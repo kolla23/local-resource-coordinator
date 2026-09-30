@@ -38,10 +38,11 @@ These were run by [run-baseline-linux.sh](run-baseline-linux.sh) on a clone in t
 | Release build | `cargo build --release --locked` | ✅ pass; the binary is 3.5 MB and reports `qex 0.33.0` | 105 s |
 | MSRV | `cargo +1.85 check --all-targets --locked` | ✅ pass | 22 s |
 
-**The unit-test failure is flaky.**
+**The unit-test failure depends on running in the full suite.**
 - The failing test was `sched::tests::a_job_that_another_user_holds_back_says_so_and_never_keeps_capacity` (`src/sched.rs:3315`, "the test peer must count": left 0, right 1).
+- It failed in both full `cargo test --bins` runs: here on the release, and again on this branch's head `700290b`.
 - Re-run alone three times, it passed 3 out of 3 ([logs/linux-wsl2/07-rerun-failing-unit-test.txt](logs/linux-wsl2/07-rerun-failing-unit-test.txt)).
-- So it fails only in the full parallel run. The root cause has not been investigated.
+- It passed in GitHub's hosted runs. The root cause has not been investigated.
 - The test builds a fake peer-coordinator record, and one of qex's peer filters discarded it. Those filters check the file owner, boot ID, staleness and whether the process is alive.
 
 ### Windows (native)
@@ -90,7 +91,7 @@ The CI on this PR's branch will show which of these remain after the docs move.
 | Environment | Builds | Tests run | Outcome |
 |---|---|---|---|
 | Windows 11 native | ❌ (by design) | none | Unsupported upstream: stops at the compile-time guard |
-| Linux, WSL2 Ubuntu 24.04 | ✅ | unit and e2e | 912 of 913 passed. One unit test is flaky under the parallel run. |
+| Linux, WSL2 Ubuntu 24.04 | ✅ | unit and e2e | 912 of 913 passed. One unit test fails in the full parallel run and passes alone. |
 | Linux, GitHub ubuntu-22.04 / 24.04 | ✅ | unit and e2e | Unit tests pass. 6 e2e failures, one caused by our docs (see above). |
 | macOS, GitHub macos-14 | ✅ | unit and e2e | Unit tests pass. 2 e2e failures, one caused by our docs. |
 | macOS, local | — | — | **Not evaluated** |
