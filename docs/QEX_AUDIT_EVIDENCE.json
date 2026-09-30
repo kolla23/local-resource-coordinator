@@ -1,0 +1,272 @@
+{
+  "repository": "https://github.com/stephenc/qex",
+  "commit": "afd869eef8ab9085dcaa4376a9f8f8b77397ba16",
+  "files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "git_blob_sha": "03f231a377df3c1659eb49837c37218864126ae3",
+      "bytes": 5922
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "git_blob_sha": "30884b40cd3a45b9fdc9048ec2726334c8191ca4",
+      "bytes": 18210
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "git_blob_sha": "9a878982a97956a172f71631c79f84f38da741d0",
+      "bytes": 10030
+    },
+    {
+      "path": "Cargo.lock",
+      "git_blob_sha": "9641f0a3bc2c938c3f2abb38c9fecbb67e3b7566",
+      "bytes": 14060
+    },
+    {
+      "path": "Cargo.toml",
+      "git_blob_sha": "2b1cd93b652e7ed32fe2219c8e9721c342c1665a",
+      "bytes": 1570
+    },
+    {
+      "path": "LICENSE",
+      "git_blob_sha": "ba7fcee806d69c22c2635647ee2bd97eda7ba470",
+      "bytes": 11347
+    },
+    {
+      "path": "README.md",
+      "git_blob_sha": "2830ec07c12f9a2ab91bd729b4aa6d3ef803a18d",
+      "bytes": 21206
+    },
+    {
+      "path": "SECURITY.md",
+      "git_blob_sha": "9da4d5637c598e0304f23219a148ca11c82883f9",
+      "bytes": 1397
+    },
+    {
+      "path": "docs/design.md",
+      "git_blob_sha": "399d0c92ad1d6337a9743b7aa8f6c0b12472b94d",
+      "bytes": 15243
+    },
+    {
+      "path": "docs/reference.md",
+      "git_blob_sha": "3ff18b46d3f4e3473d6f0b7c1333d140494715f8",
+      "bytes": 104535
+    },
+    {
+      "path": "docs/security.md",
+      "git_blob_sha": "c4e6d100f9ab36158f30001480d57d053ba5425d",
+      "bytes": 6956
+    },
+    {
+      "path": "src/capabilities.rs",
+      "git_blob_sha": "0c6cd3690ad488624628020ddf230137437e70a1",
+      "bytes": 44761
+    },
+    {
+      "path": "src/claim.rs",
+      "git_blob_sha": "a24923c991d97652bd7e17ad5775aed06fb7d33b",
+      "bytes": 10571
+    },
+    {
+      "path": "src/cli.rs",
+      "git_blob_sha": "dd35e51fe866b0f0f58a50adb3943e9536e318e6",
+      "bytes": 48760
+    },
+    {
+      "path": "src/client.rs",
+      "git_blob_sha": "a7250f82d460fca5775cb07d6ac3119eb2239adf",
+      "bytes": 74280
+    },
+    {
+      "path": "src/commands.rs",
+      "git_blob_sha": "7870f2478ddc1d3dd246a6016fcb6c90a3dec126",
+      "bytes": 329986
+    },
+    {
+      "path": "src/config.rs",
+      "git_blob_sha": "ea094d1b88ff74832df8cb44ca8263e80f46b5c3",
+      "bytes": 120859
+    },
+    {
+      "path": "src/context.rs",
+      "git_blob_sha": "03bd908d773bff1dc42e14e3a8ab59f2efb15dbd",
+      "bytes": 13397
+    },
+    {
+      "path": "src/daemon.rs",
+      "git_blob_sha": "fdd21e4bbd6c6681509895a2e6132d70e5215bc8",
+      "bytes": 147624
+    },
+    {
+      "path": "src/deps.rs",
+      "git_blob_sha": "e77b7f3bcddf6951cb365b9fceaf7dd39296d6d0",
+      "bytes": 7395
+    },
+    {
+      "path": "src/enforce.rs",
+      "git_blob_sha": "3998217ebdc77fb581349b3307b62dee921641fb",
+      "bytes": 17860
+    },
+    {
+      "path": "src/events.rs",
+      "git_blob_sha": "9f6a71593026e751b772d2e68d66966cc30a90cc",
+      "bytes": 35930
+    },
+    {
+      "path": "src/fanout.rs",
+      "git_blob_sha": "64d49d4c7fea1dcecab576d8bce779fd0d009218",
+      "bytes": 24201
+    },
+    {
+      "path": "src/help.rs",
+      "git_blob_sha": "d7e4e83668693775d5340ed2e942ce79670f2148",
+      "bytes": 108781
+    },
+    {
+      "path": "src/history.rs",
+      "git_blob_sha": "94d30ad2e60809ed5265b243f63f269496d56e81",
+      "bytes": 13690
+    },
+    {
+      "path": "src/hook.rs",
+      "git_blob_sha": "14c8265e5b45943a840174cbc640d7507910790b",
+      "bytes": 57196
+    },
+    {
+      "path": "src/job.rs",
+      "git_blob_sha": "4e13fe4c3f7ad6c41340eab830c0bcb4d8f69403",
+      "bytes": 43717
+    },
+    {
+      "path": "src/keys.rs",
+      "git_blob_sha": "a9721c88c2106eede031a30d43842dff13cb0daf",
+      "bytes": 10158
+    },
+    {
+      "path": "src/lifecycle.rs",
+      "git_blob_sha": "ec3ca68981f69f24ab995119db4e26058f82abb0",
+      "bytes": 37286
+    },
+    {
+      "path": "src/logcap.rs",
+      "git_blob_sha": "2e1cb2f5caf7920c4112a37bed0eed9e23ef6f4e",
+      "bytes": 52200
+    },
+    {
+      "path": "src/logsel.rs",
+      "git_blob_sha": "4b2747f37cf9e3a204f5ac986020b0e87e7ba7c3",
+      "bytes": 26592
+    },
+    {
+      "path": "src/main.rs",
+      "git_blob_sha": "1f6c155d46db6631ea9e9e40706743c66d824cc6",
+      "bytes": 34306
+    },
+    {
+      "path": "src/paths.rs",
+      "git_blob_sha": "6a32e6d92c6e70c482dbeda2f8f7a0e6fca436f8",
+      "bytes": 82241
+    },
+    {
+      "path": "src/pause.rs",
+      "git_blob_sha": "269dee1a014b5eac271e177e84ba3ab50861c8c6",
+      "bytes": 80675
+    },
+    {
+      "path": "src/peers.rs",
+      "git_blob_sha": "644c17143876c8fef7754c6d448f7d9f12c6187f",
+      "bytes": 26354
+    },
+    {
+      "path": "src/pipeline.rs",
+      "git_blob_sha": "77b59d507516780dbebb6b0e2aa2b701da6270c1",
+      "bytes": 17680
+    },
+    {
+      "path": "src/proto.rs",
+      "git_blob_sha": "b8955e6b7e2a4d29da3b6dd9e42b67c1de1872ac",
+      "bytes": 39086
+    },
+    {
+      "path": "src/resolve.rs",
+      "git_blob_sha": "54d447aba6a43f342feea574b45c3150f62925d6",
+      "bytes": 29060
+    },
+    {
+      "path": "src/sched.rs",
+      "git_blob_sha": "07862796c1b0bae612618ac4790e19dc5a2e480c",
+      "bytes": 174718
+    },
+    {
+      "path": "src/schema.rs",
+      "git_blob_sha": "0813828e10662a72303cb4a43bc1029866c55332",
+      "bytes": 37150
+    },
+    {
+      "path": "src/spec.rs",
+      "git_blob_sha": "8686a98a3eceb54b20df56c7e365e73ae74883a7",
+      "bytes": 107456
+    },
+    {
+      "path": "src/style.rs",
+      "git_blob_sha": "c4915833f71fef67d399c34d8cc59aa53e2e5305",
+      "bytes": 6274
+    },
+    {
+      "path": "src/supervisor.rs",
+      "git_blob_sha": "1249932b81c3ef7378c213e67eed0ec773ddaf39",
+      "bytes": 88361
+    },
+    {
+      "path": "src/sys.rs",
+      "git_blob_sha": "249a29ff50783c8954317bbff5f0a547db5b1125",
+      "bytes": 31007
+    },
+    {
+      "path": "src/testutil.rs",
+      "git_blob_sha": "b610de30c439be7687237385a125418fad54ea82",
+      "bytes": 1755
+    },
+    {
+      "path": "src/top.rs",
+      "git_blob_sha": "c6e64876d31510e15d4c48ddacc3751c0ee9e7a3",
+      "bytes": 86982
+    },
+    {
+      "path": "src/units.rs",
+      "git_blob_sha": "e9e135dcf572b5c201bbdaae30142543aba66b15",
+      "bytes": 9791
+    },
+    {
+      "path": "src/update.rs",
+      "git_blob_sha": "94645ed9ec2e2cbe125feb6685b54c60232a4361",
+      "bytes": 47832
+    },
+    {
+      "path": "src/usage.rs",
+      "git_blob_sha": "bb3953fb91296ae63bdae45967415926ede21413",
+      "bytes": 52691
+    },
+    {
+      "path": "src/version.rs",
+      "git_blob_sha": "0759fceece9797a8fd7ea76dbeb4175982ab0191",
+      "bytes": 8714
+    },
+    {
+      "path": "src/watchers.rs",
+      "git_blob_sha": "068b238a41afcaeafb6a31282c6b61dd4655c804",
+      "bytes": 16951
+    },
+    {
+      "path": "tests/e2e.rs",
+      "git_blob_sha": "907bb1bc6c4324b4aef5a401229c8dda6e68c02a",
+      "bytes": 751131
+    }
+  ],
+  "audit_date": "2026-09-30",
+  "release": "v0.33.0",
+  "release_commit": "78b4e86c5ff8be0c7f4bc26bea809aa75fe230f0",
+  "scope": "Focused static review; snapshots hash-verified; not every source line exhaustively audited",
+  "runtime_validation": "Not performed",
+  "upstream_ci_url": "https://github.com/stephenc/qex/actions/runs/35533299050"
+}

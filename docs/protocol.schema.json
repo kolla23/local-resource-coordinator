@@ -1,0 +1,4414 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:project-placeholder:protocol:v1",
+  "title": "[PROJECT_NAME] V1 local IPC request and response messages",
+  "description": "Normative structural schema; SPEC.md section 27 defines cross-field and lifecycle semantics.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/job_submit_request"
+    },
+    {
+      "$ref": "#/$defs/job_inspect_request"
+    },
+    {
+      "$ref": "#/$defs/job_list_request"
+    },
+    {
+      "$ref": "#/$defs/job_wait_request"
+    },
+    {
+      "$ref": "#/$defs/job_cancel_request"
+    },
+    {
+      "$ref": "#/$defs/stdin_write_request"
+    },
+    {
+      "$ref": "#/$defs/status_request"
+    },
+    {
+      "$ref": "#/$defs/recovery_list_request"
+    },
+    {
+      "$ref": "#/$defs/recovery_inspect_request"
+    },
+    {
+      "$ref": "#/$defs/recovery_resolve_request"
+    },
+    {
+      "$ref": "#/$defs/events_subscribe_request"
+    },
+    {
+      "$ref": "#/$defs/logs_read_request"
+    },
+    {
+      "$ref": "#/$defs/admission_set_request"
+    },
+    {
+      "$ref": "#/$defs/daemon_stop_request"
+    },
+    {
+      "$ref": "#/$defs/config_show_request"
+    },
+    {
+      "$ref": "#/$defs/config_validate_request"
+    },
+    {
+      "$ref": "#/$defs/history_list_request"
+    },
+    {
+      "$ref": "#/$defs/history_show_request"
+    },
+    {
+      "$ref": "#/$defs/history_forget_request"
+    },
+    {
+      "$ref": "#/$defs/doctor_request"
+    },
+    {
+      "$ref": "#/$defs/version_request"
+    },
+    {
+      "$ref": "#/$defs/job_submit_response"
+    },
+    {
+      "$ref": "#/$defs/job_inspect_response"
+    },
+    {
+      "$ref": "#/$defs/job_list_response"
+    },
+    {
+      "$ref": "#/$defs/job_wait_response"
+    },
+    {
+      "$ref": "#/$defs/job_cancel_response"
+    },
+    {
+      "$ref": "#/$defs/stdin_write_response"
+    },
+    {
+      "$ref": "#/$defs/status_response"
+    },
+    {
+      "$ref": "#/$defs/recovery_list_response"
+    },
+    {
+      "$ref": "#/$defs/recovery_inspect_response"
+    },
+    {
+      "$ref": "#/$defs/recovery_resolve_response"
+    },
+    {
+      "$ref": "#/$defs/events_subscribe_response"
+    },
+    {
+      "$ref": "#/$defs/logs_read_response"
+    },
+    {
+      "$ref": "#/$defs/admission_set_response"
+    },
+    {
+      "$ref": "#/$defs/daemon_stop_response"
+    },
+    {
+      "$ref": "#/$defs/config_show_response"
+    },
+    {
+      "$ref": "#/$defs/config_validate_response"
+    },
+    {
+      "$ref": "#/$defs/history_list_response"
+    },
+    {
+      "$ref": "#/$defs/history_show_response"
+    },
+    {
+      "$ref": "#/$defs/history_forget_response"
+    },
+    {
+      "$ref": "#/$defs/doctor_response"
+    },
+    {
+      "$ref": "#/$defs/version_response"
+    }
+  ],
+  "$defs": {
+    "Metric": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "enum": [
+            "bytes",
+            "nanoseconds",
+            "count",
+            "ppm"
+          ]
+        },
+        "metric_kind": {
+          "type": "string"
+        },
+        "quality": {
+          "enum": [
+            "exact_group",
+            "sampled_tree",
+            "host_only",
+            "unavailable"
+          ]
+        },
+        "sampled_at": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "age_ms": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unavailable_reason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$",
+              "maxLength": 96
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "value",
+        "unit",
+        "metric_kind",
+        "quality",
+        "sampled_at",
+        "age_ms",
+        "unavailable_reason"
+      ],
+      "additionalProperties": false
+    },
+    "Claims": {
+      "type": "object",
+      "properties": {
+        "memory_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "cpu_cores": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1048576
+        },
+        "commit_bytes": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "memory_bytes",
+        "cpu_cores",
+        "commit_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "Reason": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "maxLength": 96
+        },
+        "message": {
+          "type": "string"
+        },
+        "resource": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "required": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "available": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "resource",
+        "required",
+        "available",
+        "unit"
+      ],
+      "additionalProperties": false
+    },
+    "Capabilities": {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "group_membership": {
+          "type": "boolean"
+        },
+        "memory_metric": {
+          "type": "string"
+        },
+        "peak_metric": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pressure_source": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hard_memory_limit": {
+          "type": "boolean"
+        },
+        "cpu_quota": {
+          "type": "boolean"
+        },
+        "tree_termination": {
+          "type": "boolean"
+        },
+        "recovery_support": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "backend",
+        "group_membership",
+        "memory_metric",
+        "peak_metric",
+        "pressure_source",
+        "hard_memory_limit",
+        "cpu_quota",
+        "tree_termination",
+        "recovery_support"
+      ],
+      "additionalProperties": false
+    },
+    "Context": {
+      "type": "object",
+      "properties": {
+        "repository_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "worktree_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "head_oid": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "head_state": {
+          "enum": [
+            "attached",
+            "detached",
+            "unborn",
+            "unknown",
+            "not_git"
+          ]
+        },
+        "dirty": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "untracked": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conflicts": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completeness": {
+          "enum": [
+            "complete_observation",
+            "partial",
+            "unstable",
+            "unknown",
+            "not_git"
+          ]
+        },
+        "observed_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "maxLength": 96
+          }
+        }
+      },
+      "required": [
+        "repository_id",
+        "worktree_id",
+        "head_oid",
+        "head_state",
+        "dirty",
+        "untracked",
+        "conflicts",
+        "completeness",
+        "observed_at",
+        "errors"
+      ],
+      "additionalProperties": false
+    },
+    "Outcome": {
+      "type": "object",
+      "properties": {
+        "origin": {
+          "enum": [
+            "child",
+            "coordinator",
+            "os",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "maxLength": 96
+        },
+        "native_exit_code": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "signal": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root_status_known": {
+          "type": "boolean"
+        },
+        "cleanup_complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "origin",
+        "reason",
+        "native_exit_code",
+        "signal",
+        "root_status_known",
+        "cleanup_complete"
+      ],
+      "additionalProperties": false
+    },
+    "Job": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "execution_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submission_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "enum": [
+            "QUEUED",
+            "STARTING",
+            "RUNNING",
+            "DRAINING",
+            "CANCELLING",
+            "RECOVERING",
+            "SUCCEEDED",
+            "FAILED",
+            "CANCELLED",
+            "TIMED_OUT",
+            "QUEUE_EXPIRED",
+            "REJECTED",
+            "LAUNCH_FAILED",
+            "LOST"
+          ]
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "accepted_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "started_at": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finished_at": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "claims": {
+          "$ref": "#/$defs/Claims"
+        },
+        "memory_limit_bytes": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage": {
+          "enum": [
+            "kernel_group",
+            "sampled_tree",
+            "external_untracked",
+            "unknown"
+          ]
+        },
+        "wait_reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Reason"
+          }
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "contexts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Context"
+          }
+        },
+        "outcome": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Outcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "log_truncated": {
+          "type": "boolean"
+        },
+        "discarded_log_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "recovery_required": {
+          "type": "boolean"
+        },
+        "policy_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "estimator_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "profile_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "history_sample_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "claim_reason": {
+          "type": "string"
+        },
+        "requested_hints": {
+          "type": "object",
+          "properties": {
+            "memory_bytes": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cpu_cores": {
+              "oneOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1048576
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "memory_bytes",
+            "cpu_cores"
+          ],
+          "additionalProperties": false
+        },
+        "labels": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "job_id",
+        "execution_id",
+        "submission_seq",
+        "revision",
+        "state",
+        "group",
+        "accepted_at",
+        "started_at",
+        "finished_at",
+        "claims",
+        "memory_limit_bytes",
+        "coverage",
+        "wait_reasons",
+        "capabilities",
+        "contexts",
+        "outcome",
+        "log_truncated",
+        "discarded_log_bytes",
+        "recovery_required",
+        "policy_digest",
+        "estimator_version",
+        "profile_id",
+        "history_sample_count",
+        "claim_reason",
+        "requested_hints",
+        "labels",
+        "extensions"
+      ],
+      "additionalProperties": false
+    },
+    "Recovery": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "maxLength": 96
+        },
+        "ownership": {
+          "enum": [
+            "verified_live",
+            "verified_absent",
+            "unverified"
+          ]
+        },
+        "boot_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "reserved": {
+          "$ref": "#/$defs/Claims"
+        },
+        "reservation_released": {
+          "type": "boolean"
+        },
+        "evidence_at": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_digest": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "recheck",
+              "terminate-owned",
+              "release-absent"
+            ]
+          }
+        },
+        "identities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "pid": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "birth_identity": {
+                "type": "string"
+              },
+              "verified": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "pid",
+              "birth_identity",
+              "verified"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "cleanup_status": {
+          "enum": [
+            "pending",
+            "complete",
+            "incomplete"
+          ]
+        },
+        "outcome": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Outcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "job_id",
+        "revision",
+        "reason",
+        "ownership",
+        "boot_id",
+        "reserved",
+        "reservation_released",
+        "evidence_at",
+        "evidence_digest",
+        "actions",
+        "identities",
+        "cleanup_status",
+        "outcome"
+      ],
+      "additionalProperties": false
+    },
+    "Domain": {
+      "type": "object",
+      "properties": {
+        "domain_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "scope": {
+          "enum": [
+            "native_user",
+            "wsl_guest",
+            "container"
+          ]
+        },
+        "pressure": {
+          "enum": [
+            "NORMAL",
+            "HIGH",
+            "CRITICAL",
+            "UNKNOWN"
+          ]
+        },
+        "admission_paused": {
+          "type": "boolean"
+        },
+        "memory_capacity": {
+          "$ref": "#/$defs/Metric"
+        },
+        "memory_available": {
+          "$ref": "#/$defs/Metric"
+        },
+        "memory_budget_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "memory_reserve_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "memory_claimed_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "growth_reserved_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cpu_capacity_cores": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1048576
+        },
+        "cpu_claimed_cores": {
+          "type": "number",
+          "minimum": 0
+        },
+        "commit_room": {
+          "$ref": "#/$defs/Metric"
+        },
+        "active_jobs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "queued_jobs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "maxLength": 96
+          }
+        }
+      },
+      "required": [
+        "domain_id",
+        "scope",
+        "pressure",
+        "admission_paused",
+        "memory_capacity",
+        "memory_available",
+        "memory_budget_bytes",
+        "memory_reserve_bytes",
+        "memory_claimed_bytes",
+        "growth_reserved_bytes",
+        "cpu_capacity_cores",
+        "cpu_claimed_cores",
+        "commit_room",
+        "active_jobs",
+        "queued_jobs",
+        "capabilities",
+        "limitations"
+      ],
+      "additionalProperties": false
+    },
+    "Profile": {
+      "type": "object",
+      "properties": {
+        "profile_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "sample_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "estimator_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "claims": {
+          "$ref": "#/$defs/Claims"
+        },
+        "confidence": {
+          "enum": [
+            "cold",
+            "low",
+            "established"
+          ]
+        },
+        "last_observation_at": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metric_kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_id",
+        "sample_count",
+        "estimator_version",
+        "claims",
+        "confidence",
+        "last_observation_at",
+        "metric_kind"
+      ],
+      "additionalProperties": false
+    },
+    "Error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "maxLength": 96
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "job_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current_revision": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Reason"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable",
+        "job_id",
+        "current_revision",
+        "reasons"
+      ],
+      "additionalProperties": false
+    },
+    "LogChunk": {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "stream": {
+          "enum": [
+            "stdout",
+            "stderr"
+          ]
+        },
+        "data_base64": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "stream",
+        "data_base64"
+      ],
+      "additionalProperties": false
+    },
+    "Event": {
+      "type": "object",
+      "properties": {
+        "event_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "job_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "maxLength": 96
+        },
+        "job_revision": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Reason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policy_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "event_seq",
+        "job_id",
+        "at",
+        "type",
+        "job_revision",
+        "reason",
+        "snapshot_id",
+        "policy_digest"
+      ],
+      "additionalProperties": false
+    },
+    "job_submit_params": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "execution": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "direct"
+                  ]
+                },
+                "argv": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 131072
+                  },
+                  "minItems": 1,
+                  "maxItems": 4096
+                }
+              },
+              "required": [
+                "mode",
+                "argv"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "shell"
+                  ]
+                },
+                "shell_path": {
+                  "type": "string"
+                },
+                "script": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode",
+                "shell_path",
+                "script"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "object",
+          "maxProperties": 4096,
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "group": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "memory_bytes": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cpu_cores": {
+          "oneOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1048576
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "memory_limit_bytes": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "queue_timeout_ms": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeout_ms": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "containment": {
+          "enum": [
+            "best_available",
+            "kernel_required"
+          ]
+        },
+        "stdin": {
+          "enum": [
+            "closed",
+            "attached"
+          ]
+        },
+        "require_head": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "labels": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      },
+      "required": [
+        "idempotency_key",
+        "execution",
+        "cwd",
+        "environment",
+        "group",
+        "memory_bytes",
+        "cpu_cores",
+        "memory_limit_bytes",
+        "queue_timeout_ms",
+        "timeout_ms",
+        "containment",
+        "stdin",
+        "require_head",
+        "labels"
+      ],
+      "additionalProperties": false
+    },
+    "job_submit_data": {
+      "type": "object",
+      "properties": {
+        "job": {
+          "$ref": "#/$defs/Job"
+        },
+        "replayed_acceptance": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "job",
+        "replayed_acceptance"
+      ],
+      "additionalProperties": false
+    },
+    "job_submit_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "job.submit"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/job_submit_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "job_submit_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "job.submit"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/job_submit_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "job_inspect_params": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "additionalProperties": false
+    },
+    "job_inspect_data": {
+      "$ref": "#/$defs/Job"
+    },
+    "job_inspect_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "job.inspect"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/job_inspect_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "job_inspect_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "job.inspect"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/job_inspect_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "job_list_params": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "oneOf": [
+            {
+              "enum": [
+                "QUEUED",
+                "STARTING",
+                "RUNNING",
+                "DRAINING",
+                "CANCELLING",
+                "RECOVERING",
+                "SUCCEEDED",
+                "FAILED",
+                "CANCELLED",
+                "TIMED_OUT",
+                "QUEUE_EXPIRED",
+                "REJECTED",
+                "LAUNCH_FAILED",
+                "LOST"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "group": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "state",
+        "group",
+        "cursor",
+        "limit"
+      ],
+      "additionalProperties": false
+    },
+    "job_list_data": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Job"
+          }
+        },
+        "next_cursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false
+    },
+    "job_list_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "job.list"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/job_list_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "job_list_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "job.list"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/job_list_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "job_wait_params": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        }
+      },
+      "required": [
+        "job_id",
+        "timeout_ms"
+      ],
+      "additionalProperties": false
+    },
+    "job_wait_data": {
+      "type": "object",
+      "properties": {
+        "job": {
+          "$ref": "#/$defs/Job"
+        },
+        "observation_timed_out": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "job",
+        "observation_timed_out"
+      ],
+      "additionalProperties": false
+    },
+    "job_wait_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "job.wait"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/job_wait_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "job_wait_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "job.wait"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/job_wait_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "job_cancel_params": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "grace_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "force": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "job_id",
+        "grace_ms",
+        "force"
+      ],
+      "additionalProperties": false
+    },
+    "job_cancel_data": {
+      "type": "object",
+      "properties": {
+        "job": {
+          "$ref": "#/$defs/Job"
+        },
+        "already_terminal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "job",
+        "already_terminal"
+      ],
+      "additionalProperties": false
+    },
+    "job_cancel_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "job.cancel"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/job_cancel_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "job_cancel_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "job.cancel"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/job_cancel_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "stdin_write_params": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "data_base64": {
+          "type": "string"
+        },
+        "close": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "job_id",
+        "offset",
+        "data_base64",
+        "close"
+      ],
+      "additionalProperties": false
+    },
+    "stdin_write_data": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "next_offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "closed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "job_id",
+        "next_offset",
+        "closed"
+      ],
+      "additionalProperties": false
+    },
+    "stdin_write_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "stdin.write"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/stdin_write_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "stdin_write_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "stdin.write"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/stdin_write_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "status_params": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "status_data": {
+      "$ref": "#/$defs/Domain"
+    },
+    "status_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "status"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/status_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "status_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "status"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/status_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "recovery_list_params": {
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "cursor",
+        "limit"
+      ],
+      "additionalProperties": false
+    },
+    "recovery_list_data": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Recovery"
+          }
+        },
+        "next_cursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false
+    },
+    "recovery_list_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "recovery.list"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/recovery_list_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "recovery_list_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "recovery.list"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/recovery_list_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "recovery_inspect_params": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "additionalProperties": false
+    },
+    "recovery_inspect_data": {
+      "$ref": "#/$defs/Recovery"
+    },
+    "recovery_inspect_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "recovery.inspect"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/recovery_inspect_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "recovery_inspect_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "recovery.inspect"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/recovery_inspect_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "recovery_resolve_params": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "job_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "action": {
+              "const": "recheck"
+            }
+          },
+          "required": [
+            "job_id",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "job_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "action": {
+              "enum": [
+                "terminate-owned",
+                "release-absent"
+              ]
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "job_id",
+            "action",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "recovery_resolve_data": {
+      "$ref": "#/$defs/Recovery"
+    },
+    "recovery_resolve_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "recovery.resolve"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/recovery_resolve_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "recovery_resolve_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "recovery.resolve"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/recovery_resolve_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "events_subscribe_params": {
+      "type": "object",
+      "properties": {
+        "after_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        }
+      },
+      "required": [
+        "after_seq",
+        "timeout_ms"
+      ],
+      "additionalProperties": false
+    },
+    "events_subscribe_data": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Event"
+          }
+        },
+        "next_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "gap": {
+          "type": "boolean"
+        },
+        "snapshot": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Domain"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "events",
+        "next_seq",
+        "gap",
+        "snapshot"
+      ],
+      "additionalProperties": false
+    },
+    "events_subscribe_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "events.subscribe"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/events_subscribe_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "events_subscribe_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "events.subscribe"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/events_subscribe_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "logs_read_params": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "stream": {
+          "enum": [
+            "stdout",
+            "stderr",
+            "both"
+          ]
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        }
+      },
+      "required": [
+        "job_id",
+        "stream",
+        "offset",
+        "max_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "logs_read_data": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "chunks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LogChunk"
+          }
+        },
+        "next_offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "eof": {
+          "type": "boolean"
+        },
+        "gap": {
+          "type": "boolean"
+        },
+        "discarded_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "job_id",
+        "chunks",
+        "next_offset",
+        "eof",
+        "gap",
+        "discarded_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "logs_read_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "logs.read"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/logs_read_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "logs_read_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "logs.read"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/logs_read_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "admission_set_params": {
+      "type": "object",
+      "properties": {
+        "paused": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "paused"
+      ],
+      "additionalProperties": false
+    },
+    "admission_set_data": {
+      "type": "object",
+      "properties": {
+        "paused": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "paused"
+      ],
+      "additionalProperties": false
+    },
+    "admission_set_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "admission.set"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/admission_set_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "admission_set_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "admission.set"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/admission_set_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "daemon_stop_params": {
+      "type": "object",
+      "properties": {
+        "cancel_running": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cancel_running"
+      ],
+      "additionalProperties": false
+    },
+    "daemon_stop_data": {
+      "type": "object",
+      "properties": {
+        "admission_paused": {
+          "const": true
+        },
+        "draining": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "admission_paused",
+        "draining"
+      ],
+      "additionalProperties": false
+    },
+    "daemon_stop_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "daemon.stop"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/daemon_stop_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "daemon_stop_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "daemon.stop"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/daemon_stop_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "config_show_params": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "config_show_data": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "policy_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "value": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "source": {
+                "enum": [
+                  "default",
+                  "user",
+                  "profile"
+                ]
+              }
+            },
+            "required": [
+              "path",
+              "value",
+              "source"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy_digest",
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    "config_show_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "config.show"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/config_show_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "config_show_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "config.show"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/config_show_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "config_validate_params": {
+      "type": "object",
+      "properties": {
+        "toml": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "toml"
+      ],
+      "additionalProperties": false
+    },
+    "config_validate_data": {
+      "type": "object",
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "valid",
+        "errors"
+      ],
+      "additionalProperties": false
+    },
+    "config_validate_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "config.validate"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/config_validate_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "config_validate_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "config.validate"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/config_validate_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "history_list_params": {
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "cursor",
+        "limit"
+      ],
+      "additionalProperties": false
+    },
+    "history_list_data": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Profile"
+          }
+        },
+        "next_cursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false
+    },
+    "history_list_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "history.list"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/history_list_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "history_list_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "history.list"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/history_list_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "history_show_params": {
+      "type": "object",
+      "properties": {
+        "profile_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "required": [
+        "profile_id"
+      ],
+      "additionalProperties": false
+    },
+    "history_show_data": {
+      "$ref": "#/$defs/Profile"
+    },
+    "history_show_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "history.show"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/history_show_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "history_show_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "history.show"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/history_show_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "history_forget_params": {
+      "type": "object",
+      "properties": {
+        "profile_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
+      },
+      "required": [
+        "profile_id"
+      ],
+      "additionalProperties": false
+    },
+    "history_forget_data": {
+      "type": "object",
+      "properties": {
+        "profile_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "deleted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "profile_id",
+        "deleted"
+      ],
+      "additionalProperties": false
+    },
+    "history_forget_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "history.forget"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/history_forget_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "history_forget_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "history.forget"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/history_forget_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "doctor_params": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "doctor_data": {
+      "type": "object",
+      "properties": {
+        "domain_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]*$",
+                "maxLength": 96
+              },
+              "status": {
+                "enum": [
+                  "pass",
+                  "warn",
+                  "fail"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "capability": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "status",
+              "message",
+              "capability"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "domain_id",
+        "checks"
+      ],
+      "additionalProperties": false
+    },
+    "doctor_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "doctor"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/doctor_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "doctor_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "doctor"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/doctor_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "version_params": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "version_data": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "protocol_major": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "schema_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "store_schema_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "version",
+        "protocol_major",
+        "schema_version",
+        "store_schema_version"
+      ],
+      "additionalProperties": false
+    },
+    "version_request": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "version"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "params": {
+          "$ref": "#/$defs/version_params"
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "version_response": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "method": {
+          "const": "version"
+        },
+        "kind": {
+          "const": "response"
+        },
+        "daemon_version": {
+          "type": "string"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "data": {
+                  "$ref": "#/$defs/version_data"
+                }
+              },
+              "required": [
+                "ok",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "const": false
+                },
+                "error": {
+                  "$ref": "#/$defs/Error"
+                }
+              },
+              "required": [
+                "ok",
+                "error"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "request_id",
+        "method",
+        "kind",
+        "daemon_version",
+        "result"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

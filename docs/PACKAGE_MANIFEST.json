@@ -1,0 +1,40 @@
+{
+  "package": "Claude handoff",
+  "date": "2026-09-30",
+  "spec_version": "0.4.0",
+  "conversation": "Curated summary, not a verbatim transcript",
+  "files": [
+    {
+      "path": "CLAUDE_HANDOFF.md",
+      "sha256": "68bfa2d484854c890f30df050393f3f31a4dad2cba9db1d8bf5788a07beedaed"
+    },
+    {
+      "path": "CLAUDE_START_PROMPT.txt",
+      "sha256": "e939dc713b9e78192a5ad8feb0de81acb16a61d707fc00b76a38889297cf5c18"
+    },
+    {
+      "path": "SPEC.md",
+      "sha256": "b8e738e44361d2e1de2f87263855f944434ade9d951297de00d3b3b59e0ad885"
+    },
+    {
+      "path": "FOUNDATION_DECISION.md",
+      "sha256": "ff67385fb2f7f0f6416c9acdec4a5a0aba8f410f830e78e61a3f3584de628d93"
+    },
+    {
+      "path": "QEX_ASSESSMENT.md",
+      "sha256": "e710e269ebe0aaccdefba035d0f7e7d07aa0759095f7681630254b23daf4b813"
+    },
+    {
+      "path": "QEX_AUDIT_EVIDENCE.json",
+      "sha256": "ae15dc385e9e975ed0982b1b6eea954de6a61ad66fa289af989d10276bbf8b3c"
+    },
+    {
+      "path": "protocol.schema.json",
+      "sha256": "43223e0092687c41b7ae3fbe33a720fbe2db546ef933cc9d96e67b5aae87f1b7"
+    },
+    {
+      "path": "protocol.examples.json",
+      "sha256": "a42190d19ec6d3da30a52825325b458160bc3c2b55c3ada533cfda3d13d97969"
+    }
+  ]
+}

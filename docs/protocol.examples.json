@@ -1,0 +1,522 @@
+[
+  {
+    "schema_version": 1,
+    "request_id": "r1",
+    "kind": "request",
+    "method": "job.submit",
+    "params": {
+      "idempotency_key": "submit-17",
+      "execution": {
+        "mode": "direct",
+        "argv": [
+          "python",
+          "-m",
+          "pytest"
+        ]
+      },
+      "cwd": "/home/developer/project",
+      "environment": {
+        "PATH": "/usr/local/bin:/usr/bin",
+        "LANG": "C.UTF-8"
+      },
+      "group": "integration",
+      "memory_bytes": null,
+      "cpu_cores": null,
+      "memory_limit_bytes": null,
+      "queue_timeout_ms": null,
+      "timeout_ms": 600000,
+      "containment": "best_available",
+      "stdin": "closed",
+      "require_head": null,
+      "labels": {}
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r1",
+    "kind": "response",
+    "method": "job.submit",
+    "daemon_version": "0.1.0",
+    "result": {
+      "ok": true,
+      "data": {
+        "job": {
+          "job_id": "J17",
+          "execution_id": null,
+          "submission_seq": 17,
+          "revision": 1,
+          "state": "QUEUED",
+          "group": "integration",
+          "accepted_at": "2026-09-29T20:00:00Z",
+          "started_at": null,
+          "finished_at": null,
+          "claims": {
+            "memory_bytes": 2147483648,
+            "cpu_cores": 2,
+            "commit_bytes": null
+          },
+          "memory_limit_bytes": null,
+          "coverage": "kernel_group",
+          "wait_reasons": [],
+          "capabilities": {
+            "backend": "linux_cgroup_v2",
+            "group_membership": true,
+            "memory_metric": "cgroup_charged_bytes",
+            "peak_metric": "cgroup_peak_bytes",
+            "pressure_source": "psi",
+            "hard_memory_limit": true,
+            "cpu_quota": true,
+            "tree_termination": true,
+            "recovery_support": true
+          },
+          "contexts": [],
+          "outcome": null,
+          "log_truncated": false,
+          "discarded_log_bytes": 0,
+          "recovery_required": false,
+          "policy_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "estimator_version": 1,
+          "profile_id": null,
+          "history_sample_count": 0,
+          "claim_reason": "cold default",
+          "requested_hints": {
+            "memory_bytes": null,
+            "cpu_cores": null
+          },
+          "labels": {},
+          "extensions": {}
+        },
+        "replayed_acceptance": false
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r2",
+    "kind": "request",
+    "method": "job.submit",
+    "params": {
+      "idempotency_key": "submit-17",
+      "execution": {
+        "mode": "direct",
+        "argv": [
+          "python",
+          "-m",
+          "pytest"
+        ]
+      },
+      "cwd": "/home/developer/project",
+      "environment": {
+        "PATH": "/usr/local/bin:/usr/bin",
+        "LANG": "C.UTF-8"
+      },
+      "group": "integration",
+      "memory_bytes": null,
+      "cpu_cores": null,
+      "memory_limit_bytes": null,
+      "queue_timeout_ms": null,
+      "timeout_ms": 600000,
+      "containment": "best_available",
+      "stdin": "closed",
+      "require_head": null,
+      "labels": {}
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r2",
+    "kind": "response",
+    "method": "job.submit",
+    "daemon_version": "0.1.0",
+    "result": {
+      "ok": true,
+      "data": {
+        "job": {
+          "job_id": "J17",
+          "execution_id": null,
+          "submission_seq": 17,
+          "revision": 1,
+          "state": "QUEUED",
+          "group": "integration",
+          "accepted_at": "2026-09-29T20:00:00Z",
+          "started_at": null,
+          "finished_at": null,
+          "claims": {
+            "memory_bytes": 2147483648,
+            "cpu_cores": 2,
+            "commit_bytes": null
+          },
+          "memory_limit_bytes": null,
+          "coverage": "kernel_group",
+          "wait_reasons": [],
+          "capabilities": {
+            "backend": "linux_cgroup_v2",
+            "group_membership": true,
+            "memory_metric": "cgroup_charged_bytes",
+            "peak_metric": "cgroup_peak_bytes",
+            "pressure_source": "psi",
+            "hard_memory_limit": true,
+            "cpu_quota": true,
+            "tree_termination": true,
+            "recovery_support": true
+          },
+          "contexts": [],
+          "outcome": null,
+          "log_truncated": false,
+          "discarded_log_bytes": 0,
+          "recovery_required": false,
+          "policy_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "estimator_version": 1,
+          "profile_id": null,
+          "history_sample_count": 0,
+          "claim_reason": "cold default",
+          "requested_hints": {
+            "memory_bytes": null,
+            "cpu_cores": null
+          },
+          "labels": {},
+          "extensions": {}
+        },
+        "replayed_acceptance": true
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r3",
+    "kind": "request",
+    "method": "job.inspect",
+    "params": {
+      "job_id": "J17"
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r3",
+    "kind": "response",
+    "method": "job.inspect",
+    "daemon_version": "0.1.0",
+    "result": {
+      "ok": true,
+      "data": {
+        "job_id": "J17",
+        "execution_id": "E17",
+        "submission_seq": 17,
+        "revision": 3,
+        "state": "RUNNING",
+        "group": "integration",
+        "accepted_at": "2026-09-29T20:00:00Z",
+        "started_at": "2026-09-29T20:00:02Z",
+        "finished_at": null,
+        "claims": {
+          "memory_bytes": 2147483648,
+          "cpu_cores": 2,
+          "commit_bytes": null
+        },
+        "memory_limit_bytes": null,
+        "coverage": "kernel_group",
+        "wait_reasons": [],
+        "capabilities": {
+          "backend": "linux_cgroup_v2",
+          "group_membership": true,
+          "memory_metric": "cgroup_charged_bytes",
+          "peak_metric": "cgroup_peak_bytes",
+          "pressure_source": "psi",
+          "hard_memory_limit": true,
+          "cpu_quota": true,
+          "tree_termination": true,
+          "recovery_support": true
+        },
+        "contexts": [],
+        "outcome": null,
+        "log_truncated": false,
+        "discarded_log_bytes": 0,
+        "recovery_required": false,
+        "policy_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "estimator_version": 1,
+        "profile_id": null,
+        "history_sample_count": 0,
+        "claim_reason": "cold default",
+        "requested_hints": {
+          "memory_bytes": null,
+          "cpu_cores": null
+        },
+        "labels": {},
+        "extensions": {}
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r4",
+    "kind": "request",
+    "method": "job.cancel",
+    "params": {
+      "job_id": "J17",
+      "grace_ms": 10000,
+      "force": false
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r4",
+    "kind": "response",
+    "method": "job.cancel",
+    "daemon_version": "0.1.0",
+    "result": {
+      "ok": true,
+      "data": {
+        "job": {
+          "job_id": "J17",
+          "execution_id": "E17",
+          "submission_seq": 17,
+          "revision": 4,
+          "state": "CANCELLING",
+          "group": "integration",
+          "accepted_at": "2026-09-29T20:00:00Z",
+          "started_at": "2026-09-29T20:00:02Z",
+          "finished_at": null,
+          "claims": {
+            "memory_bytes": 2147483648,
+            "cpu_cores": 2,
+            "commit_bytes": null
+          },
+          "memory_limit_bytes": null,
+          "coverage": "kernel_group",
+          "wait_reasons": [],
+          "capabilities": {
+            "backend": "linux_cgroup_v2",
+            "group_membership": true,
+            "memory_metric": "cgroup_charged_bytes",
+            "peak_metric": "cgroup_peak_bytes",
+            "pressure_source": "psi",
+            "hard_memory_limit": true,
+            "cpu_quota": true,
+            "tree_termination": true,
+            "recovery_support": true
+          },
+          "contexts": [],
+          "outcome": null,
+          "log_truncated": false,
+          "discarded_log_bytes": 0,
+          "recovery_required": false,
+          "policy_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "estimator_version": 1,
+          "profile_id": null,
+          "history_sample_count": 0,
+          "claim_reason": "cold default",
+          "requested_hints": {
+            "memory_bytes": null,
+            "cpu_cores": null
+          },
+          "labels": {},
+          "extensions": {}
+        },
+        "already_terminal": false
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r5",
+    "kind": "request",
+    "method": "job.wait",
+    "params": {
+      "job_id": "J17",
+      "timeout_ms": 60000
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r5",
+    "kind": "response",
+    "method": "job.wait",
+    "daemon_version": "0.1.0",
+    "result": {
+      "ok": true,
+      "data": {
+        "job": {
+          "job_id": "J17",
+          "execution_id": "E17",
+          "submission_seq": 17,
+          "revision": 5,
+          "state": "CANCELLED",
+          "group": "integration",
+          "accepted_at": "2026-09-29T20:00:00Z",
+          "started_at": "2026-09-29T20:00:02Z",
+          "finished_at": "2026-09-29T20:00:05Z",
+          "claims": {
+            "memory_bytes": 2147483648,
+            "cpu_cores": 2,
+            "commit_bytes": null
+          },
+          "memory_limit_bytes": null,
+          "coverage": "kernel_group",
+          "wait_reasons": [],
+          "capabilities": {
+            "backend": "linux_cgroup_v2",
+            "group_membership": true,
+            "memory_metric": "cgroup_charged_bytes",
+            "peak_metric": "cgroup_peak_bytes",
+            "pressure_source": "psi",
+            "hard_memory_limit": true,
+            "cpu_quota": true,
+            "tree_termination": true,
+            "recovery_support": true
+          },
+          "contexts": [],
+          "outcome": {
+            "origin": "coordinator",
+            "reason": "USER_CANCELLED",
+            "native_exit_code": null,
+            "signal": 15,
+            "root_status_known": true,
+            "cleanup_complete": true
+          },
+          "log_truncated": false,
+          "discarded_log_bytes": 0,
+          "recovery_required": false,
+          "policy_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "estimator_version": 1,
+          "profile_id": null,
+          "history_sample_count": 0,
+          "claim_reason": "cold default",
+          "requested_hints": {
+            "memory_bytes": null,
+            "cpu_cores": null
+          },
+          "labels": {},
+          "extensions": {}
+        },
+        "observation_timed_out": false
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r6",
+    "kind": "request",
+    "method": "recovery.inspect",
+    "params": {
+      "job_id": "J18"
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r6",
+    "kind": "response",
+    "method": "recovery.inspect",
+    "daemon_version": "0.1.0",
+    "result": {
+      "ok": true,
+      "data": {
+        "job_id": "J18",
+        "revision": 4,
+        "reason": "SUPERVISOR_LOST",
+        "ownership": "verified_absent",
+        "boot_id": "boot-new",
+        "reserved": {
+          "memory_bytes": 4294967296,
+          "cpu_cores": 2,
+          "commit_bytes": null
+        },
+        "reservation_released": false,
+        "evidence_at": "2026-09-29T21:00:00Z",
+        "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "actions": [
+          "recheck",
+          "release-absent"
+        ],
+        "identities": [],
+        "cleanup_status": "complete",
+        "outcome": {
+          "origin": "unknown",
+          "reason": "HOST_RESTART",
+          "native_exit_code": null,
+          "signal": null,
+          "root_status_known": false,
+          "cleanup_complete": true
+        }
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r7",
+    "kind": "request",
+    "method": "recovery.resolve",
+    "params": {
+      "job_id": "J18",
+      "action": "release-absent",
+      "revision": 4
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r7",
+    "kind": "response",
+    "method": "recovery.resolve",
+    "daemon_version": "0.1.0",
+    "result": {
+      "ok": true,
+      "data": {
+        "job_id": "J18",
+        "revision": 5,
+        "reason": "SUPERVISOR_LOST",
+        "ownership": "verified_absent",
+        "boot_id": "boot-new",
+        "reserved": {
+          "memory_bytes": 4294967296,
+          "cpu_cores": 2,
+          "commit_bytes": null
+        },
+        "reservation_released": true,
+        "evidence_at": "2026-09-29T21:00:00Z",
+        "evidence_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "actions": [
+          "recheck",
+          "release-absent"
+        ],
+        "identities": [],
+        "cleanup_status": "complete",
+        "outcome": {
+          "origin": "unknown",
+          "reason": "HOST_RESTART",
+          "native_exit_code": null,
+          "signal": null,
+          "root_status_known": false,
+          "cleanup_complete": true
+        }
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r8",
+    "kind": "request",
+    "method": "recovery.resolve",
+    "params": {
+      "job_id": "J18",
+      "action": "release-absent",
+      "revision": 4
+    }
+  },
+  {
+    "schema_version": 1,
+    "request_id": "r8",
+    "kind": "response",
+    "method": "recovery.resolve",
+    "daemon_version": "0.1.0",
+    "result": {
+      "ok": false,
+      "error": {
+        "code": "RECOVERY_REVISION_CONFLICT",
+        "message": "Expected revision 5.",
+        "retryable": false,
+        "job_id": "J18",
+        "current_revision": 5,
+        "reasons": []
+      }
+    }
+  }
+]
