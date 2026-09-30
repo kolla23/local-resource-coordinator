@@ -1,0 +1,21 @@
+date_utc: 2026-09-30T22:54:38Z
+commit: 78b4e86c5ff8be0c7f4bc26bea809aa75fe230f0
+describe: v0.33.0
+uname: Linux Prakyath 5.15.167.4-microsoft-standard-WSL2 #1 SMP Tue Nov 5 00:21:55 UTC 2024 x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 24.04.1 LTS"
+nproc: 12
+               total        used        free      shared  buff/cache   available
+Mem:      8167538688   636301312  6850211840     3129344   928976896  7531237376
+NAME     TYPE      SIZE USED PRIO
+/dev/sdb partition   2G   0B   -2
+rustc 1.98.1 (48a229cea 2026-09-01)
+binary: rustc
+commit-hash: 48a229ceaefd4985c50990b14116b6d856af0985
+commit-date: 2026-09-01
+host: x86_64-unknown-linux-gnu
+release: 1.98.1
+LLVM version: 22.1.8
+cargo 1.98.1 (797e8a9bc 2026-08-05)
+rustfmt 1.9.0-stable (48a229ceae 2026-09-01)
+clippy 0.1.98 (48a229ceae 2026-09-01)
+gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0

@@ -1,0 +1,6 @@
+01-fmt                 exit=0   1s
+02-clippy              exit=0   25s
+03-test-bins           exit=101 29s
+04-test-e2e            exit=0   379s
+05-build-release       exit=0   105s
+06-msrv-check          exit=0   22s
