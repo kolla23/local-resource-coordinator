@@ -9665,16 +9665,18 @@ fn a_file_that_goes_back_and_forth_does_not_change_the_budget() {
         };
         // Only a half file that qex could have taken between the last good look
         // and the report counts: one put down before the report, and whose
-        // age could still grow after the last good look (a half file replaced
-        // more than the settle time before it was too young to take then, and
-        // could not age once replaced). A stall of some OTHER half file must
-        // not excuse this fault.
+        // age could still grow after the last good look. A stall of some OTHER
+        // half file must not excuse this fault.
+        //
+        // Each span stops at the report: qex took the file before it, so it
+        // never saw an age past `seen_at`. A writer that stalls AFTER the
+        // report must not make a young file look like a stall.
         let longest = halves
             .iter()
             .filter(|(put, replaced)| {
                 *put <= seen_at && last_good.is_none_or(|good| *replaced + SETTLE >= good)
             })
-            .map(|(put, replaced)| *replaced - *put)
+            .map(|(put, replaced)| (*replaced).min(seen_at) - *put)
             .max()
             .unwrap_or_default();
         assert!(
