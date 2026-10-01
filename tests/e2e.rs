@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: pin the CPU budget and default memory claim of with_default_config; match the long config-fault text, not the bare word "coordinator".
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -179,9 +180,19 @@ impl Harness {
     fn with_default_config(name: &str) -> Self {
         // Turn the peer system off. A test must not read the records of the
         // other users of the machine, or its result changes with the load.
+        //
+        // Pin the CPU budget and the default memory claim, so a test sees the
+        // same room on every machine: 3 default jobs at once, as on the 4-core
+        // runners upstream's CI used. Unpinned, both scale with the machine. On
+        // a 2-core runner the CPU budget (75%) is 1 core, and a default job
+        // claims memory / cores = half the memory, more than the 75% memory
+        // budget leaves for a second job. Tests that need two jobs at once then
+        // wait for ever. A budget and a claim are admission, not limits.
         Self::new(
             name,
             "[peers]\nenabled = false\n\
+             [budget]\ncpu = \"3\"\n\
+             [defaults]\nmem = \"256MB\"\n\
              [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n",
         )
     }
@@ -3488,7 +3499,7 @@ fn a_job_file_describes_a_job() {
          tags = [\"test\"]\n\
          [resources]\n\
          cpu = 2\n\
-         mem = \"256MB\"\n\
+         mem = \"192MB\"\n\
          [env]\n\
          FILE_VAR = \"present\"\n",
     )
@@ -3500,7 +3511,7 @@ fn a_job_file_describes_a_job() {
     let status = h.status_json(&id);
     assert_eq!(status["name"], "from-file");
     assert_eq!(status["cpu"], 2);
-    assert_eq!(status["mem"], 256 * 1024 * 1024);
+    assert_eq!(status["mem"], 192 * 1024 * 1024);
     assert_eq!(status["tags"][0], "test");
     assert!(h.ok(&["logs", &id]).contains("from-the-file"));
 }
@@ -7289,10 +7300,11 @@ fn a_config_fault_in_the_record_of_a_job_stays_short() {
          nothing: {status}"
     );
 
-    // The long message names the coordinator in every paragraph. One word is
-    // therefore enough to separate the two forms.
+    // Match text that only the long message has. The bare word "coordinator"
+    // also appears in any path that contains it, such as a checkout of a
+    // repository whose name holds the word.
     assert!(
-        !status.contains("coordinator"),
+        !status.contains("qex refuses a field that it does not know"),
         "the record of a job must hold the short form of a config fault. The \
          supervisor asked for the long form, which belongs to a person at a \
          terminal and not to the `error:` field of a job that already ran: \
