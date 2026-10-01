@@ -1,0 +1,48 @@
+# local-resource-coordinator (placeholder name)
+
+An independently maintained fork of qex (Apache-2.0). It is a local coordinator that decides RUN/WAIT for commands that humans and AI agents submit in parallel, so that shared work doesn't exhaust CPU or RAM. The users are developers running several agents or builds on one machine.
+
+## Stack
+- Rust (edition 2021, MSRV 1.85), a single crate `qex`. Dependencies: clap, serde/serde_json, toml, serde_yaml_ng, uuid, libc, anyhow.
+- No database. State lives in atomic job files. IPC runs over Unix sockets.
+- Upstream builds only on Unix (Linux, macOS). On Windows, build and test inside WSL2.
+- Upstream: https://github.com/stephenc/qex. We fork from v0.33.0 (`78b4e86`, tag `base/qex-v0.33.0`).
+
+## Commands (run in WSL2 or on Linux/macOS)
+- Format check: `cargo fmt --all --check`
+- Lint: `cargo clippy --all-targets -- -D warnings`
+- Unit tests: `cargo test --bins`
+- End-to-end tests: `cargo test --test e2e -- --test-threads=2` (about 6 minutes)
+- Release build: `cargo build --release --locked`
+- MSRV check: `cargo +1.85 check --all-targets --locked`
+- The whole baseline, with logs: `docs/baseline/run-baseline-linux.sh <clone> <log-dir>`
+
+## Structure
+- `src/`: upstream qex (coordinator `daemon.rs`, scheduler `sched.rs`, per-job `supervisor.rs`, platform metrics `sys.rs`).
+- `tests/e2e.rs`: upstream end-to-end suite.
+- `docs/fork/`: our handoff, SPEC (target V1 contract), qex assessment and protocol schema.
+- `docs/baseline/`: recorded baseline results and raw logs. Update these; don't rewrite history.
+- `docs/*.md` at the top level is upstream's shipped documentation, and an e2e test scans it.
+
+## Rules for this project
+- Run the checks above before saying done, and show the command and its result. Never claim a build, test or benchmark passed unless it ran in this session.
+- Never label an untested platform as passing. Missing access means "not evaluated".
+- Never commit secrets. Job records and logs can contain them.
+- Keep to the V1 scope in `docs/fork/SPEC.md` and `docs/fork/CLAUDE_HANDOFF.md`. V2 items (Windows/WSL shared budgets, containers, PTY, GPU, result reuse, rich integrations) are out of scope; ask before adding features.
+- Every independent request executes. Don't add dedupe or result reuse.
+- License (Apache-2.0):
+  - Keep `LICENSE` and all notices.
+  - Every upstream file we modify gets a header line: `// Modified by the local-resource-coordinator fork, <date>: <what>`.
+  - Never use "qex" as our product name.
+- Git:
+  - `upstream` is fetch-only (push URL `DISABLED`); never contact or contribute upstream.
+  - One purpose per branch and PR, under about 400 changed lines. Never commit directly to `main`; never merge without the owner's OK.
+- Don't add fork documents directly in `docs/`; use `docs/fork/` or another subfolder.
+- Decisions that change upstream interfaces (persistence, IPC framing, CLI compatibility, launch protocol) need an ADR first.
+
+## Gotchas
+Add one line each time the same mistake happens twice.
+- The parent folder `C:\Users\kolla` is itself a git repo. Always run git with `-C <this repo>` or from inside it.
+- On Windows, Git Bash's `/usr/bin/link.exe` can shadow the MSVC linker. From Git Bash, pass Linux paths to `wsl.exe` with `MSYS_NO_PATHCONV=1`.
+- Keep this repo's `core.autocrlf=false`, so upstream files stay LF.
+- The unit test `sched::tests::a_job_that_another_user_holds_back_says_so_and_never_keeps_capacity` fails in the full `cargo test --bins` run on WSL2 (2 out of 2) and passes alone (3 out of 3). This happens on unchanged upstream code, so it isn't a regression.
