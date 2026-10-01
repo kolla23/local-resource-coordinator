@@ -76,7 +76,7 @@ Paging from `typeperf`:
   - `--temp-root` gives workload *i* its own folder, `%LOCALAPPDATA%\lrc-bench\tmp\<rep>-w<i>`.
   - `run-gate.sh … P <temp-root>` runs the P arm 3 times.
 - **Each workload used its own folder:** each of the 9 TEMP folders contains its own `ripgrep-tests` folder with 321 entries. The shared `%TEMP%\ripgrep-tests` was last modified on 2026-09-30 at 21:30, before this run.
-- **Machine:** the owner closed apps first (`wsl --shutdown`, among others). Just before the run: 27.6 GiB committed of a 35.3 GiB limit, 4.0 GiB of RAM available ([environment.txt](logs/parallel-workload-windows-temp/environment.txt)). The commit limit was 44.8 GiB in the first run, so the page file had shrunk since.
+- **Machine:** the owner closed apps first (`wsl --shutdown`, among others). Just before the run: 26.9 GiB committed of a 34.5 GiB limit, 3.9 GiB of RAM available ([environment.txt](logs/parallel-workload-windows-temp/environment.txt)). The commit limit was 44.8 GiB in the first run, so the page file had shrunk since.
 
 | Run | Makespan | Peak memory per workload (kernel job commit) | System commit increase | Lowest available RAM | Worst timer delay | Failed tests per worktree |
 |---|---|---|---|---|---|---|
@@ -90,7 +90,7 @@ The median makespan was 92.7 s, against 97.5 s for P in the first run. Raw logs 
 - A per-job `TEMP`/`TMP` removed the collisions, without serializing anything or losing parallel speed.
 - For the coordinator, this makes per-job temp directories the main candidate for the ADR named in point 2 above. That ADR needs to settle how this fits SPEC §8.1 / S08 (environment changes). A named lock is the fallback for tools that ignore `TEMP`.
 - **How strong is the evidence?** If the original 2-in-3 collision rate still held, 3 clean reps would happen by chance about 4% of the time ((1/3)³). So this is strong evidence, but not proof. It covers one test harness (ripgrep's), and it doesn't cover tools that use fixed paths outside `TEMP`.
-- **Lowest available RAM was 1.4–2.6 GiB this time**, against 1 MiB to 1.3 GiB in the first run. That's mainly because the owner freed memory first, so it isn't evidence that per-job TEMP saves memory.
+- **Lowest available RAM was 1.3–2.6 GiB this time**, against 1 MiB to 1.3 GiB in the first run. That's mainly because the owner freed memory first, so it isn't evidence that per-job TEMP saves memory.
 
 **Two runner problems found on the way (both fixed, neither produced data):**
 - `%PATH%` now contains `C:\Program Files (x86)\Windows Kits\…`. The `)` closed the runner's `( … )` group, and cmd failed with "\Windows was unexpected at this time". This affected the unchanged gate 2 command too. The fix quotes the assignment: `set "PATH=…"`.
@@ -99,13 +99,14 @@ The median makespan was 92.7 s, against 97.5 s for P in the first run. Raw logs 
 ## Control (2026-10-01): shared TEMP again, same day and setup
 **Question:** were the clean per-job TEMP reps above caused by the separate TEMP, or by a quieter machine? To find out, I repeated the same P arm with the **shared** `%TEMP%` (no `--temp-root`), in conditions at least as good as the per-job run.
 
-**Answer:** the separate TEMP caused it. With the shared TEMP, **3 of 3 reps had collisions**, in **7 of 9 worktrees**, with **222 failed tests** in total.
+**Answer:** concurrent use of the shared TEMP caused it. With the shared TEMP, **3 of 3 reps had collisions**, in **7 of 9 worktrees**, with **222 failed tests** in total.
 
 - **Setup:** same worktrees, command, runner and script as the per-job run: `run-gate.sh … P`, with no temp root.
+  - One more difference: the per-job folders started empty, while the shared `%TEMP%\ripgrep-tests` kept 321 leftover entries from earlier runs (`run-gate.sh` only deletes `target/`). Concurrency still explains the failures best: 102 of them are "used by another process", 2 of the 9 worktrees were clean, and the first run's one-at-a-time arm used the same shared folder without these collisions (1 unrelated failure per worktree).
 - **Machine** ([environment.txt](logs/parallel-workload-windows-shared-temp-control/environment.txt)):
-  - The page file was changed from automatic to a **fixed 32 GiB**, so the commit limit was **48.8 GiB** and no longer drifted between runs.
-  - The owner's background apps were closed first (Chrome, Edge, OneDrive, Loom, Chime, Skype for Business, AweSun, the Claude desktop app; WSL shut down). VS Code stayed open.
-  - Just before the run: **5.4 GiB of RAM free** and 19.9 GiB committed, against 4.0 GiB free and 27.6 GiB committed before the per-job run. So this run had *more* headroom, which rules out memory pressure as the cause of the failures.
+  - The page file was changed from automatic to a **fixed 32 GiB**, so the commit limit was **47.7 GiB** (48,837 MiB = 16,069 MiB RAM + 32,768 MiB page file) and no longer drifted between runs.
+  - Before the run I closed background apps (Chrome, Edge, OneDrive, Loom, Chime, Skype for Business, AweSun, the Claude desktop app; WSL shut down). VS Code stayed open. This list isn't recorded in the logs.
+  - The runner's own idle reading at the start of each rep: **5.8–6.0 GiB available** and 14.7–15.2 GiB committed, against 4.0–5.1 GiB available and 26.3–26.7 GiB committed in the per-job run (the `machine:` line of each `*-summary.txt`). So this run had *more* headroom, which rules out memory pressure as the cause of the failures.
 
 | Run | Makespan | Peak memory per workload (kernel job commit) | System commit increase | Lowest available RAM | Worst timer delay | Failed tests per worktree |
 |---|---|---|---|---|---|---|
@@ -116,7 +117,7 @@ The median makespan was 92.7 s, against 97.5 s for P in the first run. Raw logs 
 Raw logs are in [logs/parallel-workload-windows-shared-temp-control/](logs/parallel-workload-windows-shared-temp-control/).
 
 **What the failures are:**
-- Every failing path is under the shared `C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\…`.
+- Every failure that prints a path points under the shared `C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\…`. The 11 code-267 failures print no path; they come from starting `rg` in a test folder (`tests\util.rs:335`).
 - By Windows error code: 102 × **32** (file in use by another process), 34 × **5** (access denied), 11 × **267** (directory name invalid), 3 × **145** (directory not empty), 3 × **3** and 1 × **2** (path or file not found). All of these are what you'd expect when three test runs create and delete the same directories at the same time.
 - The rest are `rg` itself exiting with status 2 (error, 55×) or 1 (no match, 7×), and 5 × "printed outputs differ", all inside the same shared test folders.
 - The per-job TEMP logs have **0** error-32 lines, counting both the `os error 32` and the `Os { code: 32 … }` spellings.
@@ -124,9 +125,9 @@ Raw logs are in [logs/parallel-workload-windows-shared-temp-control/](logs/paral
 **What this means:**
 - Shared TEMP collided in 3 of 3 reps; separate TEMP was clean in 3 of 3. This is a same-day comparison with more free memory on the control side, so the result supports per-job TEMP/TMP as the main candidate for the ADR (see the follow-up above).
 - It's still one test harness (ripgrep's) and 3 repetitions per side.
-- The first run's "2 of 3 parallel reps collided" was probably an undercount of how often this happens, not a sign that collisions are rare.
+- Across both shared-TEMP runs, 5 of 6 parallel reps collided. Collisions are the normal case, not a rare one, but 6 reps can't pin down the exact rate.
 
-**An earlier attempt produced no data.** At 2026-10-01T03:07Z, all 3 reps were stopped by the safety guard within 3.4 s: commit came within 2 GiB of a limit that had shrunk to 35.3 GiB under the automatic page file. Those logs are kept in [aborted-commit-limit-35gib/](logs/parallel-workload-windows-shared-temp-control/aborted-commit-limit-35gib/). This is why the page file was fixed at 32 GiB.
+**An earlier attempt produced no data.** At 2026-10-01T03:07Z, all 3 reps were stopped by the safety guard within 3.4 s: commit came within 2 GiB of a limit that had shrunk to 34.5 GiB (35,320 MiB) under the automatic page file. Those logs are kept in [aborted-commit-limit-35gib/](logs/parallel-workload-windows-shared-temp-control/aborted-commit-limit-35gib/). This is why the page file was fixed at 32 GiB.
 
 ## Not tested
 - **Through a coordinator.** Unchanged qex can't run natively here. A qex-in-WSL2 comparison is reference-only (see [DECISION_NATIVE_WINDOWS.md](../fork/DECISION_NATIVE_WINDOWS.md)) and wasn't run in this step.
