@@ -3750,6 +3750,38 @@ mem = \"1GB\"
         );
     }
 
+    /// Content that the last look did not see is no older than the time
+    /// since that look, whatever its mtime says. A file with an old mtime
+    /// moved into place (`cp -p`, a temp file renamed in) is new at the path.
+    /// It waits the settle time from the look before it, not more, not less.
+    #[test]
+    fn new_content_is_no_older_than_the_time_since_the_last_look() {
+        let whole = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\nmem = \"1GB\"\n".to_vec(),
+            Some(CONFIG_SETTLE * 4),
+        );
+        let mut state = State::for_a_test();
+        reload_config(&mut state, clone_of(&whole));
+        let taken = state.config_seen;
+
+        // 300ms later, with no clock step: other content with an mtime of 2s.
+        time_passes(&mut state, Duration::from_millis(300));
+        reload_config(&mut state, half_file(Duration::from_secs(2)));
+        assert_eq!(
+            state.config_seen, taken,
+            "content seen for the first time 300ms after the last look is at most 300ms old"
+        );
+
+        // 300ms more: 600ms since the last look that did not see it.
+        time_passes(&mut state, Duration::from_millis(300));
+        reload_config(&mut state, half_file(Duration::from_millis(2300)));
+        assert_eq!(
+            state.config_seen,
+            config_fingerprint(&half_file(Duration::ZERO)),
+            "and it settles once the settle time has passed"
+        );
+    }
+
     /// A BACKWARD step counts as no step. The wall time since the last look
     /// is then less than the monotonic time, and a bound that read that as a
     /// large step would treat a settled file as one it cannot place, and hold
