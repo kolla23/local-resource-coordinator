@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: config template shows check = "never" (issue #4).
 //! This module holds the text for the `qex help <topic>` command.
 //!
 //! An agent reads this text to learn the tool. Each topic is thus short and
@@ -841,7 +842,7 @@ that qex uses now.
     timeout = \"30s\"       # the time limit for that command
 
     [update]
-    check   = \"7d\"        # how often qex looks for a newer release, or `never`
+    check   = \"never\"     # how often qex looks for a newer release, e.g. `7d`
     url     = \"https://api.github.com/repos/stephenc/qex/releases/latest\"
     timeout = \"5s\"        # how long qex waits for that service
 
