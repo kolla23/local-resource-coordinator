@@ -1,0 +1,72 @@
+date_utc: 2026-10-01T01:12:22Z
+commit: 5c92b8a (+ uncommitted probe source)
+Microsoft Windows [Version 10.0.26200.9457]
+rustc 1.98.1 (48a229cea 2026-09-01)
+windows-sys: version = "0.61.2"
+machine: i7-1255U 10C/12T, 15.7 GiB RAM
+
+=================== run 1: target/release/jobobject-probe.exe
+probe pid 50208 | probe itself already in a job: true
+
+[1] contain: in job before resume = true
+[2] tree: expected 7 processes x 100 MiB = 700 MiB allocated | total processes 7 | max seen at once 7 | wall 3.22s
+    kernel peak job commit 705.8 MiB | sampled(100ms) peak sum working set 732.2 MiB | sampled peak sum private 705.8 MiB
+
+[3] burst 400 MiB for 150 ms: kernel peak job commit 401.4 MiB | sampled(250ms) peak private 401.4 MiB
+
+[4] cancel (Ctrl-Break, 2 s grace, then force) of 7 processes: graceful exits 7 | not graceful (pid depth) [] | forced = false | job counter zero after Some(22.6705ms) | all exited after Some(22.6855ms) | survivors after 10 s []
+
+[4] cancel (force only) of 7 processes: graceful exits 0 | not graceful (pid depth) ["11420 depth 0", "14856 depth 2", "26652 depth 1", "32144 depth 0", "33808 depth 1", "35876 depth 0", "40656 depth 0"] | forced = true | job counter zero after Some(108.2µs) | all exited after Some(5.6625ms) | survivors after 10 s []
+
+[5] breakaway attempt: ["denied Access is denied. (os error 5)"]
+
+[6] nested job: 54832 assigned=true | still listed in outer job true | killed by outer cancel true
+
+[7] owner killed: tree of 7 processes stopped by kill-on-close after Some(8.2461ms) | survivors []
+
+[8] WMI-created process pid 54004: in job false | still running after job cancel true
+exit_code: 0
+
+=================== run 2: target/release/jobobject-probe.exe
+probe pid 22836 | probe itself already in a job: true
+
+[1] contain: in job before resume = true
+[2] tree: expected 7 processes x 100 MiB = 700 MiB allocated | total processes 7 | max seen at once 7 | wall 3.22s
+    kernel peak job commit 706.0 MiB | sampled(100ms) peak sum working set 732.2 MiB | sampled peak sum private 705.9 MiB
+
+[3] burst 400 MiB for 150 ms: kernel peak job commit 401.4 MiB | sampled(250ms) peak private 401.4 MiB
+
+[4] cancel (Ctrl-Break, 2 s grace, then force) of 7 processes: graceful exits 7 | not graceful (pid depth) [] | forced = false | job counter zero after Some(33.8924ms) | all exited after Some(33.9283ms) | survivors after 10 s []
+
+[4] cancel (force only) of 7 processes: graceful exits 0 | not graceful (pid depth) ["29500 depth 0", "29548 depth 1", "37044 depth 0", "43396 depth 0", "45260 depth 1", "52128 depth 0", "54188 depth 2"] | forced = true | job counter zero after Some(91.7µs) | all exited after Some(5.7767ms) | survivors after 10 s []
+
+[5] breakaway attempt: ["denied Access is denied. (os error 5)"]
+
+[6] nested job: 39040 assigned=true | still listed in outer job true | killed by outer cancel true
+
+[7] owner killed: tree of 7 processes stopped by kill-on-close after Some(8.1568ms) | survivors []
+
+[8] WMI-created process pid 35304: in job false | still running after job cancel true
+exit_code: 0
+
+=================== run 3: target/release/jobobject-probe.exe
+probe pid 22220 | probe itself already in a job: true
+
+[1] contain: in job before resume = true
+[2] tree: expected 7 processes x 100 MiB = 700 MiB allocated | total processes 7 | max seen at once 7 | wall 3.22s
+    kernel peak job commit 706.0 MiB | sampled(100ms) peak sum working set 732.3 MiB | sampled peak sum private 705.9 MiB
+
+[3] burst 400 MiB for 150 ms: kernel peak job commit 401.4 MiB | sampled(250ms) peak private 401.4 MiB
+
+[4] cancel (Ctrl-Break, 2 s grace, then force) of 7 processes: graceful exits 7 | not graceful (pid depth) [] | forced = false | job counter zero after Some(28.4257ms) | all exited after Some(28.4523ms) | survivors after 10 s []
+
+[4] cancel (force only) of 7 processes: graceful exits 0 | not graceful (pid depth) ["27704 depth 2", "28564 depth 0", "37196 depth 0", "37300 depth 0", "39412 depth 1", "42096 depth 1", "42500 depth 0"] | forced = true | job counter zero after Some(84.3µs) | all exited after Some(5.5374ms) | survivors after 10 s []
+
+[5] breakaway attempt: ["denied Access is denied. (os error 5)"]
+
+[6] nested job: 50952 assigned=true | still listed in outer job true | killed by outer cancel true
+
+[7] owner killed: tree of 7 processes stopped by kill-on-close after Some(6.4991ms) | survivors []
+
+[8] WMI-created process pid 51368: in job false | still running after job cancel true
+exit_code: 0
