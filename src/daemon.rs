@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: a clock step must not settle a config file that just changed (issue #17).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a comment no longer calls `7d` the default (issue #4).
 //! This module holds the coordinator.
 //!
@@ -3251,6 +3252,61 @@ mod tests {
         assert_ne!(
             state.config_seen, before,
             "a file with no time must still reach the coordinator"
+        );
+    }
+
+    /// A forward step of the wall clock must not make a file that just
+    /// changed look settled (issue #17).
+    ///
+    /// The age of a file is wall-clock time minus its mtime. WSL2 measured
+    /// forward steps of 450ms and 407ms within three minutes of a busy build,
+    /// and the coordinator then took a half file that had been at the path
+    /// 302ms because its age read 732ms. Here the coordinator saw one content
+    /// a moment ago, and the next look gives OTHER content with an age of a
+    /// minute: the content cannot be older than the look that did not see it.
+    #[test]
+    fn a_clock_step_does_not_settle_a_file_that_just_changed() {
+        let whole = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\nmem = \"1GB\"\n".to_vec(),
+            Some(CONFIG_SETTLE * 4),
+        );
+        let mut state = State::for_a_test();
+        reload_config(&mut state, clone_of(&whole));
+        let taken = state.config_seen;
+        assert_eq!(
+            taken,
+            config_fingerprint(&whole),
+            "an old file is the configuration"
+        );
+
+        // The very next look: different bytes, and an age that a clock step
+        // made a minute long.
+        let half = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\n".to_vec(),
+            Some(Duration::from_secs(60)),
+        );
+        reload_config(&mut state, clone_of(&half));
+        assert_eq!(
+            state.config_seen, taken,
+            "content that the last look did not see cannot have settled, whatever its age says"
+        );
+    }
+
+    /// An age that cannot be computed is never settled. A wall clock that
+    /// went BACK gives a file a time in the future, so `read_config_file`
+    /// gives no age, and no number of quick looks may take that file: only
+    /// the monotonic wait of the older test can.
+    #[test]
+    fn a_file_with_no_age_is_not_settled_by_quick_looks() {
+        let file = ConfigFile::Text(b"[budget]\ncpu = \"1\"\n".to_vec(), None);
+        let mut state = State::for_a_test();
+        let before = state.config_seen;
+        for _ in 0..10 {
+            reload_config(&mut state, clone_of(&file));
+        }
+        assert_eq!(
+            state.config_seen, before,
+            "a file whose age cannot be computed must not settle on quick looks"
         );
     }
 

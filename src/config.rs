@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: unit test for the automatic CPU budget.
 // Modified by the local-resource-coordinator fork, 2026-10-01: default [update] check = "never" (issue #4).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a config file replaced during the read is young (issue #17).
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests that a clock step or an unknown age never settles a config file (issue #17).
 //! This module reads the config file `~/.config/qex.toml`.
 //!
 //! Each field has a default value. The config file is thus optional. If the
@@ -2614,6 +2615,28 @@ mod tests {
             age.is_some_and(|a| a >= Duration::from_secs(59)),
             "an untouched file keeps its age, got {age:?}"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A wall clock that went back leaves a file with a time in the future.
+    /// Its age cannot be computed, and the read must say so (no age), never
+    /// give it an age that could count as settled.
+    #[test]
+    fn a_file_from_the_future_has_no_age() {
+        let dir = a_config_dir("future");
+        let path = dir.join("qex.toml");
+        std::fs::write(&path, "[budget]\ncpu = \"2\"\n").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::now() + Duration::from_secs(60))
+            .unwrap();
+
+        let ConfigFile::Text(_, age) = read_config_at(&path, || {}) else {
+            panic!("the file must read as text");
+        };
+        assert_eq!(age, None, "a file from the future has no age");
         std::fs::remove_dir_all(&dir).ok();
     }
 
