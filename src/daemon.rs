@@ -238,6 +238,11 @@ pub struct State {
     /// this same number for `CONFIG_SETTLE`. See `reload_config` for the fault
     /// that this stops, and for the limit of a guard that looks.
     pub config_settling: Option<(u64, Instant)>,
+    /// The last look at the file: what it gave, and both clocks then.
+    pub config_last_look: Option<ConfigLook>,
+    /// The last look that gave content OTHER than what the file gives now.
+    /// The content now arrived after it, so this bounds how old it can be.
+    pub config_changed_after: Option<ConfigLook>,
     /// The fault in the configuration file, if the last read gave one.
     ///
     /// The coordinator keeps the values that it had. A file that qex cannot
@@ -408,8 +413,68 @@ pub(crate) const WAITING_FOR_A_WRITER: &str =
     "a writer changes the configuration file now, so qex waits for it. The coordinator keeps \
      the values that it had.";
 
+/// One look at the configuration file: what it gave, and both clocks then.
+#[derive(Clone, Copy, Debug)]
+pub struct ConfigLook {
+    pub fingerprint: u64,
+    pub mono: Instant,
+    pub wall: std::time::SystemTime,
+}
+
+impl ConfigLook {
+    pub fn now(fingerprint: u64) -> Self {
+        Self {
+            fingerprint,
+            mono: Instant::now(),
+            wall: std::time::SystemTime::now(),
+        }
+    }
+}
+
+/// Records this look, and bounds the age of the file by what the
+/// coordinator itself saw (issue #17).
+///
+/// The age of a file is wall-clock time minus its mtime, and a wall clock
+/// STEPS: WSL2 measured forward steps of 450ms and 407ms within three
+/// minutes of a busy build, which made a half file that had been at the path
+/// 302ms read 732ms old. Two bounds, from the last look that gave OTHER
+/// content (the content now arrived after it):
+///
+/// 1. The content is no older than the monotonic time since that look.
+/// 2. Any forward step of the wall clock since that look is measured, as the
+///    wall time that passed beyond the monotonic time, and taken off the age.
+///    A coordinator that stalled still measures a step inside the stall.
+///
+/// Both can only make a file look YOUNGER: the worst case is a wait of about
+/// one step more. An age that cannot be computed stays unknown, and the
+/// older monotonic test in `reload_config` decides.
+fn bound_the_age(state: &mut State, fingerprint: u64, read: ConfigFile) -> ConfigFile {
+    let look = ConfigLook::now(fingerprint);
+    if let Some(last) = state.config_last_look {
+        if last.fingerprint != fingerprint {
+            state.config_changed_after = Some(last);
+        }
+    }
+    state.config_last_look = Some(look);
+
+    let ConfigFile::Text(bytes, Some(age)) = read else {
+        return read;
+    };
+    let Some(before) = state.config_changed_after else {
+        return ConfigFile::Text(bytes, Some(age));
+    };
+    let mono = look.mono.saturating_duration_since(before.mono);
+    let wall = look
+        .wall
+        .duration_since(before.wall)
+        .unwrap_or(Duration::ZERO);
+    let step = wall.saturating_sub(mono);
+    ConfigFile::Text(bytes, Some(age.saturating_sub(step).min(mono)))
+}
+
 pub fn reload_config(state: &mut State, read: ConfigFile) {
     let now = config_fingerprint(&read);
+    let read = bound_the_age(state, now, read);
     if now == state.config_seen {
         state.config_settling = None;
         // The file gives what the coordinator holds, so no writer is in the
@@ -589,6 +654,8 @@ impl State {
             started_at: 0,
             config_seen: 0,
             config_settling: None,
+            config_last_look: None,
+            config_changed_after: None,
             config_error: None,
             events: crate::events::EventLog::new(),
             paused: crate::pause::Paused::default(),
@@ -1001,6 +1068,10 @@ impl Coordinator {
                 // no change.
                 config_seen,
                 config_settling: None,
+                // The read at start is the first look. Start reads the file
+                // once, as before, and waits for nothing.
+                config_last_look: Some(ConfigLook::now(config_seen)),
+                config_changed_after: None,
                 config_error: None,
                 events: crate::events::EventLog::new(),
                 paused: crate::pause::Paused::default(),
@@ -3292,6 +3363,65 @@ mod tests {
         );
     }
 
+    /// A coordinator that STALLS past the settle time while the wall clock
+    /// steps forward: the monotonic bound is then large, and only the
+    /// measured step keeps the half file out.
+    #[test]
+    fn a_stall_and_a_clock_step_together_do_not_settle_a_new_file() {
+        let whole = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\nmem = \"1GB\"\n".to_vec(),
+            Some(CONFIG_SETTLE * 4),
+        );
+        let mut state = State::for_a_test();
+        reload_config(&mut state, clone_of(&whole));
+        let taken = state.config_seen;
+
+        // The last look was 2s ago by the monotonic clock, and the wall clock
+        // moved 600ms more than that: a stall and a step in one window.
+        let last = state.config_last_look.as_mut().unwrap();
+        last.mono = Instant::now() - Duration::from_secs(2);
+        last.wall = std::time::SystemTime::now() - Duration::from_millis(2600);
+
+        // A half file that is really 150ms old, and reads 750ms.
+        let half = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\n".to_vec(),
+            Some(Duration::from_millis(750)),
+        );
+        reload_config(&mut state, clone_of(&half));
+        assert_eq!(
+            state.config_seen, taken,
+            "the measured step must come off the age, even after a stall"
+        );
+    }
+
+    /// The bounds must not cost a busy coordinator its single look: a file
+    /// that really settled while the coordinator did not look, with no clock
+    /// step, is taken at once.
+    #[test]
+    fn a_file_that_settled_during_a_stall_is_taken_on_one_look() {
+        let whole = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\nmem = \"1GB\"\n".to_vec(),
+            Some(CONFIG_SETTLE * 4),
+        );
+        let mut state = State::for_a_test();
+        reload_config(&mut state, clone_of(&whole));
+
+        let last = state.config_last_look.as_mut().unwrap();
+        last.mono = Instant::now() - Duration::from_secs(2);
+        last.wall = std::time::SystemTime::now() - Duration::from_secs(2);
+
+        let next = ConfigFile::Text(
+            b"[budget]\ncpu = \"3\"\n".to_vec(),
+            Some(Duration::from_secs(1)),
+        );
+        reload_config(&mut state, clone_of(&next));
+        assert_eq!(
+            state.config_seen,
+            config_fingerprint(&next),
+            "a file that settled while the coordinator was busy is taken on one look"
+        );
+    }
+
     /// An age that cannot be computed is never settled. A wall clock that
     /// went BACK gives a file a time in the future, so `read_config_file`
     /// gives no age, and no number of quick looks may take that file: only
@@ -3371,6 +3501,8 @@ mod tests {
             stop: false,
             config_seen: 0,
             config_settling: None,
+            config_last_look: None,
+            config_changed_after: None,
             config_error: None,
             events: crate::events::EventLog::new(),
         }
