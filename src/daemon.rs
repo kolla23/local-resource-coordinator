@@ -433,23 +433,39 @@ impl ConfigLook {
     }
 }
 
+/// A step of the wall clock below this is drift and measurement noise, not a
+/// step.
+const CLOCK_STEP_TOLERANCE: Duration = Duration::from_millis(50);
+
+/// The forward step of the wall clock between two looks: the wall time that
+/// passed beyond the monotonic time. A backward step counts as none.
+fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
+    let mono = to.mono.saturating_duration_since(from.mono);
+    let wall = to.wall.duration_since(from.wall).unwrap_or(Duration::ZERO);
+    wall.saturating_sub(mono)
+}
+
 /// Records this look, and bounds the age of the file by what the
 /// coordinator itself saw (issue #17).
 ///
 /// The age of a file is wall-clock time minus its mtime, and a wall clock
 /// STEPS: WSL2 measured forward steps of 450ms and 407ms within three
 /// minutes of a busy build, which made a half file that had been at the path
-/// 302ms read 732ms old. Two bounds, from the last look that gave OTHER
-/// content (the content now arrived after it):
+/// 302ms read 732ms old. The content now arrived after the last look that
+/// gave OTHER content (`before`), and was first seen at `first`:
 ///
-/// 1. The content is no older than the monotonic time since that look.
-/// 2. Any forward step of the wall clock since that look is measured, as the
-///    wall time that passed beyond the monotonic time, and taken off the age.
-///    A coordinator that stalled still measures a step inside the stall.
+/// 1. It is no older than the monotonic time since `before`.
+/// 2. A step between `first` and now came after the file was written, so it
+///    is taken off the age exactly.
+/// 3. A step between `before` and `first` may have come before the write or
+///    after it, so the age is UNKNOWN, and the monotonic test in
+///    `reload_config` decides: the same content for `CONFIG_SETTLE`. That
+///    keeps the wait near the settle time whatever the size of the step: a
+///    clock correction of minutes, or a suspend (the monotonic clock of
+///    Linux stops in a suspend and the wall clock does not).
 ///
-/// Both can only make a file look YOUNGER: the worst case is a wait of about
-/// one step more. An age that cannot be computed stays unknown, and the
-/// older monotonic test in `reload_config` decides.
+/// Every bound only makes a file younger or unknown, never older. An age
+/// that cannot be computed stays unknown.
 fn bound_the_age(state: &mut State, fingerprint: u64, read: ConfigFile) -> ConfigFile {
     let look = ConfigLook::now(fingerprint);
     match state.config_last_look {
@@ -468,13 +484,15 @@ fn bound_the_age(state: &mut State, fingerprint: u64, read: ConfigFile) -> Confi
     let Some(before) = state.config_changed_after else {
         return ConfigFile::Text(bytes, Some(age));
     };
-    let mono = look.mono.saturating_duration_since(before.mono);
-    let wall = look
-        .wall
-        .duration_since(before.wall)
-        .unwrap_or(Duration::ZERO);
-    let step = wall.saturating_sub(mono);
-    ConfigFile::Text(bytes, Some(age.saturating_sub(step).min(mono)))
+    let first = state.config_first_seen.unwrap_or(look);
+    if forward_step(&before, &first) > CLOCK_STEP_TOLERANCE {
+        return ConfigFile::Text(bytes, None);
+    }
+    let since_before = look.mono.saturating_duration_since(before.mono);
+    let age = age
+        .saturating_sub(forward_step(&first, &look))
+        .min(since_before);
+    ConfigFile::Text(bytes, Some(age))
 }
 
 pub fn reload_config(state: &mut State, read: ConfigFile) {
