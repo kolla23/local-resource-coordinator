@@ -243,6 +243,8 @@ pub struct State {
     /// The last look that gave content OTHER than what the file gives now.
     /// The content now arrived after it, so this bounds how old it can be.
     pub config_changed_after: Option<ConfigLook>,
+    /// The first look that gave the content that the file gives now.
+    pub config_first_seen: Option<ConfigLook>,
     /// The fault in the configuration file, if the last read gave one.
     ///
     /// The coordinator keeps the values that it had. A file that qex cannot
@@ -450,10 +452,13 @@ impl ConfigLook {
 /// older monotonic test in `reload_config` decides.
 fn bound_the_age(state: &mut State, fingerprint: u64, read: ConfigFile) -> ConfigFile {
     let look = ConfigLook::now(fingerprint);
-    if let Some(last) = state.config_last_look {
-        if last.fingerprint != fingerprint {
+    match state.config_last_look {
+        Some(last) if last.fingerprint != fingerprint => {
             state.config_changed_after = Some(last);
+            state.config_first_seen = Some(look);
         }
+        None => state.config_first_seen = Some(look),
+        _ => {}
     }
     state.config_last_look = Some(look);
 
@@ -656,6 +661,7 @@ impl State {
             config_settling: None,
             config_last_look: None,
             config_changed_after: None,
+            config_first_seen: None,
             config_error: None,
             events: crate::events::EventLog::new(),
             paused: crate::pause::Paused::default(),
@@ -1072,6 +1078,7 @@ impl Coordinator {
                 // once, as before, and waits for nothing.
                 config_last_look: Some(ConfigLook::now(config_seen)),
                 config_changed_after: None,
+                config_first_seen: Some(ConfigLook::now(config_seen)),
                 config_error: None,
                 events: crate::events::EventLog::new(),
                 paused: crate::pause::Paused::default(),
@@ -3419,6 +3426,90 @@ mod tests {
             state.config_seen,
             config_fingerprint(&next),
             "a file that settled while the coordinator was busy is taken on one look"
+        );
+    }
+
+    /// Moves every time the coordinator recorded back by `d`, on both clocks:
+    /// `d` passes with no clock step.
+    fn time_passes(state: &mut State, d: Duration) {
+        for look in [
+            state.config_last_look.as_mut(),
+            state.config_changed_after.as_mut(),
+            state.config_first_seen.as_mut(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            look.mono -= d;
+            look.wall -= d;
+        }
+        if let Some((_, since)) = state.config_settling.as_mut() {
+            *since -= d;
+        }
+    }
+
+    /// A LARGE forward step must not hold a change back for its length. A
+    /// 10-minute clock correction, or a laptop that slept 10 minutes (the
+    /// monotonic clock stops in a suspend on Linux, and the wall clock does
+    /// not), gives a step of 10 minutes. A file written after it must still
+    /// settle by the monotonic clock, in about the settle time.
+    #[test]
+    fn a_large_clock_step_does_not_hold_a_change_for_its_length() {
+        let whole = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\nmem = \"1GB\"\n".to_vec(),
+            Some(CONFIG_SETTLE * 4),
+        );
+        let mut state = State::for_a_test();
+        reload_config(&mut state, clone_of(&whole));
+
+        // The last look was 1s ago by the monotonic clock, and the wall clock
+        // moved 10 minutes more than that.
+        let last = state.config_last_look.as_mut().unwrap();
+        last.mono = Instant::now() - Duration::from_secs(1);
+        last.wall = std::time::SystemTime::now() - Duration::from_secs(601);
+
+        // A change written after the step: its wall age is true.
+        let next = |age| ConfigFile::Text(b"[budget]\ncpu = \"3\"\n".to_vec(), Some(age));
+        reload_config(&mut state, next(Duration::from_millis(100)));
+        assert_ne!(state.config_seen, config_fingerprint(&next(Duration::ZERO)));
+
+        // The settle time and a little more pass, with no further step.
+        time_passes(&mut state, CONFIG_SETTLE + Duration::from_millis(100));
+        reload_config(&mut state, next(Duration::from_millis(700)));
+        assert_eq!(
+            state.config_seen,
+            config_fingerprint(&next(Duration::ZERO)),
+            "a change after a large step must settle in about the settle time, not the step"
+        );
+    }
+
+    /// A BACKWARD step must never make a file look older. The wall time
+    /// since the last look is then less than the monotonic time; the
+    /// difference must count as no step, never as a negative one.
+    #[test]
+    fn a_backward_clock_step_never_makes_a_file_older() {
+        let whole = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\nmem = \"1GB\"\n".to_vec(),
+            Some(CONFIG_SETTLE * 4),
+        );
+        let mut state = State::for_a_test();
+        reload_config(&mut state, clone_of(&whole));
+        let taken = state.config_seen;
+
+        // The wall clock went back 10 minutes since the last look, 1s ago.
+        let last = state.config_last_look.as_mut().unwrap();
+        last.mono = Instant::now() - Duration::from_secs(1);
+        last.wall = std::time::SystemTime::now() + Duration::from_secs(599);
+
+        // A file 100ms old must stay young.
+        let half = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\n".to_vec(),
+            Some(Duration::from_millis(100)),
+        );
+        reload_config(&mut state, clone_of(&half));
+        assert_eq!(
+            state.config_seen, taken,
+            "a backward step must not add to the age of a file"
         );
     }
 
