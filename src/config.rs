@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: unit test for the automatic CPU budget.
+// Modified by the local-resource-coordinator fork, 2026-10-01: default [update] check = "never" (issue #4).
 //! This module reads the config file `~/.config/qex.toml`.
 //!
 //! Each field has a default value. The config file is thus optional. If the
@@ -1001,7 +1002,9 @@ pub struct UpdateConfig {
 impl Default for UpdateConfig {
     fn default() -> Self {
         Self {
-            check: "7d".into(),
+            // The fork asks nothing by default: the address below is
+            // upstream's releases, not ours (docs/fork/DECISION_UPDATE_CHECK.md).
+            check: crate::update::NEVER.into(),
             url: "https://api.github.com/repos/stephenc/qex/releases/latest".into(),
             timeout: "5s".into(),
         }
@@ -1827,6 +1830,15 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The fork's default asks nothing: the default address is upstream's
+    /// releases, which are not this project's (issue #4).
+    #[test]
+    fn the_default_update_check_is_never() {
+        let cfg = Config::default();
+        assert!(cfg.update.check.eq_ignore_ascii_case(crate::update::NEVER));
+        assert!(crate::update::interval(&cfg).unwrap().is_none());
+    }
 
     /// A number must be accepted where the field takes a number or text.
     ///

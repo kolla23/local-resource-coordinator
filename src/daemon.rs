@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: a comment no longer calls `7d` the default (issue #4).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -953,8 +954,8 @@ fn update_watch(coord: Arc<Coordinator>) {
         crate::update::check_if_due(&cfg);
 
         // THE STEP FOLLOWS THE INTERVAL. A user who asks for `10s` gets a look
-        // every 10 seconds, and the default of `7d` costs one look each
-        // minute: the limit above holds the cost of the default, and the limit
+        // every 10 seconds, and a long interval such as `7d` costs one look
+        // each minute: the limit above holds the cost of a long interval, and the limit
         // below holds the cost of a very small interval.
         //
         // The step comes from the configuration at EVERY turn, so a change to
