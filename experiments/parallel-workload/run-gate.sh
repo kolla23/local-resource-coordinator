@@ -12,7 +12,9 @@ ARMS=${3:-P S}
 TEMP_ROOT=${4:-}
 HERE=$(cd "$(dirname "$0")" && pwd)
 RUNNER="$HERE/target/release/parallel-workload.exe"
-CMD='set PATH=C:\Users\kolla\.cargo\bin;%PATH% && cargo build --locked && cargo test --locked'
+# Quoted: a ")" in the expanded %PATH% (e.g. "Program Files (x86)") would
+# otherwise close the runner's "( ... )" group.
+CMD='set "PATH=C:\Users\kolla\.cargo\bin;%PATH%" && cargo build --locked && cargo test --locked'
 mkdir -p "$OUT"
 
 for rep in 1 2 3; do
