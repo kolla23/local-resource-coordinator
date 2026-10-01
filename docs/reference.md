@@ -2,6 +2,7 @@
 title: qex reference
 description: Every command, option, claim word and configuration field.
 ---
+<!-- Modified by the local-resource-coordinator fork, 2026-10-01: the update check defaults to never (issue #4). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -641,13 +642,18 @@ qex version --check --json   # the same answer for a program
 | Exit code 1 | qex could not ask. The message says why, and nothing changed. |
 | `--json` | The answer of `qex version`, with an `update` object added: `version`, `newest`, `newer`, `development`, `source`, `error`. |
 
+**This build asks nothing by default.** It sets `check = "never"`, because
+the default address is upstream qex's releases, not this project's (see
+`docs/fork/DECISION_UPDATE_CHECK.md`). Set `check` to a time to turn the
+automatic check on; `qex version --check` always asks.
+
 **The coordinator asks, and your command never does.** A check must not delay a
 command and must not fail one, so the network stays out of the path of a
 command: the coordinator asks on its own time in its own thread, and every
 command reads the answer from a file in the state directory. One call also
 serves every agent on the machine.
 
-**The first week is quiet.** A fresh install writes the time and asks nothing,
+**When the check is on, the first interval is quiet.** A fresh install writes the time and asks nothing,
 because a person who installed qex a moment ago holds the newest release
 already. The first question comes after the first interval.
 
@@ -656,7 +662,7 @@ is unaffected.
 
 ```toml
 [update]
-check   = "7d"        # a time, or `never`
+check   = "never"     # a time such as `7d`, or `never` (the default)
 url     = "https://api.github.com/repos/stephenc/qex/releases/latest"
 timeout = "5s"
 ```

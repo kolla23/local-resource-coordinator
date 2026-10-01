@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: pin the CPU budget and default memory claim of with_default_config; match the long config-fault text, not the bare word "coordinator"; wait for the peer reason after the small jobs end (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-01: a coordinator with no [update] check writes no update record (issue #4).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -1838,6 +1839,35 @@ fn never_asks_nothing_and_writes_nothing() {
     }
 
     // The coordinator was there for the whole of that time.
+    assert!(h.qex(&["info", "--no-start"]).status.success());
+}
+
+/// The fork's default is `never`: a config that names no `check` writes no
+/// update record. An active check writes one within seconds, even on a fresh
+/// install (see the next test), so this test fails if the default is a time.
+#[test]
+fn the_default_asks_nothing_and_writes_nothing() {
+    let h = Harness::with_default_config("updatedefault");
+    h.write_config(
+        "[peers]\nenabled = false\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [update]\nurl = \"file:///qex-no-such-file-4c1d\"\n",
+    );
+
+    let id = h.submit(&["submit", "--", "true"]);
+    assert_eq!(h.qex(&["wait", &id]).status.code(), Some(0));
+
+    // Longer than the coordinator's first look, as in the test above.
+    let record = h.root.join("state/qex/update.json");
+    let deadline = Instant::now() + Duration::from_secs(6);
+    while Instant::now() < deadline {
+        assert!(
+            !record.exists(),
+            "the default must write no update record: {}",
+            record.display()
+        );
+        std::thread::sleep(Duration::from_millis(250));
+    }
     assert!(h.qex(&["info", "--no-start"]).status.success());
 }
 

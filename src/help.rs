@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: config template shows check = "never" (issue #4).
 //! This module holds the text for the `qex help <topic>` command.
 //!
 //! An agent reads this text to learn the tool. Each topic is thus short and
@@ -841,16 +842,20 @@ that qex uses now.
     timeout = \"30s\"       # the time limit for that command
 
     [update]
-    check   = \"7d\"        # how often qex looks for a newer release, or `never`
+    check   = \"never\"     # how often qex looks for a newer release, e.g. `7d`
     url     = \"https://api.github.com/repos/stephenc/qex/releases/latest\"
     timeout = \"5s\"        # how long qex waits for that service
 
 A newer qex
 -----------
 
-qex looks for a newer release of itself, and it says one line when it finds
+qex can look for a newer release of itself, and it says one line when it finds
 one. It never installs anything: the person who installed qex chose how, and a
 package manager can own that file.
+
+This build does not look by default: `check` is `never`, because the default
+address is upstream qex's releases. Set `check` to a time such as `7d` to turn
+the automatic check on.
 
 `[update] check = \"never\"` stops the AUTOMATIC check completely. qex then opens
 no connection of its own, writes no file for it, and says nothing about a
@@ -865,7 +870,7 @@ command: the coordinator asks on its own time, in its own thread, and every
 command reads the answer from a file. One call also serves every agent on the
 machine.
 
-THE FIRST WEEK IS QUIET. A fresh install writes the time and asks nothing,
+WHEN THE CHECK IS ON, THE FIRST INTERVAL IS QUIET. A fresh install writes the time and asks nothing,
 because a person who installed qex a moment ago holds the newest release
 already. The first question comes after the first interval.
 
