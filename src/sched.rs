@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: the peer test holds the env lock (issue #5).
 //! This module decides when each job starts.
 //!
 //! The rule is simple: a job starts when the machine has capacity for its
@@ -3310,6 +3311,7 @@ mod tests {
     /// queue starts the jobs behind this one.
     #[test]
     fn a_job_that_another_user_holds_back_says_so_and_never_keeps_capacity() {
+        let _env = crate::testutil::peers_env();
         let (cfg, dir, mut live) = cfg_with_peer("4", "256MB", 3, 0);
         let machine = Machine::read(&cfg);
         assert_eq!(machine.peers.count, 1, "the test peer must count");
