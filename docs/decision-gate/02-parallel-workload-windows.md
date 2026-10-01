@@ -119,7 +119,7 @@ Raw logs are in [logs/parallel-workload-windows-shared-temp-control/](logs/paral
 **What the failures are:**
 - Every failure that prints a path points under the shared `C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\…`. The 11 code-267 failures print no path; they come from starting `rg` in a test folder (`tests\util.rs:335`).
 - By Windows error code: 102 × **32** (file in use by another process), 34 × **5** (access denied), 11 × **267** (directory name invalid), 3 × **145** (directory not empty), 3 × **3** and 1 × **2** (path or file not found). All of these are what you'd expect when three test runs create and delete the same directories at the same time.
-- The rest are `rg` itself exiting with status 2 (error, 55×) or 1 (no match, 7×), and 5 × "printed outputs differ", all inside the same shared test folders.
+- The rest are `rg` itself exiting with status 2 (error, 56×; one of them, `r1159_exit_status`, prints it as "found: 2") or 1 (no match, 7×), and 5 × "printed outputs differ", all inside the same shared test folders.
 - The per-job TEMP logs have **0** error-32 lines, counting both the `os error 32` and the `Os { code: 32 … }` spellings.
 
 **What this means:**
