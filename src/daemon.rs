@@ -422,11 +422,7 @@ pub struct ConfigLook {
 }
 
 impl ConfigLook {
-    pub fn now(fingerprint: u64) -> Self {
-        Self::at(fingerprint, LookClocks::now())
-    }
-
-    fn at(fingerprint: u64, clocks: LookClocks) -> Self {
+    pub fn at(fingerprint: u64, clocks: LookClocks) -> Self {
         Self {
             fingerprint,
             mono: clocks.mono,
@@ -435,27 +431,7 @@ impl ConfigLook {
     }
 }
 
-/// Both clocks, read together at one look.
-///
-/// TAKE THEM RIGHT AFTER THE READ of the file, before anything waits: the
-/// read runs outside the mutex, and a time taken after the lock would add
-/// that wait to the gap between two looks and put a clock step in the wrong
-/// window. Taken after the read, the gap can only come out shorter than the
-/// true bound, and the clocks agree with the age that the read computed.
-#[derive(Clone, Copy, Debug)]
-pub struct LookClocks {
-    pub mono: Instant,
-    pub wall: std::time::SystemTime,
-}
-
-impl LookClocks {
-    pub fn now() -> Self {
-        Self {
-            mono: Instant::now(),
-            wall: std::time::SystemTime::now(),
-        }
-    }
-}
+pub use crate::config::LookClocks;
 
 /// The largest step of the wall clock that `bound_the_age` takes off an age
 /// when it cannot tell whether the step came before or after the write.
@@ -1128,7 +1104,7 @@ pub struct Coordinator {
 }
 
 impl Coordinator {
-    pub(crate) fn new(cfg: Config, config_seen: u64) -> Self {
+    pub(crate) fn new(cfg: Config, config_seen: u64, clocks: LookClocks) -> Self {
         Self {
             state: Mutex::new(State {
                 cfg,
@@ -1150,7 +1126,7 @@ impl Coordinator {
                 config_settling: None,
                 // The read at start is the first look. Start reads the file
                 // once, as before, and waits for nothing.
-                config_last_look: Some(ConfigLook::now(config_seen)),
+                config_last_look: Some(ConfigLook::at(config_seen, clocks)),
                 config_bounded_age: None,
                 config_error: None,
                 events: crate::events::EventLog::new(),
@@ -1180,7 +1156,9 @@ fn start_config(read: ConfigFile) -> Result<(Config, u64)> {
 /// Runs the coordinator. This function gives control back when the coordinator
 /// stops.
 pub fn run() -> Result<()> {
-    let (cfg, config_seen) = start_config(crate::config::read_config_file())?;
+    // The clocks of THIS read: the first look (issue #17).
+    let (read, clocks) = crate::config::read_config_file_with_clocks();
+    let (cfg, config_seen) = start_config(read)?;
     cfg.validate()?;
 
     let runtime = paths::runtime_dir()?;
@@ -1306,7 +1284,7 @@ pub fn run() -> Result<()> {
     // Delete the old lines of the job history. See `[history] keep`.
     crate::history::prune(&cfg);
 
-    let coord = Arc::new(Coordinator::new(cfg, config_seen));
+    let coord = Arc::new(Coordinator::new(cfg, config_seen, clocks));
     recover(&coord)?;
 
     log(&format!(
@@ -3244,7 +3222,7 @@ mod tests {
     /// this test makes the state instead of racing for it.
     #[test]
     fn a_cancel_leaves_no_error_text_from_an_earlier_attempt() {
-        let coord = Arc::new(Coordinator::new(Config::default(), 0));
+        let coord = Arc::new(Coordinator::new(Config::default(), 0, LookClocks::now()));
         let id = uuid::Uuid::new_v4();
 
         {
@@ -3614,7 +3592,7 @@ mod tests {
     /// code refused it on that age. The new code must refuse it too, and
     /// never take a file that the wall age alone would have refused.
     #[test]
-    fn an_unknown_age_never_takes_a_file_that_its_wall_age_refuses() {
+    fn a_young_wall_age_is_never_overruled() {
         let mut state = after_a_stall_with_a_step(Duration::from_millis(100));
         let taken = state.config_seen;
 
@@ -3710,6 +3688,22 @@ mem = \"1GB\"
             state.config_seen, taken,
             "the step that the read's clocks show must count"
         );
+    }
+
+    /// Startup records the clocks of ITS read as the first look, not a time
+    /// taken later, after the lock, the socket and the pruning.
+    #[test]
+    fn the_first_look_has_the_clocks_of_the_start_read() {
+        let read_at = LookClocks {
+            mono: Instant::now() - Duration::from_secs(3),
+            wall: std::time::SystemTime::now() - Duration::from_secs(3),
+        };
+        let coord = Coordinator::new(Config::default(), 7, read_at);
+        let state = coord.state.lock().unwrap();
+        let first = state.config_last_look.expect("startup is the first look");
+        assert_eq!(first.fingerprint, 7);
+        assert_eq!(first.mono, read_at.mono);
+        assert_eq!(first.wall, read_at.wall);
     }
 
     /// A BACKWARD step counts as no step. The wall time since the last look

@@ -999,9 +999,9 @@ pub fn run(coord: Arc<Coordinator>) {
         // the median gap was 500.7ms with nothing to do, and 17.0ms with a loop
         // of `qex submit` running, with a minimum of 1.2ms. `reload_config`
         // therefore measures TIME, and it must never count turns.
-        let config = crate::config::read_config_file();
-        // The clocks of THIS read, before the wait for the mutex (issue #17).
-        let clocks = crate::daemon::LookClocks::now();
+        // With the clocks of the moment the read computed the age, before
+        // the wait for the mutex (issue #17).
+        let (config, clocks) = crate::config::read_config_file_with_clocks();
         crate::daemon::reload_config_at(&mut coord.state.lock().unwrap(), config, clocks);
 
         // Read the status file of each job that operates. The supervisors write

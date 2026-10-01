@@ -1,7 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: unit test for the automatic CPU budget.
 // Modified by the local-resource-coordinator fork, 2026-10-01: default [update] check = "never" (issue #4).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a config file replaced during the read is young (issue #17).
-// Modified by the local-resource-coordinator fork, 2026-10-01: tests that a clock step or an unknown age never settles a config file (issue #17).
+// Modified by the local-resource-coordinator fork, 2026-10-01: a read returns the clocks its age was measured against; tests that a clock step or an unknown age never settles a config file (issue #17).
 //! This module reads the config file `~/.config/qex.toml`.
 //!
 //! Each field has a default value. The config file is thus optional. If the
@@ -10,7 +10,7 @@
 use crate::{paths, sys, units};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 /// Selects the quantity of the environment that a job receives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1238,15 +1238,63 @@ pub enum ConfigFile {
 /// unbounded read, which is the right trade in a change whose whole subject is
 /// unbounded reads.
 pub fn read_config_file() -> ConfigFile {
+    read_config_file_with_clocks().0
+}
+
+/// Both clocks, read together at the moment a read of the config file
+/// computed its age (issue #17).
+///
+/// The coordinator bounds that age by its own monotonic clock from look to
+/// look, so the clocks of a look must be the clocks that the age was
+/// measured against: the same `SystemTime`, and an `Instant` taken with it.
+/// Anything later (the check of the path after the read, a wait for the
+/// mutex) would widen the gap between two looks and could put a step of the
+/// wall clock in the wrong window.
+#[derive(Clone, Copy, Debug)]
+pub struct LookClocks {
+    pub mono: Instant,
+    pub wall: SystemTime,
+}
+
+impl LookClocks {
+    pub fn now() -> Self {
+        Self {
+            mono: Instant::now(),
+            wall: SystemTime::now(),
+        }
+    }
+}
+
+/// `read_config_file`, with the clocks of the moment the age was computed.
+/// A read that gave no age gives the clocks of its end.
+pub fn read_config_file_with_clocks() -> (ConfigFile, LookClocks) {
     let Ok(path) = paths::config_file() else {
-        return ConfigFile::Missing;
+        return (ConfigFile::Missing, LookClocks::now());
     };
-    read_config_at(&path, || {})
+    read_config_clocked(&path, || {})
 }
 
 /// Reads the file at `path`. `after_read` runs between the read and the age,
 /// so a test can replace the file at that moment; it does nothing otherwise.
+#[cfg(test)]
 fn read_config_at(path: &std::path::Path, after_read: impl FnOnce()) -> ConfigFile {
+    read_config_clocked(path, after_read).0
+}
+
+fn read_config_clocked(
+    path: &std::path::Path,
+    after_read: impl FnOnce(),
+) -> (ConfigFile, LookClocks) {
+    let mut clocks = None;
+    let read = read_config_inner(path, after_read, &mut clocks);
+    (read, clocks.unwrap_or_else(LookClocks::now))
+}
+
+fn read_config_inner(
+    path: &std::path::Path,
+    after_read: impl FnOnce(),
+    clocks: &mut Option<LookClocks>,
+) -> ConfigFile {
     match std::fs::metadata(path) {
         Ok(m) if !m.is_file() => return ConfigFile::NotRegular,
         Ok(_) => {}
@@ -1280,10 +1328,12 @@ fn read_config_at(path: &std::path::Path, after_read: impl FnOnce()) -> ConfigFi
     let read = std::io::Read::read_to_end(&mut handle, &mut bytes);
     after_read();
     let read_meta = handle.metadata().ok();
+    let at = LookClocks::now();
+    *clocks = Some(at);
     let age = read_meta
         .as_ref()
         .and_then(|m| m.modified().ok())
-        .and_then(|t| SystemTime::now().duration_since(t).ok());
+        .and_then(|t| at.wall.duration_since(t).ok());
 
     // THE FILE AT THE PATH MUST STILL BE THE FILE THAT WAS READ.
     //
@@ -2615,6 +2665,29 @@ mod tests {
             age.is_some_and(|a| a >= Duration::from_secs(59)),
             "an untouched file keeps its age, got {age:?}"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The clocks of a read are the clocks that its age was measured
+    /// against: the age is exactly their wall time less the mtime. A time
+    /// taken later (after the check of the path) would not match.
+    #[test]
+    fn the_clocks_of_a_read_are_the_clocks_of_its_age() {
+        let dir = a_config_dir("clocks");
+        let path = dir.join("qex.toml");
+        an_old_file(
+            &path,
+            "[budget]
+cpu = \"2\"
+",
+        );
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        let (read, clocks) = read_config_clocked(&path, || {});
+        let ConfigFile::Text(_, Some(age)) = read else {
+            panic!("the file must read as text with an age");
+        };
+        assert_eq!(age, clocks.wall.duration_since(mtime).unwrap());
         std::fs::remove_dir_all(&dir).ok();
     }
 
