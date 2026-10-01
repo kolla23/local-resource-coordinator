@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests of the line and record turn the check on, since the default is now never (issue #4).
 //! Looks for a newer release of qex, and says so one time.
 //!
 //! # Who asks
@@ -902,6 +903,15 @@ mod tests {
         assert!(note("0.23.0", &empty).is_none());
     }
 
+    /// A config whose automatic check is on. The fork's default is `never`,
+    /// which says nothing whatever the record holds, so a test of the line
+    /// and the record must turn the check on.
+    fn checking() -> Config {
+        let mut cfg = Config::default();
+        cfg.update.check = "7d".into();
+        cfg
+    }
+
     fn a_directory(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("qx-upd-{name}-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
@@ -916,7 +926,7 @@ mod tests {
     #[test]
     fn a_command_gives_the_line_one_time_and_remembers_it() {
         let dir = a_directory("cmd");
-        let cfg = Config::default();
+        let cfg = checking();
         write_record_in(&dir, &record_of("0.24.0", None)).unwrap();
 
         let first = note_for_a_command_in(&dir, "0.23.0", &cfg);
@@ -951,7 +961,7 @@ mod tests {
     #[test]
     fn a_command_with_nothing_to_say_writes_no_file() {
         let dir = a_directory("quiet");
-        let cfg = Config::default();
+        let cfg = checking();
 
         assert!(note_for_a_command_in(&dir, "0.23.0", &cfg).is_none());
         assert!(
@@ -986,7 +996,7 @@ mod tests {
         );
 
         // A command then names the new one.
-        let line = note_for_a_command_in(&dir, "0.23.0", &Config::default());
+        let line = note_for_a_command_in(&dir, "0.23.0", &checking());
         assert!(line.unwrap().contains("0.25.0"));
         let record = read_record_in(&dir);
         assert_eq!(record.last_checked, 99, "a command must keep the time");
@@ -1024,7 +1034,7 @@ mod tests {
 
         // A command says nothing, and it does not fail the command that it
         // runs in.
-        assert!(note_for_a_command_in(&dir, "0.23.0", &Config::default()).is_none());
+        assert!(note_for_a_command_in(&dir, "0.23.0", &checking()).is_none());
 
         std::fs::remove_dir_all(&dir).ok();
     }
