@@ -435,6 +435,10 @@ pub use crate::config::LookClocks;
 
 /// The forward step of the wall clock between two looks: the wall time that
 /// passed beyond the monotonic time. A backward step counts as none.
+///
+/// It sees only the two ends of the window, so steps INSIDE one window
+/// net out: a step back and a step forward between two looks look like no
+/// step at all. See the limit in `bound_the_age`.
 fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
     let mono = to.mono.saturating_duration_since(from.mono);
     let wall = to.wall.duration_since(from.wall).unwrap_or(Duration::ZERO);
@@ -447,8 +451,9 @@ fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
 /// The age of a file is wall-clock time minus its mtime, and a wall clock
 /// STEPS: WSL2 measured forward steps of 450ms and 407ms within three
 /// minutes of a busy build, which made a half file that had been at the path
-/// 302ms read 732ms old. So each look takes the smaller of two LOWER bounds
-/// on the true age:
+/// 302ms read 732ms old. So each look takes the smaller of two bounds that
+/// are LOWER bounds on the true age as long as the wall clock moves one way
+/// within each window between two looks (see the limit below):
 ///
 /// - the wall age that this read gives, less the forward step of the wall
 ///   clock since the last look. If the file was written in that window, no
@@ -467,6 +472,15 @@ fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
 /// not), lowers the bound of ONE look; the bound then grows again on the
 /// monotonic clock, so a change waits about `CONFIG_SETTLE`, never the
 /// length of the step, and a clock that steps at every look cannot hold it.
+///
+/// THE LIMIT. `forward_step` sees only the two ends of a window, so steps in
+/// opposite directions inside ONE window cancel: the wall clock steps back,
+/// a writer puts a file down, the clock steps forward again before the next
+/// look. The wall term is then not a lower bound, and if the carried bound
+/// has already passed the settle time (the same bytes put down again and
+/// again, the pattern of issue #64), the file is judged by its raw wall age:
+/// exactly as the code before this change judged it. Two clock samples per
+/// look cannot see this, and it needs two opposite steps within one look.
 ///
 /// Every bound is a `min` or a subtraction, so a file only looks younger,
 /// never older: it can never be taken where the wall age alone refused it,
