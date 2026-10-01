@@ -14,9 +14,12 @@ ARMS=${3:-P S}
 TEMP_ROOT=${4:-}
 HERE=$(cd "$(dirname "$0")" && pwd)
 RUNNER="$HERE/target/release/parallel-workload.exe"
-mkdir -p "$OUT"
-OUT=$(cd "$OUT" && pwd -W)
-if [ -n "$TEMP_ROOT" ]; then mkdir -p "$TEMP_ROOT" && TEMP_ROOT=$(cd "$TEMP_ROOT" && pwd -W); fi
+mkdir -p "$OUT" || exit 1
+# CDPATH= keeps cd from printing a matched directory into the captured value.
+OUT=$(CDPATH= cd -- "$OUT" && pwd -W) || exit 1
+if [ -n "$TEMP_ROOT" ]; then
+  mkdir -p "$TEMP_ROOT" && TEMP_ROOT=$(CDPATH= cd -- "$TEMP_ROOT" && pwd -W) || exit 1
+fi
 # Whichever cargo this shell finds, as a Windows path for cmd.exe.
 CARGO=$(command -v cargo) || { echo "cargo not found on PATH" >&2; exit 1; }
 CARGO_BIN=$(cygpath -w "$(dirname "$CARGO")")

@@ -37,21 +37,22 @@ unsafe impl Sync for Job {}
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
-    let get = |n: &str| {
-        args.iter()
-            .position(|a| a == n)
-            .and_then(|i| args.get(i + 1).cloned())
-            .unwrap_or_else(|| panic!("missing {n}"))
+    // The value after flag `n`; a following flag is not a value.
+    let value = |n: &str| {
+        args.iter().position(|a| a == n).map(|i| {
+            args.get(i + 1)
+                .filter(|v| !v.starts_with("--"))
+                .unwrap_or_else(|| panic!("missing {n} value"))
+                .clone()
+        })
     };
+    let get = |n: &str| value(n).unwrap_or_else(|| panic!("missing {n}"));
     let mode = get("--mode");
     let out = PathBuf::from(get("--out"));
     let label = get("--label");
     let cmd = get("--cmd");
-    let temp_root = args
-        .iter()
-        .position(|a| a == "--temp-root")
-        // Absolute: each workload resolves TEMP from its own worktree.
-        .map(|i| std::path::absolute(args.get(i + 1).expect("missing --temp-root value")).unwrap());
+    // Absolute: each workload resolves TEMP from its own worktree.
+    let temp_root = value("--temp-root").map(|r| std::path::absolute(r).unwrap());
     let dirs: Vec<PathBuf> = {
         let mut skip = false;
         let mut v = Vec::new();
