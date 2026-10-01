@@ -3499,7 +3499,7 @@ fn a_job_file_describes_a_job() {
          tags = [\"test\"]\n\
          [resources]\n\
          cpu = 2\n\
-         mem = \"256MB\"\n\
+         mem = \"192MB\"\n\
          [env]\n\
          FILE_VAR = \"present\"\n",
     )
@@ -3511,7 +3511,7 @@ fn a_job_file_describes_a_job() {
     let status = h.status_json(&id);
     assert_eq!(status["name"], "from-file");
     assert_eq!(status["cpu"], 2);
-    assert_eq!(status["mem"], 256 * 1024 * 1024);
+    assert_eq!(status["mem"], 192 * 1024 * 1024);
     assert_eq!(status["tags"][0], "test");
     assert!(h.ok(&["logs", &id]).contains("from-the-file"));
 }
