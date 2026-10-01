@@ -3,7 +3,10 @@
 //! what the machine went through. Standalone; not part of qex.
 //!
 //!   parallel-workload --mode parallel|serial --out <dir> --label <name> \
-//!       --cmd "<command line>" <workdir>...
+//!       --cmd "<command line>" [--temp-root <dir>] <workdir>...
+//!
+//! With `--temp-root`, workload i gets its own fresh `TEMP`/`TMP` at
+//! `<dir>/<label>-w<i>`, so test harnesses can't collide in a shared `%TEMP%`.
 //!
 //! Each workload runs in its own Job Object, so its whole process tree (cargo,
 //! rustc, link.exe, test binaries) is measured: the kernel's peak job commit.
@@ -44,6 +47,10 @@ fn main() {
     let out = PathBuf::from(get("--out"));
     let label = get("--label");
     let cmd = get("--cmd");
+    let temp_root = args
+        .iter()
+        .position(|a| a == "--temp-root")
+        .map(|i| PathBuf::from(&args[i + 1]));
     let dirs: Vec<PathBuf> = {
         let mut skip = false;
         let mut v = Vec::new();
@@ -63,7 +70,7 @@ fn main() {
         "--mode parallel|serial"
     );
     fs::create_dir_all(&out).unwrap();
-    run(&mode, &out, &label, &cmd, &dirs);
+    run(&mode, &out, &label, &cmd, temp_root.as_deref(), &dirs);
 }
 
 fn perf() -> PERFORMANCE_INFORMATION {
@@ -187,7 +194,7 @@ fn poll(r: &mut Run) {
     }
 }
 
-fn run(mode: &str, out: &Path, label: &str, cmd: &str, dirs: &[PathBuf]) {
+fn run(mode: &str, out: &Path, label: &str, cmd: &str, temp_root: Option<&Path>, dirs: &[PathBuf]) {
     let stop = Arc::new(AtomicBool::new(false));
 
     // Paging counters, once a second, for the whole run.
@@ -270,7 +277,17 @@ fn run(mode: &str, out: &Path, label: &str, cmd: &str, dirs: &[PathBuf]) {
             }
             let i = runs.len();
             let log = out.join(format!("{label}-w{i}.log"));
-            runs.push(start(new_job(), d, cmd, &log));
+            let cmd = match temp_root {
+                Some(root) => {
+                    let tmp = root.join(format!("{label}-w{i}"));
+                    fs::remove_dir_all(&tmp).ok();
+                    fs::create_dir_all(&tmp).unwrap();
+                    let t = tmp.display();
+                    format!("set \"TEMP={t}\" && set \"TMP={t}\" && {cmd}")
+                }
+                None => cmd.to_string(),
+            };
+            runs.push(start(new_job(), d, &cmd, &log));
             pending.pop();
         }
         for r in &mut runs {
