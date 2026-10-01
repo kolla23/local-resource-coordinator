@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: test State gains the config-look fields (issue #17).
 //! This module holds the event stream of the coordinator.
 //!
 //! # The fault that this module removes
@@ -828,6 +829,8 @@ mod tests {
             dedupe: BTreeMap::new(),
             config_seen: 0,
             config_settling: None,
+            config_last_look: None,
+            config_changed_after: None,
             config_error: None,
             events: EventLog::with_capacity(RETAINED),
             paused: crate::pause::Paused::default(),

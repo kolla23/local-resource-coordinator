@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: the peer test holds the env lock (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-01: test State gains the config-look fields (issue #17).
 //! This module decides when each job starts.
 //!
 //! The rule is simple: a job starts when the machine has capacity for its
@@ -2501,6 +2502,8 @@ mod tests {
             started_at: sys::now_secs(),
             config_seen: 0,
             config_settling: None,
+            config_last_look: None,
+            config_changed_after: None,
             config_error: None,
             dedupe: Default::default(),
             events: crate::events::EventLog::new(),
