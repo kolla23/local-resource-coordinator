@@ -3706,6 +3706,40 @@ mem = \"1GB\"
         assert_eq!(first.wall, read_at.wall);
     }
 
+    /// THE SAME BYTES ARE NOT THE SAME FILE. A writer can put the same half
+    /// file down again between two looks (half, whole, half), so content
+    /// that matches the last look may be a new file. With a step above
+    /// `CLOCK_STEP_TOLERANCE` in that gap, the wall age is inflated, and the
+    /// carried bound is no bound for a file that may be new. Traced on WSL2
+    /// (issue #17): looks 500ms apart, a half file seen young at 283ms, the
+    /// next look the same bytes with raw age 603ms after a 425ms step, and
+    /// the coordinator took it; the file was about 180ms old.
+    #[test]
+    fn the_same_bytes_after_a_large_step_are_not_carried() {
+        let whole = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\nmem = \"1GB\"\n".to_vec(),
+            Some(CONFIG_SETTLE * 4),
+        );
+        let mut state = State::for_a_test();
+        reload_config(&mut state, clone_of(&whole));
+        let taken = state.config_seen;
+
+        // The half file is first seen 500ms later, 283ms old.
+        time_passes(&mut state, CONFIG_SETTLE);
+        reload_config(&mut state, half_file(Duration::from_millis(283)));
+        assert_eq!(state.config_seen, taken);
+
+        // 500ms later: the same bytes (a new half file), and the wall clock
+        // stepped 425ms forward in the gap, so the raw age reads 603ms.
+        time_passes(&mut state, CONFIG_SETTLE);
+        state.config_last_look.as_mut().unwrap().wall -= Duration::from_millis(425);
+        reload_config(&mut state, half_file(Duration::from_millis(603)));
+        assert_eq!(
+            state.config_seen, taken,
+            "the same bytes after a large step may be a new file and must not be carried"
+        );
+    }
+
     /// A BACKWARD step counts as no step. The wall time since the last look
     /// is then less than the monotonic time, and a bound that read that as a
     /// large step would treat a settled file as one it cannot place, and hold
