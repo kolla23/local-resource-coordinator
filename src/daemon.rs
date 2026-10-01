@@ -3501,6 +3501,45 @@ mod tests {
         );
     }
 
+    /// A step AFTER the content was first seen came after the file was
+    /// written, so it comes off the age exactly. It matters after a stall,
+    /// when the monotonic bound alone is large.
+    #[test]
+    fn a_clock_step_after_the_first_look_comes_off_the_age() {
+        let whole = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\nmem = \"1GB\"\n".to_vec(),
+            Some(CONFIG_SETTLE * 4),
+        );
+        let mut state = State::for_a_test();
+        reload_config(&mut state, clone_of(&whole));
+        let taken = state.config_seen;
+
+        // A stall of 2s with no step, then the half file is first seen.
+        time_passes(&mut state, Duration::from_secs(2));
+        let half = |age| ConfigFile::Text(b"[budget]\ncpu = \"2\"\n".to_vec(), Some(age));
+        reload_config(&mut state, half(Duration::from_millis(100)));
+        assert_eq!(state.config_seen, taken);
+
+        // 100ms pass, and the wall clock steps 600ms forward: the file is
+        // really 200ms old and reads 800ms.
+        time_passes(&mut state, Duration::from_millis(100));
+        for look in [
+            state.config_changed_after.as_mut(),
+            state.config_first_seen.as_mut(),
+            state.config_last_look.as_mut(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            look.wall -= Duration::from_millis(600);
+        }
+        reload_config(&mut state, half(Duration::from_millis(800)));
+        assert_eq!(
+            state.config_seen, taken,
+            "a step after the first look must come off the age"
+        );
+    }
+
     /// A BACKWARD step must never make a file look older. The wall time
     /// since the last look is then less than the monotonic time; the
     /// difference must count as no step, never as a negative one.
