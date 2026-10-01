@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: unit test for the automatic CPU budget.
 //! This module reads the config file `~/.config/qex.toml`.
 //!
 //! Each field has a default value. The config file is thus optional. If the
@@ -2491,6 +2492,16 @@ mod tests {
         assert!(c.budget_cpu().unwrap() >= 1);
         assert_eq!(c.default_cpu().unwrap(), 1);
         assert_eq!(c.default_timeout().unwrap(), None);
+    }
+
+    /// With no `[budget]` section, the CPU budget is 75% of this machine's
+    /// cores, and never zero. The e2e harness pins its own budget, so this
+    /// test is the one that holds the automatic value.
+    #[test]
+    fn an_empty_config_gives_three_quarters_of_the_cores() {
+        let c: Config = toml::from_str("").unwrap();
+        let cores = sys::cpu_count();
+        assert_eq!(c.budget_cpu().unwrap(), (cores * 75 / 100).max(1));
     }
 
     /// With no `[defaults]` section, a job gets 1 core and an equal part of the
