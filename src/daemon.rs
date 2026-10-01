@@ -433,8 +433,19 @@ impl ConfigLook {
     }
 }
 
-/// A step of the wall clock below this is drift and measurement noise, not a
-/// step.
+/// The largest step of the wall clock that `bound_the_age` takes off an age
+/// when it cannot tell whether the step came before or after the write.
+///
+/// WHY 50ms. Taking a step off the age assumes it came after the write, and
+/// if it came before, the file waits that much longer than it had to. This
+/// value is the most extra wait that assumption may cost. It is a tenth of
+/// `CONFIG_SETTLE`, and above the drift that the wall and monotonic clocks
+/// show between two looks with no step at all: NTP slews a clock by at most
+/// 500ppm, which is 1ms over a 2s stall and 30ms over a full minute. The
+/// steps that broke the guard were 407ms and 450ms (WSL2). A larger step
+/// is not taken off: the file must ALSO pass the monotonic test (the same
+/// content for `CONFIG_SETTLE`), so its wait stays near the settle time
+/// whatever the size of the step.
 const CLOCK_STEP_TOLERANCE: Duration = Duration::from_millis(50);
 
 /// The forward step of the wall clock between two looks: the wall time that
@@ -458,14 +469,18 @@ fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
 /// 2. A step between `first` and now came after the file was written, so it
 ///    is taken off the age exactly.
 /// 3. A step between `before` and `first` may have come before the write or
-///    after it, so the age is UNKNOWN, and the monotonic test in
-///    `reload_config` decides: the same content for `CONFIG_SETTLE`. That
-///    keeps the wait near the settle time whatever the size of the step: a
-///    clock correction of minutes, or a suspend (the monotonic clock of
-///    Linux stops in a suspend and the wall clock does not).
+///    after it. Up to `CLOCK_STEP_TOLERANCE` it is taken off the age. A
+///    larger one is not, and the age is then ALSO capped by the monotonic
+///    time since `first`: the file must pass both its wall age, as the code
+///    before this change asked, and the same content at every look for
+///    `CONFIG_SETTLE`. It can thus never be taken where the wall age alone
+///    refused it, which keeps the known limit of issue #64 no worse, and its
+///    wait stays near the settle time whatever the size of the step: a clock
+///    correction of minutes, or a suspend (the monotonic clock of Linux
+///    stops in a suspend and the wall clock does not).
 ///
-/// Every bound only makes a file younger or unknown, never older. An age
-/// that cannot be computed stays unknown.
+/// Every bound is a `min` or a subtraction, so it only makes a file younger,
+/// never older. An age that cannot be computed stays unknown.
 fn bound_the_age(state: &mut State, fingerprint: u64, read: ConfigFile) -> ConfigFile {
     let look = ConfigLook::now(fingerprint);
     match state.config_last_look {
@@ -485,13 +500,15 @@ fn bound_the_age(state: &mut State, fingerprint: u64, read: ConfigFile) -> Confi
         return ConfigFile::Text(bytes, Some(age));
     };
     let first = state.config_first_seen.unwrap_or(look);
-    if forward_step(&before, &first) > CLOCK_STEP_TOLERANCE {
-        return ConfigFile::Text(bytes, None);
-    }
-    let since_before = look.mono.saturating_duration_since(before.mono);
+    let unplaced = forward_step(&before, &first);
     let age = age
         .saturating_sub(forward_step(&first, &look))
-        .min(since_before);
+        .min(look.mono.saturating_duration_since(before.mono));
+    let age = if unplaced > CLOCK_STEP_TOLERANCE {
+        age.min(look.mono.saturating_duration_since(first.mono))
+    } else {
+        age.saturating_sub(unplaced)
+    };
     ConfigFile::Text(bytes, Some(age))
 }
 
@@ -3591,6 +3608,14 @@ mod tests {
             state.config_seen,
             config_fingerprint(&half_file(Duration::ZERO)),
             "a step of {below:?} keeps the single look"
+        );
+        // ...and that step comes off the age: 530ms less 49ms is young.
+        let mut state = after_a_stall_with_a_step(below);
+        let taken = state.config_seen;
+        reload_config(&mut state, half_file(Duration::from_millis(530)));
+        assert_eq!(
+            state.config_seen, taken,
+            "a step of {below:?} comes off the age"
         );
 
         let above = CLOCK_STEP_TOLERANCE + Duration::from_millis(1);
