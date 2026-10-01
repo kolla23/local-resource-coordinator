@@ -653,7 +653,7 @@ command: the coordinator asks on its own time in its own thread, and every
 command reads the answer from a file in the state directory. One call also
 serves every agent on the machine.
 
-**The first week is quiet.** A fresh install writes the time and asks nothing,
+**When the check is on, the first interval is quiet.** A fresh install writes the time and asks nothing,
 because a person who installed qex a moment ago holds the newest release
 already. The first question comes after the first interval.
 
