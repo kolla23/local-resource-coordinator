@@ -1,4 +1,4 @@
-// Modified by the local-resource-coordinator fork, 2026-10-01: pin the CPU budget and default memory claim of with_default_config; match the long config-fault text, not the bare word "coordinator".
+// Modified by the local-resource-coordinator fork, 2026-10-01: pin the CPU budget and default memory claim of with_default_config; match the long config-fault text, not the bare word "coordinator"; wait for the peer reason after the small jobs end (issue #5).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -15054,6 +15054,17 @@ fn a_job_that_another_user_holds_back_does_not_park_the_jobs_behind_it() {
 
     // The job at the front still waits, and its reason gives the cause and a
     // remedy. It must never read as a queue position.
+    //
+    // Wait for the reason (issue #5). While the second small job runs, the two
+    // jobs that passed reach `max_bypass`, so the job at the front is held for
+    // the jobs of this queue, and that is correct. The next pass of the
+    // scheduler, after the small job ends, names the other user again. A read
+    // between the end of the job and that pass gets the earlier reason.
+    mine.until(
+        "the job at the front names the other user again",
+        Duration::from_secs(45),
+        || blocked_reason(&mine, &big).contains("another user holds capacity"),
+    );
     assert_eq!(mine.state_of(&big), "queued");
     let reason = blocked_reason(&mine, &big);
     assert!(
