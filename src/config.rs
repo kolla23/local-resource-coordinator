@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: unit test for the automatic CPU budget.
 // Modified by the local-resource-coordinator fork, 2026-10-01: default [update] check = "never" (issue #4).
+// Modified by the local-resource-coordinator fork, 2026-10-01: a config file replaced during the read is young (issue #17).
 //! This module reads the config file `~/.config/qex.toml`.
 //!
 //! Each field has a default value. The config file is thus optional. If the
@@ -1239,13 +1240,19 @@ pub fn read_config_file() -> ConfigFile {
     let Ok(path) = paths::config_file() else {
         return ConfigFile::Missing;
     };
-    match std::fs::metadata(&path) {
+    read_config_at(&path, || {})
+}
+
+/// Reads the file at `path`. `after_read` runs between the read and the age,
+/// so a test can replace the file at that moment; it does nothing otherwise.
+fn read_config_at(path: &std::path::Path, after_read: impl FnOnce()) -> ConfigFile {
+    match std::fs::metadata(path) {
         Ok(m) if !m.is_file() => return ConfigFile::NotRegular,
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return ConfigFile::Missing,
         Err(e) => return ConfigFile::Unreadable(e),
     }
-    let file = match std::fs::File::open(&path) {
+    let file = match std::fs::File::open(path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return ConfigFile::Missing,
         Err(e) => return ConfigFile::Unreadable(e),
@@ -1270,11 +1277,39 @@ pub fn read_config_file() -> ConfigFile {
     let mut handle = file;
     let mut bytes = Vec::new();
     let read = std::io::Read::read_to_end(&mut handle, &mut bytes);
-    let age = handle
-        .metadata()
-        .ok()
+    after_read();
+    let read_meta = handle.metadata().ok();
+    let age = read_meta
+        .as_ref()
         .and_then(|m| m.modified().ok())
         .and_then(|t| SystemTime::now().duration_since(t).ok());
+
+    // THE FILE AT THE PATH MUST STILL BE THE FILE THAT WAS READ.
+    //
+    // The handle names the file that the OPEN gave, and a writer that renames
+    // a new file into place does not change it: the handle still names the
+    // old file, whose age keeps growing. A coordinator held off the processor
+    // between the open and this line would then give a file that was at the
+    // path for less than the settle time an old age, and take it on one look
+    // (issue #17). So look at the path again: a different file, or a newer
+    // time, means a writer arrived during the read, and the bytes are young.
+    let replaced = {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(path), &read_meta) {
+            (Ok(now), Some(read)) => {
+                now.dev() != read.dev()
+                    || now.ino() != read.ino()
+                    || now.modified().ok() != read.modified().ok()
+            }
+            // The file went, or qex cannot say: do not call it settled.
+            _ => true,
+        }
+    };
+    let age = if replaced {
+        Some(Duration::ZERO)
+    } else {
+        age
+    };
 
     match read {
         Ok(_) => ConfigFile::Text(bytes, age),
@@ -2514,6 +2549,76 @@ mod tests {
         let c: Config = toml::from_str("").unwrap();
         let cores = sys::cpu_count();
         assert_eq!(c.budget_cpu().unwrap(), (cores * 75 / 100).max(1));
+    }
+
+    /// A directory under `/tmp` for one test. Not `temp_dir()`: other tests
+    /// set `TMPDIR` for the whole process.
+    fn a_config_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::path::PathBuf::from("/tmp").join(format!(
+            "qex-cfg-{tag}-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Writes `text` at `path` with a time a minute ago: a file that has been
+    /// there long past the settle time.
+    fn an_old_file(path: &std::path::Path, text: &str) {
+        std::fs::write(path, text).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(60))
+            .unwrap();
+    }
+
+    /// A writer that renames a new file into place DURING the read must not
+    /// lend the bytes that were read the age of the old file (issue #17). The
+    /// handle still names the old file, and its age is that of the old file,
+    /// so the coordinator would take those bytes on one look.
+    #[test]
+    fn a_file_replaced_during_the_read_is_young() {
+        let dir = a_config_dir("replaced");
+        let path = dir.join("qex.toml");
+        let half = "[budget]\ncpu = \"2\"\n";
+        an_old_file(&path, half);
+
+        let temp = dir.join(".qex.toml.new");
+        let read = read_config_at(&path, || {
+            std::fs::write(&temp, "[budget]\ncpu = \"2\"\nmem = \"1GB\"\n").unwrap();
+            std::fs::rename(&temp, &path).unwrap();
+        });
+
+        let ConfigFile::Text(bytes, age) = read else {
+            panic!("the file must read as text");
+        };
+        assert_eq!(bytes, half.as_bytes(), "the read gives the file it opened");
+        assert!(
+            age.is_some_and(|a| a < crate::daemon::CONFIG_SETTLE),
+            "a file replaced during the read must be young, got {age:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The check above must not make every file young: a file that nothing
+    /// touched keeps its own age, or no change would ever settle.
+    #[test]
+    fn a_file_that_nothing_touched_keeps_its_age() {
+        let dir = a_config_dir("untouched");
+        let path = dir.join("qex.toml");
+        an_old_file(&path, "[budget]\ncpu = \"2\"\n");
+
+        let ConfigFile::Text(_, age) = read_config_at(&path, || {}) else {
+            panic!("the file must read as text");
+        };
+        assert!(
+            age.is_some_and(|a| a >= Duration::from_secs(59)),
+            "an untouched file keeps its age, got {age:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// With no `[defaults]` section, a job gets 1 core and an equal part of the
