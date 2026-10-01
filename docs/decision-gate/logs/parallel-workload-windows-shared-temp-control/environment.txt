@@ -1,0 +1,4 @@
+before_run free_phys_MiB=5,353 commit_used_MiB=19,865 commit_limit_MiB=48,837
+page file: fixed 32 GiB (AutomaticManagedPagefile=False)
+shared %TEMP%\ripgrep-tests entries before run: 321
+shared %TEMP%\ripgrep-tests last modified: 2026-09-30T21:30:19

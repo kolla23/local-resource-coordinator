@@ -96,6 +96,38 @@ The median makespan was 92.7 s, against 97.5 s for P in the first run. Raw logs 
 - `%PATH%` now contains `C:\Program Files (x86)\Windows Kits\…`. The `)` closed the runner's `( … )` group, and cmd failed with "\Windows was unexpected at this time". This affected the unchanged gate 2 command too. The fix quotes the assignment: `set "PATH=…"`.
 - I passed a relative output directory, which the workloads, running with their worktree as the current directory, couldn't find. The output directory has to be an absolute path.
 
+## Control (2026-10-01): shared TEMP again, same day and setup
+**Question:** were the clean per-job TEMP reps above caused by the separate TEMP, or by a quieter machine? To find out, I repeated the same P arm with the **shared** `%TEMP%` (no `--temp-root`), in conditions at least as good as the per-job run.
+
+**Answer:** the separate TEMP caused it. With the shared TEMP, **3 of 3 reps had collisions**, in **7 of 9 worktrees**, with **222 failed tests** in total.
+
+- **Setup:** same worktrees, command, runner and script as the per-job run: `run-gate.sh … P`, with no temp root.
+- **Machine** ([environment.txt](logs/parallel-workload-windows-shared-temp-control/environment.txt)):
+  - The page file was changed from automatic to a **fixed 32 GiB**, so the commit limit was **48.8 GiB** and no longer drifted between runs.
+  - The owner's background apps were closed first (Chrome, Edge, OneDrive, Loom, Chime, Skype for Business, AweSun, the Claude desktop app; WSL shut down). VS Code stayed open.
+  - Just before the run: **5.4 GiB of RAM free** and 19.9 GiB committed, against 4.0 GiB free and 27.6 GiB committed before the per-job run. So this run had *more* headroom, which rules out memory pressure as the cause of the failures.
+
+| Run | Makespan | Peak memory per workload (kernel job commit) | System commit increase | Lowest available RAM | Worst timer delay | Failed tests per worktree |
+|---|---|---|---|---|---|---|
+| rep1-P | 105.2 s | 2012 / 1955 / 2010 MiB | +5835 MiB | 2555 MiB | 118 ms | **9 / 26 / 37** |
+| rep2-P | 96.7 s | 2034 / 2073 / 2030 MiB | +6104 MiB | 2683 MiB | 97 ms | 0 / **32 / 44** |
+| rep3-P | 110.8 s | 1995 / 2012 / 1914 MiB | +5541 MiB | 3052 MiB | 104 ms | **40** / 0 / **34** |
+
+Raw logs are in [logs/parallel-workload-windows-shared-temp-control/](logs/parallel-workload-windows-shared-temp-control/).
+
+**What the failures are:**
+- Every failing path is under the shared `C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\…`.
+- By Windows error code: 102 × **32** (file in use by another process), 34 × **5** (access denied), 11 × **267** (directory name invalid), 3 × **145** (directory not empty), 3 × **3** and 1 × **2** (path or file not found). All of these are what you'd expect when three test runs create and delete the same directories at the same time.
+- The rest are `rg` itself exiting with status 2 (error, 55×) or 1 (no match, 7×), and 5 × "printed outputs differ", all inside the same shared test folders.
+- The per-job TEMP logs have **0** error-32 lines, counting both the `os error 32` and the `Os { code: 32 … }` spellings.
+
+**What this means:**
+- Shared TEMP collided in 3 of 3 reps; separate TEMP was clean in 3 of 3. This is a same-day comparison with more free memory on the control side, so the result supports per-job TEMP/TMP as the main candidate for the ADR (see the follow-up above).
+- It's still one test harness (ripgrep's) and 3 repetitions per side.
+- The first run's "2 of 3 parallel reps collided" was probably an undercount of how often this happens, not a sign that collisions are rare.
+
+**An earlier attempt produced no data.** At 2026-10-01T03:07Z, all 3 reps were stopped by the safety guard within 3.4 s: commit came within 2 GiB of a limit that had shrunk to 35.3 GiB under the automatic page file. Those logs are kept in [aborted-commit-limit-35gib/](logs/parallel-workload-windows-shared-temp-control/aborted-commit-limit-35gib/). This is why the page file was fixed at 32 GiB.
+
 ## Not tested
 - **Through a coordinator.** Unchanged qex can't run natively here. A qex-in-WSL2 comparison is reference-only (see [DECISION_NATIVE_WINDOWS.md](../fork/DECISION_NATIVE_WINDOWS.md)) and wasn't run in this step.
 - More than 3 workloads; larger projects; release builds; other toolchains (Node, Python, .NET).

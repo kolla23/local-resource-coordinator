@@ -1,0 +1,17 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling memchr v2.8.3
+   Compiling regex-syntax v0.8.11
+   Compiling windows-link v0.2.1
+   Compiling log v0.4.33
+   Compiling serde_core v1.0.228
+   Compiling zmij v1.0.23
+   Compiling crossbeam-utils v0.8.22
+   Compiling cfg-if v1.0.4
+   Compiling crossbeam-epoch v0.9.20
+   Compiling serde v1.0.228
+   Compiling serde_json v1.0.150
+   Compiling crossbeam-deque v0.8.7
+   Compiling windows-sys v0.61.2
+   Compiling encoding_rs v0.8.35
+   Compiling memmap2 v0.9.11

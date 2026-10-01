@@ -1,0 +1,34 @@
+=== rep 1 arm P (parallel) 2026-10-01T03:07:20Z
+ABORT: commit 33422 MiB within 2 GiB of limit 35320 MiB
+makespan_s: 3.4
+aborted: commit 33422 MiB within 2 GiB of limit 35320 MiB
+w0: dir C:/Users/kolla/AppData/Local/lrc-bench/wt1 | exit 1 | wall_s 3.4 | job_peak_commit_mib 1878 | processes_total 29 | still_running_after_root_exit 0
+w1: dir C:/Users/kolla/AppData/Local/lrc-bench/wt2 | exit 1 | wall_s 3.3 | job_peak_commit_mib 1776 | processes_total 28 | still_running_after_root_exit 0
+w2: dir C:/Users/kolla/AppData/Local/lrc-bench/wt3 | exit 1 | wall_s 3.3 | job_peak_commit_mib 1732 | processes_total 28 | still_running_after_root_exit 0
+sum_of_job_peaks_mib: 5386
+system_max_commit_mib: 33422 (+5482 over idle)
+system_min_available_mib: 1999
+responsiveness_100ms_timer: samples 39 | worst_late_ms 61 | late_over_1s 0 | late_over_2s 0
+=== rep 2 arm P (parallel) 2026-10-01T03:07:49Z
+ABORT: commit 33530 MiB within 2 GiB of limit 35320 MiB
+makespan_s: 2.7
+aborted: commit 33530 MiB within 2 GiB of limit 35320 MiB
+w0: dir C:/Users/kolla/AppData/Local/lrc-bench/wt1 | exit 1 | wall_s 2.7 | job_peak_commit_mib 1832 | processes_total 30 | still_running_after_root_exit 0
+w1: dir C:/Users/kolla/AppData/Local/lrc-bench/wt2 | exit 1 | wall_s 2.7 | job_peak_commit_mib 1754 | processes_total 30 | still_running_after_root_exit 0
+w2: dir C:/Users/kolla/AppData/Local/lrc-bench/wt3 | exit 1 | wall_s 2.7 | job_peak_commit_mib 1825 | processes_total 30 | still_running_after_root_exit 0
+sum_of_job_peaks_mib: 5411
+system_max_commit_mib: 33530 (+5483 over idle)
+system_min_available_mib: 1416
+responsiveness_100ms_timer: samples 31 | worst_late_ms 99 | late_over_1s 0 | late_over_2s 0
+=== rep 3 arm P (parallel) 2026-10-01T03:08:17Z
+ABORT: commit 33498 MiB within 2 GiB of limit 35320 MiB
+makespan_s: 2.9
+aborted: commit 33498 MiB within 2 GiB of limit 35320 MiB
+w0: dir C:/Users/kolla/AppData/Local/lrc-bench/wt1 | exit 1 | wall_s 2.9 | job_peak_commit_mib 1571 | processes_total 29 | still_running_after_root_exit 0
+w1: dir C:/Users/kolla/AppData/Local/lrc-bench/wt2 | exit 1 | wall_s 2.9 | job_peak_commit_mib 1836 | processes_total 30 | still_running_after_root_exit 0
+w2: dir C:/Users/kolla/AppData/Local/lrc-bench/wt3 | exit 1 | wall_s 2.8 | job_peak_commit_mib 2041 | processes_total 30 | still_running_after_root_exit 0
+sum_of_job_peaks_mib: 5448
+system_max_commit_mib: 33498 (+5502 over idle)
+system_min_available_mib: 1589
+responsiveness_100ms_timer: samples 34 | worst_late_ms 85 | late_over_1s 0 | late_over_2s 0
+=== done 2026-10-01T03:08:23Z

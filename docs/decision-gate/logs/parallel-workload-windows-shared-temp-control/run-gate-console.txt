@@ -1,0 +1,31 @@
+=== rep 1 arm P (parallel) 2026-10-01T03:44:02Z
+makespan_s: 105.2
+aborted: no
+w0: dir C:/Users/kolla/AppData/Local/lrc-bench/wt1 | exit 101 | wall_s 105.1 | job_peak_commit_mib 2012 | processes_total 506 | still_running_after_root_exit 0
+w1: dir C:/Users/kolla/AppData/Local/lrc-bench/wt2 | exit 101 | wall_s 104.9 | job_peak_commit_mib 1955 | processes_total 511 | still_running_after_root_exit 0
+w2: dir C:/Users/kolla/AppData/Local/lrc-bench/wt3 | exit 101 | wall_s 104.9 | job_peak_commit_mib 2010 | processes_total 504 | still_running_after_root_exit 1
+sum_of_job_peaks_mib: 5976
+system_max_commit_mib: 21409 (+5835 over idle)
+system_min_available_mib: 2555
+responsiveness_100ms_timer: samples 958 | worst_late_ms 118 | late_over_1s 0 | late_over_2s 0
+=== rep 2 arm P (parallel) 2026-10-01T03:46:12Z
+makespan_s: 96.7
+aborted: no
+w0: dir C:/Users/kolla/AppData/Local/lrc-bench/wt1 | exit 0 | wall_s 92.6 | job_peak_commit_mib 2034 | processes_total 552 | still_running_after_root_exit 1
+w1: dir C:/Users/kolla/AppData/Local/lrc-bench/wt2 | exit 101 | wall_s 96.6 | job_peak_commit_mib 2073 | processes_total 514 | still_running_after_root_exit 0
+w2: dir C:/Users/kolla/AppData/Local/lrc-bench/wt3 | exit 101 | wall_s 96.6 | job_peak_commit_mib 2030 | processes_total 496 | still_running_after_root_exit 0
+sum_of_job_peaks_mib: 6137
+system_max_commit_mib: 21585 (+6104 over idle)
+system_min_available_mib: 2683
+responsiveness_100ms_timer: samples 863 | worst_late_ms 97 | late_over_1s 0 | late_over_2s 0
+=== rep 3 arm P (parallel) 2026-10-01T03:48:40Z
+makespan_s: 110.8
+aborted: no
+w0: dir C:/Users/kolla/AppData/Local/lrc-bench/wt1 | exit 101 | wall_s 110.8 | job_peak_commit_mib 1995 | processes_total 508 | still_running_after_root_exit 0
+w1: dir C:/Users/kolla/AppData/Local/lrc-bench/wt2 | exit 0 | wall_s 104.6 | job_peak_commit_mib 2012 | processes_total 552 | still_running_after_root_exit 0
+w2: dir C:/Users/kolla/AppData/Local/lrc-bench/wt3 | exit 101 | wall_s 110.7 | job_peak_commit_mib 1914 | processes_total 511 | still_running_after_root_exit 0
+sum_of_job_peaks_mib: 5921
+system_max_commit_mib: 20638 (+5541 over idle)
+system_min_available_mib: 3052
+responsiveness_100ms_timer: samples 1055 | worst_late_ms 104 | late_over_1s 0 | late_over_2s 0
+=== done 2026-10-01T03:50:33Z
