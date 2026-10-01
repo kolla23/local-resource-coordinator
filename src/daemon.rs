@@ -3747,6 +3747,35 @@ mem = \"1GB\"
         );
     }
 
+    /// A clock that steps at EVERY look must not hold a change for ever. A
+    /// VM whose wall clock gains 60ms in each 100ms window still applies a
+    /// change once it has been seen unchanged for about the settle time.
+    #[test]
+    fn a_clock_that_steps_at_every_look_still_settles_a_change() {
+        let whole = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\nmem = \"1GB\"\n".to_vec(),
+            Some(CONFIG_SETTLE * 4),
+        );
+        let mut state = State::for_a_test();
+        reload_config(&mut state, clone_of(&whole));
+
+        // A new file, written at the start, read every 100ms of monotonic
+        // time; the wall clock gains 60ms more in every window.
+        let mut wall_age = Duration::ZERO;
+        let file = |age| ConfigFile::Text(b"[budget]\ncpu = \"3\"\n".to_vec(), Some(age));
+        for _ in 0..12 {
+            time_passes(&mut state, Duration::from_millis(100));
+            state.config_last_look.as_mut().unwrap().wall -= Duration::from_millis(60);
+            wall_age += Duration::from_millis(160);
+            reload_config(&mut state, file(wall_age));
+        }
+        assert_eq!(
+            state.config_seen,
+            config_fingerprint(&file(Duration::ZERO)),
+            "1.2s of looks with a step in each must still settle the change"
+        );
+    }
+
     /// A BACKWARD step counts as no step. The wall time since the last look
     /// is then less than the monotonic time, and a bound that read that as a
     /// large step would treat a settled file as one it cannot place, and hold
