@@ -48,7 +48,8 @@ fn main() {
     };
     let get = |n: &str| value(n).unwrap_or_else(|| panic!("missing {n}"));
     let mode = get("--mode");
-    let out = PathBuf::from(get("--out"));
+    // Absolute: each workload writes its log from its own worktree.
+    let out = std::path::absolute(get("--out")).unwrap();
     let label = get("--label");
     let cmd = get("--cmd");
     // Absolute: each workload resolves TEMP from its own worktree.
