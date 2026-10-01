@@ -1,0 +1,15 @@
+label: rep2-S
+mode: serial
+command: set PATH=C:\Users\kolla\.cargo\bin;%PATH% && cargo build --locked && cargo test --locked
+workloads: 3
+machine: physical 16069 MiB, commit limit 45553 MiB | idle before start: commit 36561 MiB, available 3907 MiB
+makespan_s: 155.3
+aborted: no
+w0: dir C:\Users\kolla\AppData\Local/lrc-bench/wt1 | exit 101 | wall_s 36.0 | job_peak_commit_mib 1820 | processes_total 549 | still_running_after_root_exit 0
+w1: dir C:\Users\kolla\AppData\Local/lrc-bench/wt2 | exit 101 | wall_s 58.4 | job_peak_commit_mib 1739 | processes_total 549 | still_running_after_root_exit 0
+w2: dir C:\Users\kolla\AppData\Local/lrc-bench/wt3 | exit 101 | wall_s 60.3 | job_peak_commit_mib 1755 | processes_total 549 | still_running_after_root_exit 0
+sum_of_job_peaks_mib: 5314
+system_max_commit_mib: 38349 (+1788 over idle)
+system_min_available_mib: 2123
+responsiveness_100ms_timer: samples 1543 | worst_late_ms 36 | late_over_1s 0 | late_over_2s 0
+typeperf_csv: C:\Users\kolla\AppData\Local/lrc-bench/results\rep2-S-typeperf.csv

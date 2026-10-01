@@ -1,0 +1,6 @@
+ripgrep: https://github.com/BurntSushi/ripgrep tag 15.2.0 commit e89fff89ac9af12e8d4ce9d5fd07beb408ca730f
+rustc: rustc 1.98.1 (48a229cea 2026-09-01) (x86_64-pc-windows-msvc)
+runner: experiments/parallel-workload (this branch)
+machine: Windows 11 Home 10.0.26200.9457, i7-1255U 10C/12T, 16069 MiB physical, commit limit 45915 MiB (pagefile 29845 MiB)
+TEMP: C:\Users\kolla\AppData\Local\Temp (inside the git repository at C:/Users/kolla)
+background at start (top private MiB): chrome 5401, vmmem 4104, python 3425, claude 2926, ChatGPT 2559, Code 1468
