@@ -433,21 +433,6 @@ impl ConfigLook {
 
 pub use crate::config::LookClocks;
 
-/// The largest step of the wall clock that `bound_the_age` takes off an age
-/// when it cannot tell whether the step came before or after the write.
-///
-/// WHY 50ms. Taking a step off the age assumes it came after the write, and
-/// if it came before, the file waits that much longer than it had to. This
-/// value is the most extra wait that assumption may cost. It is a tenth of
-/// `CONFIG_SETTLE`, and above the drift that the wall and monotonic clocks
-/// show between two looks with no step at all: NTP slews a clock by at most
-/// 500ppm, which is 1ms over a 2s stall and 30ms over a full minute. The
-/// steps that broke the guard were 407ms and 450ms (WSL2). A larger step
-/// is not taken off: the file must ALSO pass the monotonic test (the same
-/// content for `CONFIG_SETTLE`), so its wait stays near the settle time
-/// whatever the size of the step.
-const CLOCK_STEP_TOLERANCE: Duration = Duration::from_millis(50);
-
 /// The forward step of the wall clock between two looks: the wall time that
 /// passed beyond the monotonic time. A backward step counts as none.
 fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
@@ -462,29 +447,31 @@ fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
 /// The age of a file is wall-clock time minus its mtime, and a wall clock
 /// STEPS: WSL2 measured forward steps of 450ms and 407ms within three
 /// minutes of a busy build, which made a half file that had been at the path
-/// 302ms read 732ms old. So the age is carried from look to look on the
-/// monotonic clock, and each look takes the smaller of two numbers:
+/// 302ms read 732ms old. So each look takes the smaller of two LOWER bounds
+/// on the true age:
 ///
-/// - the wall age that this read gives, less a forward step of up to
-///   `CLOCK_STEP_TOLERANCE` measured since the last look (a larger one is
-///   not taken off: it may have come before or after the write);
-/// - the bound of the last look plus the monotonic time since it, for the
-///   same content. Content that the last look did not see arrived after it,
-///   so it starts at the monotonic time since that look. When a larger step
-///   falls in the window, ANY content starts at ZERO: the same bytes may be
-///   a new file that a writer put down again during the gap, so the carried
-///   bound is no bound, and the age is counted only on the monotonic clock
-///   from this look.
+/// - the wall age that this read gives, less the forward step of the wall
+///   clock since the last look. If the file was written in that window, no
+///   earlier step touched its age, and a step before the write only makes
+///   it look younger; if it was older, the step inflated its age by exactly
+///   that much. A backward step counts as none.
+/// - for the same content as the last look, that look's bound plus the
+///   monotonic time since it; for other content, the monotonic time since
+///   the last look (the content arrived after it).
 ///
-/// So a file must pass its wall age, as the code before this change asked,
-/// AND every bound; it can never be taken where the wall age alone refused
-/// it, which keeps the known limit of issue #64 no worse. A step of any size
-/// (a clock correction of minutes, or a suspend, in which the monotonic
-/// clock of Linux stops and the wall clock does not) holds a change for
-/// about `CONFIG_SETTLE`, not for the step. A rewrite of the same bytes after
-/// a step gives a small wall age, and the `min` takes it. Every bound is a
-/// `min` or a subtraction, so a file only looks younger, never older. An age
-/// that cannot be computed stays unknown.
+/// THE SAME BYTES ARE NOT THE SAME FILE: a writer can put the same half file
+/// down again between two looks. The first bound covers that case, and the
+/// second covers an old file whose earlier steps the first does not see; the
+/// `min` is a lower bound in both. A step of any size, or a suspend (the
+/// monotonic clock of Linux stops in a suspend and the wall clock does
+/// not), lowers the bound of ONE look; the bound then grows again on the
+/// monotonic clock, so a change waits about `CONFIG_SETTLE`, never the
+/// length of the step, and a clock that steps at every look cannot hold it.
+///
+/// Every bound is a `min` or a subtraction, so a file only looks younger,
+/// never older: it can never be taken where the wall age alone refused it,
+/// which keeps the known limit of issue #64 no worse. An age that cannot be
+/// computed stays unknown.
 fn bound_the_age(
     state: &mut State,
     fingerprint: u64,
@@ -503,20 +490,8 @@ fn bound_the_age(
         None => age,
         Some(last) => {
             let gap = look.mono.saturating_duration_since(last.mono);
-            let step = forward_step(&last, &look);
-            let placed = step <= CLOCK_STEP_TOLERANCE;
-            let wall = if placed {
-                age.saturating_sub(step)
-            } else {
-                age
-            };
-            // A step that cannot be placed leaves no bound to carry: the
-            // same bytes may be a NEW file that a writer put down again
-            // during the gap (half, whole, half), and its wall age is
-            // inflated by the step. Start again at zero; the content then
-            // settles on the monotonic clock, within about `CONFIG_SETTLE`.
+            let wall = age.saturating_sub(forward_step(&last, &look));
             let since = match carried {
-                _ if !placed => Duration::ZERO,
                 Some(before) if last.fingerprint == fingerprint => before + gap,
                 _ => gap,
             };
@@ -3436,8 +3411,8 @@ mod tests {
 
     /// A coordinator that STALLS past the settle time while the wall clock
     /// steps forward: the gap since the last look is then large, so it does
-    /// not bound the age. A step above `CLOCK_STEP_TOLERANCE` in that window
-    /// makes the new content start at zero, and that keeps the half file out.
+    /// not bound the age. The step in that window comes off the wall age,
+    /// and that keeps the half file out.
     #[test]
     fn a_stall_and_a_clock_step_together_do_not_settle_a_new_file() {
         let whole = ConfigFile::Text(
@@ -3462,7 +3437,7 @@ mod tests {
         reload_config(&mut state, clone_of(&half));
         assert_eq!(
             state.config_seen, taken,
-            "a step above the tolerance must start new content at zero, even after a stall"
+            "the step must come off the wall age, even after a stall"
         );
     }
 
@@ -3541,11 +3516,10 @@ mod tests {
         );
     }
 
-    /// A step AFTER the content was first seen must not age it. The step
-    /// here is above `CLOCK_STEP_TOLERANCE`, so the wall age is not reduced;
-    /// the bound carried from the last look plus the monotonic gap keeps the
-    /// file young. It matters after a stall, when the gap before the first
-    /// look is large.
+    /// A step AFTER the content was first seen must not age it: it comes off
+    /// the wall age of that look, and the bound carried from the last look
+    /// plus the monotonic gap keeps the file young. It matters after a
+    /// stall, when the gap before the first look is large.
     #[test]
     fn a_clock_step_after_the_first_look_does_not_age_the_file() {
         let whole = ConfigFile::Text(
@@ -3612,36 +3586,36 @@ mod tests {
         );
     }
 
-    /// The tolerance at its edge. A step of up to `CLOCK_STEP_TOLERANCE` in
-    /// the window before the first look is taken off the age, and the file
-    /// keeps its single look. A larger one also needs the monotonic looks.
+    /// A step of ANY size in the window comes off the wall age, and no more.
+    /// A file that the age less the step still proves settled is taken on
+    /// one look; one that it proves young is not.
     #[test]
-    fn a_step_at_the_tolerance_keeps_the_single_look_and_one_above_does_not() {
-        let below = CLOCK_STEP_TOLERANCE - Duration::from_millis(1);
-        let mut state = after_a_stall_with_a_step(below);
-        reload_config(&mut state, half_file(Duration::from_millis(600)));
-        assert_eq!(
-            state.config_seen,
-            config_fingerprint(&half_file(Duration::ZERO)),
-            "a step of {below:?} keeps the single look"
-        );
-        // ...and that step comes off the age: 530ms less 49ms is young.
-        let mut state = after_a_stall_with_a_step(below);
-        let taken = state.config_seen;
-        reload_config(&mut state, half_file(Duration::from_millis(530)));
-        assert_eq!(
-            state.config_seen, taken,
-            "a step of {below:?} comes off the age"
-        );
+    fn a_step_of_any_size_comes_off_the_wall_age_and_no_more() {
+        for step in [
+            Duration::from_millis(49),
+            Duration::from_millis(51),
+            Duration::from_millis(400),
+        ] {
+            // Settled: the age less the step is still over the settle time.
+            let mut state = after_a_stall_with_a_step(step);
+            let age = CONFIG_SETTLE + step + Duration::from_millis(20);
+            reload_config(&mut state, half_file(age));
+            assert_eq!(
+                state.config_seen,
+                config_fingerprint(&half_file(Duration::ZERO)),
+                "after a step of {step:?}, a file of age {age:?} has settled"
+            );
 
-        let above = CLOCK_STEP_TOLERANCE + Duration::from_millis(1);
-        let mut state = after_a_stall_with_a_step(above);
-        let taken = state.config_seen;
-        reload_config(&mut state, half_file(Duration::from_millis(600)));
-        assert_eq!(
-            state.config_seen, taken,
-            "a step of {above:?} needs the monotonic looks as well"
-        );
+            // Young: the age less the step is under it.
+            let mut state = after_a_stall_with_a_step(step);
+            let taken = state.config_seen;
+            let age = CONFIG_SETTLE + step - Duration::from_millis(20);
+            reload_config(&mut state, half_file(age));
+            assert_eq!(
+                state.config_seen, taken,
+                "after a step of {step:?}, a file of age {age:?} is young"
+            );
+        }
     }
 
     /// A file seen at many quick looks settles as the monotonic time adds up
@@ -3715,9 +3689,9 @@ mem = \"1GB\"
 
     /// THE SAME BYTES ARE NOT THE SAME FILE. A writer can put the same half
     /// file down again between two looks (half, whole, half), so content
-    /// that matches the last look may be a new file. With a step above
-    /// `CLOCK_STEP_TOLERANCE` in that gap, the wall age is inflated, and the
-    /// carried bound is no bound for a file that may be new. Traced on WSL2
+    /// that matches the last look may be a new file. With a step in that gap
+    /// the wall age is inflated, and the carried bound is no bound for a
+    /// file that may be new: the step must come off the wall age. Traced on WSL2
     /// (issue #17): looks 500ms apart, a half file seen young at 283ms, the
     /// next look the same bytes with raw age 603ms after a 425ms step, and
     /// the coordinator took it; the file was about 180ms old.
