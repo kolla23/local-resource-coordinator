@@ -1,72 +1,78 @@
-date_utc: 2026-10-01T01:12:22Z
-commit: 5c92b8a (+ uncommitted probe source)
+date_utc: 2026-10-01T01:18:50Z
+commit: 0eb02fe23654c199e8120c92df95f8f9eaac6dc8
+probe source tree clean vs commit: yes
+src/main.rs git blob: 4518e4572b91352e533660e97892952f446cf730  working copy: 4518e4572b91352e533660e97892952f446cf730
 Microsoft Windows [Version 10.0.26200.9457]
 rustc 1.98.1 (48a229cea 2026-09-01)
 windows-sys: version = "0.61.2"
 machine: i7-1255U 10C/12T, 15.7 GiB RAM
 
+$ cargo clean && cargo build --release --locked
+   Compiling jobobject-probe v0.1.0 (C:\Users\kolla\projects\local-resource-coordinator\experiments\jobobject-probe)
+    Finished `release` profile [optimized] target(s) in 7.37s
+
 =================== run 1: target/release/jobobject-probe.exe
-probe pid 50208 | probe itself already in a job: true
+probe pid 9548 | probe itself already in a job: true
 
 [1] contain: in job before resume = true
-[2] tree: expected 7 processes x 100 MiB = 700 MiB allocated | total processes 7 | max seen at once 7 | wall 3.22s
-    kernel peak job commit 705.8 MiB | sampled(100ms) peak sum working set 732.2 MiB | sampled peak sum private 705.8 MiB
+[2] tree: expected 7 processes x 100 MiB = 700 MiB allocated | total processes 7 | max seen at once 7 | wall 3.73s
+    kernel peak job commit 706.0 MiB | sampled(100ms) peak sum working set 732.3 MiB | sampled peak sum private 705.9 MiB
 
-[3] burst 400 MiB for 150 ms: kernel peak job commit 401.4 MiB | sampled(250ms) peak private 401.4 MiB
+[3] burst 400 MiB for 150 ms: kernel peak job commit 401.5 MiB | sampled(250ms) peak private 401.4 MiB
 
-[4] cancel (Ctrl-Break, 2 s grace, then force) of 7 processes: graceful exits 7 | not graceful (pid depth) [] | forced = false | job counter zero after Some(22.6705ms) | all exited after Some(22.6855ms) | survivors after 10 s []
+[4] cancel (Ctrl-Break, 2 s grace, then force) of 7 processes: graceful exits 7 | not graceful (pid depth) [] | forced = false | job counter zero after Some(28.5878ms) | all exited after Some(28.6118ms) | survivors after 10 s []
 
-[4] cancel (force only) of 7 processes: graceful exits 0 | not graceful (pid depth) ["11420 depth 0", "14856 depth 2", "26652 depth 1", "32144 depth 0", "33808 depth 1", "35876 depth 0", "40656 depth 0"] | forced = true | job counter zero after Some(108.2µs) | all exited after Some(5.6625ms) | survivors after 10 s []
+[4] cancel (force only) of 7 processes: graceful exits 0 | not graceful (pid depth) ["18316 depth 1", "18452 depth 0", "19448 depth 2", "30700 depth 1", "46456 depth 0", "53944 depth 0", "9056 depth 0"] | forced = true | job counter zero after Some(231.7µs) | all exited after Some(5.8866ms) | survivors after 10 s []
 
 [5] breakaway attempt: ["denied Access is denied. (os error 5)"]
 
-[6] nested job: 54832 assigned=true | still listed in outer job true | killed by outer cancel true
+[6] nested job: 34824 assigned=true | still listed in outer job true | killed by outer cancel true
 
-[7] owner killed: tree of 7 processes stopped by kill-on-close after Some(8.2461ms) | survivors []
+[7] owner killed: tree of 7 processes stopped by kill-on-close after Some(12.9399ms) | survivors []
 
-[8] WMI-created process pid 54004: in job false | still running after job cancel true
+[8] WMI-created process pid 52912: in job false | still running after job cancel true
 exit_code: 0
 
 =================== run 2: target/release/jobobject-probe.exe
-probe pid 22836 | probe itself already in a job: true
+probe pid 31072 | probe itself already in a job: true
 
 [1] contain: in job before resume = true
-[2] tree: expected 7 processes x 100 MiB = 700 MiB allocated | total processes 7 | max seen at once 7 | wall 3.22s
-    kernel peak job commit 706.0 MiB | sampled(100ms) peak sum working set 732.2 MiB | sampled peak sum private 705.9 MiB
+[2] tree: expected 7 processes x 100 MiB = 700 MiB allocated | total processes 7 | max seen at once 7 | wall 3.63s
+    kernel peak job commit 706.0 MiB | sampled(100ms) peak sum working set 732.3 MiB | sampled peak sum private 706.0 MiB
 
-[3] burst 400 MiB for 150 ms: kernel peak job commit 401.4 MiB | sampled(250ms) peak private 401.4 MiB
+[3] burst 400 MiB for 150 ms: kernel peak job commit 401.5 MiB | sampled(250ms) peak private 401.4 MiB
 
-[4] cancel (Ctrl-Break, 2 s grace, then force) of 7 processes: graceful exits 7 | not graceful (pid depth) [] | forced = false | job counter zero after Some(33.8924ms) | all exited after Some(33.9283ms) | survivors after 10 s []
+[4] cancel (Ctrl-Break, 2 s grace, then force) of 7 processes: graceful exits 7 | not graceful (pid depth) [] | forced = false | job counter zero after Some(28.2667ms) | all exited after Some(28.2795ms) | survivors after 10 s []
 
-[4] cancel (force only) of 7 processes: graceful exits 0 | not graceful (pid depth) ["29500 depth 0", "29548 depth 1", "37044 depth 0", "43396 depth 0", "45260 depth 1", "52128 depth 0", "54188 depth 2"] | forced = true | job counter zero after Some(91.7µs) | all exited after Some(5.7767ms) | survivors after 10 s []
+[4] cancel (force only) of 7 processes: graceful exits 0 | not graceful (pid depth) ["17892 depth 2", "23760 depth 1", "40340 depth 0", "49028 depth 0", "49336 depth 0", "53604 depth 0", "54140 depth 1"] | forced = true | job counter zero after Some(101.7µs) | all exited after Some(5.6485ms) | survivors after 10 s []
 
 [5] breakaway attempt: ["denied Access is denied. (os error 5)"]
 
-[6] nested job: 39040 assigned=true | still listed in outer job true | killed by outer cancel true
+[6] nested job: 9000 assigned=true | still listed in outer job true | killed by outer cancel true
 
-[7] owner killed: tree of 7 processes stopped by kill-on-close after Some(8.1568ms) | survivors []
+[7] owner killed: tree of 7 processes stopped by kill-on-close after Some(6.7573ms) | survivors []
 
-[8] WMI-created process pid 35304: in job false | still running after job cancel true
+[8] WMI-created process pid 6132: in job false | still running after job cancel true
 exit_code: 0
 
 =================== run 3: target/release/jobobject-probe.exe
-probe pid 22220 | probe itself already in a job: true
+probe pid 34708 | probe itself already in a job: true
 
 [1] contain: in job before resume = true
 [2] tree: expected 7 processes x 100 MiB = 700 MiB allocated | total processes 7 | max seen at once 7 | wall 3.22s
-    kernel peak job commit 706.0 MiB | sampled(100ms) peak sum working set 732.3 MiB | sampled peak sum private 705.9 MiB
+    kernel peak job commit 705.9 MiB | sampled(100ms) peak sum working set 732.2 MiB | sampled peak sum private 705.9 MiB
 
 [3] burst 400 MiB for 150 ms: kernel peak job commit 401.4 MiB | sampled(250ms) peak private 401.4 MiB
 
-[4] cancel (Ctrl-Break, 2 s grace, then force) of 7 processes: graceful exits 7 | not graceful (pid depth) [] | forced = false | job counter zero after Some(28.4257ms) | all exited after Some(28.4523ms) | survivors after 10 s []
+[4] cancel (Ctrl-Break, 2 s grace, then force) of 7 processes: graceful exits 7 | not graceful (pid depth) [] | forced = false | job counter zero after Some(28.0195ms) | all exited after Some(28.0416ms) | survivors after 10 s []
 
-[4] cancel (force only) of 7 processes: graceful exits 0 | not graceful (pid depth) ["27704 depth 2", "28564 depth 0", "37196 depth 0", "37300 depth 0", "39412 depth 1", "42096 depth 1", "42500 depth 0"] | forced = true | job counter zero after Some(84.3µs) | all exited after Some(5.5374ms) | survivors after 10 s []
+[4] cancel (force only) of 7 processes: graceful exits 0 | not graceful (pid depth) ["21992 depth 2", "37568 depth 0", "42464 depth 0", "43796 depth 1", "44096 depth 0", "47640 depth 0", "50508 depth 1"] | forced = true | job counter zero after Some(114.6µs) | all exited after Some(5.893ms) | survivors after 10 s []
 
 [5] breakaway attempt: ["denied Access is denied. (os error 5)"]
 
-[6] nested job: 50952 assigned=true | still listed in outer job true | killed by outer cancel true
+[6] nested job: 49868 assigned=true | still listed in outer job true | killed by outer cancel true
 
-[7] owner killed: tree of 7 processes stopped by kill-on-close after Some(6.4991ms) | survivors []
+[7] owner killed: tree of 7 processes stopped by kill-on-close after Some(6.462ms) | survivors []
 
-[8] WMI-created process pid 51368: in job false | still running after job cancel true
+[8] WMI-created process pid 50224: in job false | still running after job cancel true
 exit_code: 0
