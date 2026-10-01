@@ -1,3 +1,5 @@
+# Modified by the local-resource-coordinator fork, 2026-09-30: macOS jobs moved
+# to macos.yml (weekly and on demand) to save private-repo Actions minutes.
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -46,7 +48,9 @@ jobs:
         #
         # Two versions of Ubuntu, because a fault that appears on one of them
         # and not on the other says immediately where to look.
-        os: [ubuntu-22.04, ubuntu-24.04, macos-14]
+        #
+        # Fork: macos-14 runs in macos.yml, weekly and on demand.
+        os: [ubuntu-22.04, ubuntu-24.04]
     steps:
       - uses: actions/checkout@v5
       - name: Install Rust
@@ -134,10 +138,7 @@ jobs:
             os: ubuntu-24.04
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04
-          - target: x86_64-apple-darwin
-            os: macos-14
-          - target: aarch64-apple-darwin
-            os: macos-14
+          # Fork: the two apple-darwin targets build in macos.yml.
     steps:
       - uses: actions/checkout@v5
       - name: Install Rust for ${{ matrix.target }}

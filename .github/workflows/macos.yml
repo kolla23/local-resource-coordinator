@@ -1,0 +1,56 @@
+# Added by the local-resource-coordinator fork. The jobs are copied from
+# upstream qex's ci.yml (Apache-2.0).
+#
+# macOS minutes on a private repository cost ten times Linux minutes, so these
+# jobs run once a week and on demand (Actions tab › macOS › Run workflow),
+# not on every push or pull request.
+name: macOS
+
+on:
+  schedule:
+    # Mondays 06:00 UTC. A schedule runs on the default branch only.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: Test on macos-14
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - name: The unit tests
+        run: cargo test --bins
+      - name: The end-to-end tests
+        run: cargo test --test e2e -- --test-threads=2
+
+  cross:
+    name: Build for ${{ matrix.target }}
+    runs-on: macos-14
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-apple-darwin, aarch64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust for ${{ matrix.target }}
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
