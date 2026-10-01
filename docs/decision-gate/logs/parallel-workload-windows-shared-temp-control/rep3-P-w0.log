@@ -1,0 +1,1029 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling memchr v2.8.3
+   Compiling windows-link v0.2.1
+   Compiling regex-syntax v0.8.11
+   Compiling log v0.4.33
+   Compiling serde_core v1.0.228
+   Compiling zmij v1.0.23
+   Compiling cfg-if v1.0.4
+   Compiling crossbeam-utils v0.8.22
+   Compiling serde_json v1.0.150
+   Compiling serde v1.0.228
+   Compiling crossbeam-epoch v0.9.20
+   Compiling crossbeam-deque v0.8.7
+   Compiling windows-sys v0.61.2
+   Compiling encoding_rs v0.8.35
+   Compiling memmap2 v0.9.11
+   Compiling aho-corasick v1.1.4
+   Compiling grep-matcher v0.1.9 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\matcher)
+   Compiling itoa v1.0.18
+   Compiling winapi-util v0.1.11
+   Compiling anyhow v1.0.103
+   Compiling ripgrep v15.2.0 (C:\Users\kolla\AppData\Local\lrc-bench\wt1)
+   Compiling lexopt v0.3.2
+   Compiling textwrap v0.16.2
+   Compiling termcolor v1.4.1
+   Compiling encoding_rs_io v0.1.7
+   Compiling same-file v1.0.6
+   Compiling regex-automata v0.4.15
+   Compiling walkdir v2.5.0
+   Compiling bstr v1.13.0
+   Compiling globset v0.4.19 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\globset)
+   Compiling grep-searcher v0.1.17 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\searcher)
+   Compiling grep-regex v0.1.14 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\regex)
+   Compiling grep-cli v0.1.12 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\cli)
+   Compiling grep-printer v0.3.1 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\printer)
+   Compiling ignore v0.4.29 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\ignore)
+   Compiling grep v0.4.1 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\grep)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 14s
+   Compiling proc-macro2 v1.0.106
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.46
+   Compiling syn v2.0.119
+   Compiling serde_derive v1.0.228
+   Compiling ripgrep v15.2.0 (C:\Users\kolla\AppData\Local\lrc-bench\wt1)
+warning: method `env` is never used
+   --> tests\util.rs:278:12
+    |
+255 | impl TestCommand {
+    | ---------------- method in this implementation
+...
+278 |     pub fn env(
+    |            ^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ripgrep` (test "integration") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.23s
+     Running unittests crates\core\main.rs (target\debug\deps\rg-ff2a6bef784b8b22.exe)
+
+running 114 tests
+test flags::defs::test_case_sensitive ... ok
+test flags::defs::test_byte_offset ... ok
+test flags::defs::test_colors ... ok
+test flags::defs::test_color ... ok
+test flags::config::tests::basic ... ok
+test flags::config::tests::error ... ok
+test flags::defs::test_after_context ... ok
+test flags::defs::test_auto_hybrid_regex ... ok
+test flags::defs::test_before_context ... ok
+test flags::defs::test_binary ... ok
+test flags::defs::test_block_buffered ... ok
+test flags::defs::test_column ... ok
+test flags::defs::test_context ... ok
+test flags::defs::test_context_separator ... ok
+test flags::defs::test_count ... ok
+test flags::defs::test_count_matches ... ok
+test flags::defs::test_crlf ... ok
+test flags::defs::test_debug ... ok
+test flags::defs::test_file ... ok
+test flags::defs::test_field_match_separator ... ok
+test flags::defs::test_files ... ok
+test flags::defs::test_files_with_matches ... ok
+test flags::defs::test_dfa_size_limit ... ok
+test flags::defs::test_encoding ... ok
+test flags::defs::test_engine ... ok
+test flags::defs::test_files_without_match ... ok
+test flags::defs::test_follow ... ok
+test flags::defs::test_generate ... ok
+test flags::defs::test_fixed_strings ... ok
+test flags::defs::test_field_context_separator ... ok
+test flags::defs::test_hostname_bin ... ok
+test flags::defs::test_hidden ... ok
+test flags::defs::test_hyperlink_format ... ok
+test flags::defs::test_iglob ... ok
+test flags::defs::test_ignore_file ... ok
+test flags::defs::test_ignore_case ... ok
+test flags::defs::test_ignore_file_case_insensitive ... ok
+test flags::defs::test_include_zero ... ok
+test flags::defs::test_glob ... ok
+test flags::defs::test_glob_case_insensitive ... ok
+test flags::defs::test_line_regexp ... ok
+test flags::defs::test_heading ... ok
+test flags::defs::test_max_columns ... ok
+test flags::defs::test_help ... ok
+test flags::defs::test_max_columns_preview ... ok
+test flags::defs::test_max_count ... ok
+test flags::defs::test_max_depth ... ok
+test flags::defs::test_mmap ... ok
+test flags::defs::test_max_filesize ... ok
+test flags::defs::test_multiline ... ok
+test flags::defs::test_no_ignore_exclude ... ok
+test flags::defs::test_no_ignore_files ... ok
+test flags::defs::test_no_ignore_global ... ok
+test flags::defs::test_no_ignore_messages ... ok
+test flags::defs::test_no_ignore_parent ... ok
+test flags::defs::test_no_ignore_vcs ... ok
+test flags::defs::test_no_line_number ... ok
+test flags::defs::test_no_messages ... ok
+test flags::defs::test_invert_match ... ok
+test flags::defs::test_json ... ok
+test flags::defs::test_line_buffered ... ok
+test flags::defs::test_multiline_dotall ... ok
+test flags::defs::test_no_config ... ok
+test flags::defs::test_no_ignore ... ok
+test flags::defs::test_no_ignore_dot ... ok
+test flags::defs::test_no_pcre2_unicode ... ok
+test flags::defs::test_no_require_git ... ok
+test flags::defs::test_no_unicode ... ok
+test flags::defs::test_line_number ... ok
+test flags::defs::test_null ... ok
+test flags::defs::test_null_data ... ok
+test flags::defs::test_one_file_system ... ok
+test flags::defs::test_only_matching ... ok
+test flags::defs::test_passthru ... ok
+test flags::defs::test_path_separator ... ok
+test flags::defs::test_pcre2 ... ok
+test flags::defs::test_pre ... ok
+test flags::defs::test_replace ... ok
+test flags::defs::test_pcre2_version ... ok
+test flags::defs::test_regexp ... ok
+test flags::defs::test_search_zip ... ok
+test flags::defs::test_smart_case ... ok
+test flags::defs::test_sort ... ok
+test flags::defs::test_sort_files ... ok
+test flags::defs::test_stats ... ok
+test flags::defs::test_sortr ... ok
+test flags::defs::test_trim ... ok
+test flags::defs::test_type ... ok
+test flags::defs::test_type_add ... ok
+test flags::defs::test_type_clear ... ok
+test flags::defs::test_type_list ... ok
+test flags::defs::test_type_not ... ok
+test flags::defs::test_unrestricted ... ok
+test flags::defs::test_version ... ok
+test flags::defs::test_pre_glob ... ok
+test flags::defs::test_pretty ... ok
+test flags::defs::test_quiet ... ok
+test flags::defs::test_regex_size_limit ... ok
+test flags::defs::test_stop_on_nonmatch ... ok
+test flags::defs::test_text ... ok
+test flags::defs::test_threads ... ok
+test flags::defs::test_trace ... ok
+test flags::defs::test_with_filename ... ok
+test flags::defs::test_with_filename_no ... ok
+test flags::defs::test_word_regexp ... ok
+test flags::defs::test_vimgrep ... ok
+test flags::defs::tests::available_shorts ... ok
+test flags::defs::tests::choices_ascii_alphanumeric ... ok
+test flags::defs::tests::longs_all_ascii_alphanumeric ... ok
+test flags::defs::tests::longs_no_duplicates ... ok
+test flags::defs::tests::non_switches_have_variable_names ... ok
+test flags::defs::tests::shorts_all_ascii_alphanumeric ... ok
+test flags::defs::tests::shorts_no_duplicates ... ok
+test flags::defs::tests::switches_have_no_choices ... ok
+
+test result: ok. 114 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests\tests.rs (target\debug\deps\integration-b6b4df7f4f523614.exe)
+
+running 323 tests
+test binary::after_match1_implicit_quiet ... ok
+test binary::after_match1_implicit_text ... ok
+test binary::after_match1_stdin ... ok
+test binary::after_match1_explicit ... ok
+test binary::after_match1_implicit_path ... ok
+test binary::after_match2_implicit ... ok
+test binary::after_match1_explicit_text ... ok
+test binary::after_match1_explicit_count ... ok
+test binary::after_match1_implicit_count_binary ... ok
+test binary::before_match1_explicit ... FAILED
+test binary::after_match1_implicit ... ok
+test binary::after_match1_implicit_count ... ok
+test binary::after_match2_implicit_text ... ok
+test binary::after_match1_implicit_binary ... ok
+test binary::mmap_after_nul_match ... ok
+test binary::before_match1_implicit_binary ... ok
+test binary::before_match1_implicit ... ok
+test binary::before_match2_implicit ... ok
+test binary::before_match1_implicit_text ... ok
+test binary::before_match2_implicit_text ... ok
+test binary::before_match2_explicit ... ok
+test binary::mmap_binary_flag ... ok
+test binary::mmap_match_count ... ok
+test binary::mmap_match_explicit ... ok
+test binary::mmap_match_implicit ... ok
+test binary::mmap_match_multiple ... ok
+test feature::context_sep_default ... ok
+test feature::f1155_auto_hybrid_regex ... ok
+test binary::mmap_match_near_nul ... ok
+test feature::context_sep ... ok
+test feature::context_sep_empty ... ok
+test binary::mmap_text_flag ... ok
+test feature::f1078_max_columns_preview1 ... ok
+test feature::f1078_max_columns_preview2 ... ok
+test feature::f109_case_sensitive_part2 ... ok
+test feature::f109_max_depth ... ok
+test feature::f1207_auto_encoding ... ok
+test feature::f109_case_sensitive_part1 ... ok
+test feature::f1207_ignore_encoding ... ok
+test feature::f129_context ... ok
+test feature::f129_replace ... ok
+test feature::f129_matches ... ok
+test feature::f1842_field_context_separator ... FAILED
+test feature::f159_max_count ... ok
+test binary::matching_files_inconsistent_with_count ... ok
+test feature::f159_max_count_zero ... ok
+test feature::f1404_nothing_searched_ignored ... ok
+test feature::f1420_no_ignore_exclude ... ok
+test feature::f1_utf16_explicit ... FAILED
+test feature::f1_unknown_encoding ... ok
+test feature::f1404_nothing_searched_warning ... ok
+test feature::f1138_no_ignore_dot ... ok
+test feature::f1414_no_require_git ... ok
+test feature::f1_replacement_encoding ... ok
+test feature::f1_eucjp ... ok
+test feature::f1_sjis ... ok
+test feature::f2288_context_partial_override ... ok
+test feature::f1_utf16_auto ... ok
+test feature::f196_persistent_config ... ok
+test feature::f2288_context_partial_override_rev ... ok
+test feature::f20_no_filename ... ok
+test feature::f263_sort_files ... ok
+test feature::f243_column_line ... ok
+test feature::f362_dfa_size_limit ... ok
+test feature::f34_only_matching_line_column ... ok
+test feature::f263_sort_files_reverse ... ok
+test feature::f275_pathsep ... ok
+test feature::f411_parallel_quiet_search_stats ... ok
+test feature::f362_exceeds_regex_size_limit ... ok
+test feature::f1466_no_ignore_files ... ok
+test feature::f411_single_threaded_quiet_search_stats ... ok
+test feature::f34_only_matching ... ok
+test feature::f411_single_threaded_search_stats ... ok
+test feature::f411_parallel_search_stats ... ok
+test feature::f416_crlf ... ok
+test feature::f740_passthru ... FAILED
+test feature::f419_zero_as_shortcut_for_null ... ok
+test feature::f416_crlf_only_matching ... ok
+test feature::f1842_field_match_separator ... ok
+test feature::f416_crlf_multiline ... ok
+test feature::f45_precedence_internal ... ok
+test feature::f7 ... ok
+test feature::f45_precedence_with_others ... ok
+test feature::f70_smart_case ... ok
+test feature::f68_no_ignore_vcs ... ok
+test feature::f89_count ... ok
+test feature::f917_trim_match ... ok
+test feature::f7_stdin ... ok
+test feature::f917_trim ... ok
+test feature::f89_files_with_matches ... ok
+test feature::f89_files_without_match ... ok
+test feature::f89_files ... ok
+test feature::f917_trim_max_columns_matches ... FAILED
+test feature::f89_match ... ok
+test feature::f917_trim_max_columns_multi_only_matching ... ok
+test feature::f917_trim_max_columns_normal ... ok
+test feature::f917_trim_max_columns_multi_per_match ... ok
+test feature::f917_trim_max_columns_multi_standard ... ok
+test feature::f948_exit_code_error ... ok
+test feature::no_context_sep ... ok
+test feature::f917_trim_multi_standard ... ok
+test feature::f993_null_data ... ok
+test feature::f948_exit_code_no_match ... ok
+test feature::no_context_sep_overridden ... ok
+test feature::no_context_sep_overrides ... ok
+test json::quiet_stats ... FAILED
+test json::r1095_crlf_empty_match ... FAILED
+test json::r1412_look_behind_match_missing ... ok
+test feature::f948_exit_code_match ... ok
+test json::crlf ... ok
+test feature::stop_on_nonmatch ... FAILED
+test misc::after_context_line_numbers ... FAILED
+test json::basic ... ok
+test feature::f45_relative_cwd ... ok
+test json::replacement ... ok
+test feature::no_unicode ... ok
+test json::notutf8_file ... ok
+test misc::before_context ... FAILED
+test misc::after_context ... ok
+test misc::before_context_line_numbers ... ok
+test misc::binary_convert ... FAILED
+test misc::binary_convert_mmap ... ok
+test json::r1095_missing_crlf ... ok
+test feature::f2361_sort_nested_files ... ok
+test misc::byte_offset_only_matching ... ok
+test misc::compressed_lz4 ... ok
+test misc::binary_quit_mmap ... ok
+test misc::binary_search_no_mmap ... ok
+test misc::binary_quit ... ok
+test misc::compressed_uncompress ... ok
+test misc::binary_search_mmap ... ok
+test misc::compressed_zstd ... ok
+test misc::case_insensitive ... ok
+test misc::columns ... ok
+test misc::context ... ok
+test misc::context_line_numbers ... ok
+test misc::count ... ok
+test misc::count_matches_inverted ... FAILED
+test misc::count_matches ... FAILED
+test misc::file_type_clear ... FAILED
+test misc::count_matches_via_only ... ok
+test misc::compressed_brotli ... ok
+test misc::compressed_lzma ... ok
+test misc::compressed_bzip2 ... ok
+test misc::compressed_xz ... ok
+test misc::compressed_gzip ... ok
+test misc::files_without_match ... FAILED
+test misc::dir ... ok
+test misc::file_type_add_compose ... FAILED
+test misc::compressed_failing_gzip ... ok
+test misc::file_types_negate ... ok
+test misc::file_type_add ... ok
+test misc::file_types ... ok
+test misc::files ... FAILED
+test misc::files_with_matches ... ok
+test misc::glob ... FAILED
+test misc::glob_case_insensitive ... ok
+test misc::ignore_generic ... ok
+test misc::glob_always_case_insensitive ... ok
+test misc::ignore_git ... ok
+test misc::glob_negate ... ok
+test misc::glob_case_sensitive ... ok
+test misc::ignore_git_parent ... ok
+test misc::ignore_git_parent_stop_file ... ok
+test misc::ignore_git_parent_stop ... ok
+test misc::ignore_ripgrep ... ok
+test misc::ignore_ripgrep_parent_no_stop ... ok
+test misc::ignore_hidden ... ok
+test misc::inverted ... ok
+test misc::ignore_git_multi_root_order ... ok
+test misc::inverted_line_numbers ... ok
+test misc::ignore_rgignore_multi_root_order ... ok
+test misc::line_numbers ... ok
+test misc::literal ... ok
+test misc::no_ignore ... FAILED
+test misc::max_filesize_parse_error_length ... ok
+test misc::max_filesize_parse_error_suffix ... ok
+test misc::line ... ok
+test misc::include_zero_override ... ok
+test misc::max_filesize_parse_no_suffix ... ok
+test misc::include_zero ... ok
+test misc::max_filesize_parse_m_suffix ... ok
+test misc::quiet ... FAILED
+test misc::max_filesize_suffix_overflow ... ok
+test misc::max_filesize_parse_k_suffix ... ok
+test misc::sort_accessed ... FAILED
+test misc::sort_files ... FAILED
+test misc::no_ignore_hidden ... ok
+test misc::replace_named_groups ... ok
+test misc::replace ... ok
+test misc::replace_groups ... ok
+test misc::no_parent_ignore_git ... ok
+test misc::type_list ... ok
+test misc::preprocessing ... ok
+test misc::vimgrep ... FAILED
+test misc::single_file ... ok
+test misc::unrestricted2 ... ok
+test misc::with_filename ... ok
+test misc::unrestricted1 ... ok
+test misc::symlink_nofollow ... ok
+test misc::unrestricted3 ... ok
+test misc::preprocessing_glob ... ok
+test misc::vimgrep_no_line ... ok
+test misc::vimgrep_no_line_no_column ... ok
+test misc::with_heading ... ok
+test misc::word ... ok
+test multiline::context ... ok
+test misc::with_heading_default ... ok
+test misc::word_period ... ok
+test misc::replace_with_only_matching ... ok
+test multiline::only_matching ... ok
+test multiline::overlap1 ... ok
+test multiline::dot_no_newline ... ok
+test multiline::vimgrep ... FAILED
+test multiline::dot_all ... ok
+test multiline::overlap2 ... ok
+test multiline::stdin ... ok
+test misc::sortr_accessed ... ok
+test misc::file_types_negate_all ... FAILED
+test regression::r1130 ... ok
+test regression::r1173 ... FAILED
+test regression::r105_part1 ... ok
+test regression::r1159_invalid_flag ... ok
+test regression::r105_part2 ... ok
+test regression::r1098 ... ok
+test regression::r1064 ... ok
+test regression::r1163 ... ok
+test regression::r1176_line_regex ... ok
+test regression::r1164 ... ok
+test regression::r1176_literal_file ... ok
+test regression::r1223_no_dir_check_for_default_path ... ok
+test regression::r1334_crazy_literals ... FAILED
+test regression::r1174 ... ok
+test regression::r1311_multi_line_term_replace ... ok
+test regression::r1259_drop_last_byte_nonl ... ok
+test regression::r127 ... ok
+test regression::r128 ... ok
+test regression::r1401_look_ahead_only_matching_1 ... ok
+test regression::r1401_look_ahead_only_matching_2 ... ok
+test regression::r1412_look_behind_no_replacement ... ok
+test misc::file_types_all ... ok
+test regression::r131 ... ok
+test regression::r1319 ... ok
+test regression::r1573 ... ok
+test regression::r1380 ... ok
+test regression::f1757 ... ok
+test regression::r1537 ... ok
+test regression::r1559 ... ok
+test regression::r1389_bad_symlinks_no_biscuit ... ok
+test regression::r1866 ... FAILED
+test regression::r1446_respect_excludes_in_worktree ... ok
+test regression::r156 ... ok
+test regression::r1203_reverse_suffix_literal ... ok
+test regression::r1739_replacement_lineterm_match ... ok
+test regression::r1638 ... ok
+test regression::r16 ... ok
+test regression::r1765 ... ok
+test regression::r1334_invert_empty_patterns ... ok
+test regression::r1891 ... ok
+test regression::r2094 ... FAILED
+test regression::r199 ... ok
+test regression::r229 ... FAILED
+test regression::r1838_nul_error_with_binary_detection ... ok
+test regression::r206 ... FAILED
+test regression::r2236 ... ok
+test regression::r184 ... ok
+test regression::r2095 ... FAILED
+test regression::r270 ... FAILED
+test regression::r228 ... ok
+test regression::r2658_null_data_line_regexp ... ok
+test regression::r2198 ... ok
+test regression::r2208 ... ok
+test regression::r251 ... ok
+test regression::r2574 ... ok
+test regression::r1159_exit_status ... ok
+test regression::r30 ... ok
+test regression::r1878 ... ok
+test regression::r2944_incorrect_bytes_searched ... ok
+test regression::r3139_multiline_lookahead_files_with_matches ... ok
+test regression::r279 ... ok
+test regression::r3127_gitignore_allow_unclosed_class ... ok
+test regression::r3127_glob_flag_not_allow_unclosed_class ... ok
+test regression::r391 ... FAILED
+test regression::r25 ... ok
+test regression::r3067_gitignore_error ... ok
+test regression::r2770_gitignore_error ... ok
+test regression::r428_unrecognized_style ... FAILED
+test regression::r451_only_matching_as_in_issue ... ok
+test regression::r451_only_matching ... ok
+test regression::r3180_look_around_panic ... ok
+test regression::r2480 ... ok
+test regression::r1868_context_passthru_override ... ok
+test regression::r405 ... ok
+test regression::r493 ... ok
+test regression::r483_matching_no_stdout ... ok
+test regression::r483_non_matching_exit_code ... ok
+test regression::r3179_global_gitignore_cwd ... FAILED
+test regression::r49 ... ok
+test regression::r50 ... ok
+test regression::r506_word_not_parenthesized ... ok
+test regression::r599 ... ok
+test regression::r64 ... ok
+test regression::r829_2731 ... FAILED
+test regression::r693_context_in_contextless_mode ... ok
+test regression::r829_2747 ... FAILED
+test regression::r65 ... ok
+test regression::r553_flag ... ok
+test regression::r67 ... ok
+test regression::r829_2933 ... FAILED
+test regression::r807 ... FAILED
+test regression::r568_leading_hyphen_option_args ... ok
+test regression::r900 ... ok
+test regression::r553_switch ... ok
+test regression::r90 ... ok
+test regression::r99 ... ok
+test regression::r87 ... ok
+test regression::r3108_files_without_match_quiet_exit ... ok
+test regression::r829_2836 ... ok
+test regression::r829_2778 ... ok
+test regression::r3173_hidden_whitelist_only_dot ... ok
+test regression::r829_original ... ok
+test regression::r93 ... ok
+test regression::r2711 ... ok
+
+failures:
+
+---- binary::before_match1_explicit stdout ----
+
+thread 'binary::before_match1_explicit' (14080) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--no-mmap" "-n" "Heaven" "hay"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\before_match1_explicit\13
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\before_match1_explicit\\13"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: hay: IO error for operation on hay: The system cannot find the file specified. (os error 2)
+
+
+==========
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- feature::f1842_field_context_separator stdout ----
+
+thread 'feature::f1842_field_context_separator' (26532) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-n" "-A1" "Doctor Watsons" "sherlock"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\f1842_field_context_separator\51
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\f1842_field_context_separator\\51"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: sherlock: IO error for operation on sherlock: The system cannot find the file specified. (os error 2)
+
+
+==========
+
+
+---- feature::f1_utf16_explicit stdout ----
+
+thread 'feature::f1_utf16_explicit' (21644) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\f1_utf16_explicit\59: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+
+---- feature::f740_passthru stdout ----
+
+thread 'feature::f740_passthru' (26100) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\f740_passthru\86: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+
+---- feature::f917_trim_max_columns_matches stdout ----
+
+thread 'feature::f917_trim_max_columns_matches' (20132) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\f917_trim_max_columns_matches\95: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+
+---- json::quiet_stats stdout ----
+
+thread 'json::quiet_stats' (24444) panicked at tests\util.rs:335:44:
+called `Result::unwrap()` on an `Err` value: Os { code: 267, kind: NotADirectory, message: "The directory name is invalid." }
+
+---- json::r1095_crlf_empty_match stdout ----
+
+thread 'json::r1095_crlf_empty_match' (19628) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r1095_crlf_empty_match\114: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+
+---- feature::stop_on_nonmatch stdout ----
+
+thread 'feature::stop_on_nonmatch' (15524) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--stop-on-nonmatch" "[235]"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\stop_on_nonmatch\109
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\stop_on_nonmatch\\109"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: No files were searched, which means ripgrep probably applied a filter you didn't expect.
+Running with --debug will show why files are being skipped.
+
+
+==========
+
+
+---- misc::after_context_line_numbers stdout ----
+
+thread 'misc::after_context_line_numbers' (4240) panicked at tests\util.rs:335:44:
+called `Result::unwrap()` on an `Err` value: Os { code: 267, kind: NotADirectory, message: "The directory name is invalid." }
+
+---- misc::before_context stdout ----
+
+thread 'misc::before_context' (24756) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-B" "1" "Sherlock" "sherlock"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\before_context\120
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\before_context\\120"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: sherlock: IO error for operation on sherlock: The system cannot find the file specified. (os error 2)
+
+
+==========
+
+
+---- misc::binary_convert stdout ----
+
+thread 'misc::binary_convert' (19224) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--no-mmap" "foo" "file"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\binary_convert\122
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\binary_convert\\122"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: file: IO error for operation on file: The system cannot find the file specified. (os error 2)
+
+
+==========
+
+
+---- misc::count_matches_inverted stdout ----
+
+thread 'misc::count_matches_inverted' (13688) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--count-matches" "--invert-match" "Sherlock"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\count_matches_inverted\144
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\count_matches_inverted\\144"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: No files were searched, which means ripgrep probably applied a filter you didn't expect.
+Running with --debug will show why files are being skipped.
+
+
+==========
+
+
+---- misc::count_matches stdout ----
+
+thread 'misc::count_matches' (21656) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--count-matches" "the"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\count_matches\143
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\count_matches\\143"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: No files were searched, which means ripgrep probably applied a filter you didn't expect.
+Running with --debug will show why files are being skipped.
+
+
+==========
+
+
+---- misc::file_type_clear stdout ----
+
+thread 'misc::file_type_clear' (3684) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\file_type_clear\149: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+
+---- misc::files_without_match stdout ----
+
+thread 'misc::files_without_match' (16212) panicked at tests\util.rs:335:44:
+called `Result::unwrap()` on an `Err` value: Os { code: 267, kind: NotADirectory, message: "The directory name is invalid." }
+
+---- misc::file_type_add_compose stdout ----
+
+thread 'misc::file_type_add_compose' (25184) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--type-add" "wat:*.wat" "--type-add" "combo:include:wat,py" "-t" "combo" "Sherlock"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\file_type_add_compose\148
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\file_type_add_compose\\148"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: No files were searched, which means ripgrep probably applied a filter you didn't expect.
+Running with --debug will show why files are being skipped.
+
+
+==========
+
+
+---- misc::files stdout ----
+
+thread 'misc::files' (1000) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+Did your search end up with no results?
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--files"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\files\154
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\files\\154"]
+
+status: exit code: 1
+
+stdout: 
+
+stderr: 
+
+==========
+
+
+---- misc::glob stdout ----
+
+thread 'misc::glob' (21064) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-g" "*.rs" "Sherlock"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\glob\157
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\glob\\157"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: No files were searched, which means ripgrep probably applied a filter you didn't expect.
+Running with --debug will show why files are being skipped.
+
+
+==========
+
+
+---- misc::no_ignore stdout ----
+
+thread 'misc::no_ignore' (14256) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\no_ignore\185: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+
+---- misc::quiet stdout ----
+
+thread 'misc::quiet' (24236) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\quiet\190: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+
+---- misc::sort_accessed stdout ----
+
+thread 'misc::sort_accessed' (8424) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\sort_accessed\196: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+
+---- misc::sort_files stdout ----
+
+thread 'misc::sort_files' (20068) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\sort_files\197: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+
+---- misc::vimgrep stdout ----
+
+thread 'misc::vimgrep' (22960) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\vimgrep\204: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+
+---- multiline::vimgrep stdout ----
+
+thread 'multiline::vimgrep' (11256) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\vimgrep\219: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+
+---- misc::file_types_negate_all stdout ----
+
+thread 'misc::file_types_negate_all' (680) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-T" "all" "Sherlock"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\file_types_negate_all\153
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\file_types_negate_all\\153"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: No files were searched, which means ripgrep probably applied a filter you didn't expect.
+Running with --debug will show why files are being skipped.
+
+
+==========
+
+
+---- regression::r1173 stdout ----
+
+thread 'regression::r1173' (10744) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r1173\230: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+
+---- regression::r1334_crazy_literals stdout ----
+
+thread 'regression::r1334_crazy_literals' (5116) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r1334_crazy_literals\242: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+
+---- regression::r1866 stdout ----
+
+thread 'regression::r1866' (26252) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r1866\260: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+
+---- regression::r2094 stdout ----
+
+thread 'regression::r2094' (20296) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--no-line-number" "--no-filename" "--multiline" "--max-count=1" "--passthru" "--replace=B" "b" "haystack"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r2094\266
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\r2094\\266"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: haystack: IO error for operation on haystack: The system cannot find the file specified. (os error 2)
+
+
+==========
+
+
+---- regression::r229 stdout ----
+
+thread 'regression::r229' (17964) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r229\272: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+
+---- regression::r206 stdout ----
+
+thread 'regression::r206' (16992) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "test" "-g" "*.txt"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r206\265
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\r206\\265"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: No files were searched, which means ripgrep probably applied a filter you didn't expect.
+Running with --debug will show why files are being skipped.
+
+
+==========
+
+
+---- regression::r2095 stdout ----
+
+thread 'regression::r2095' (10404) panicked at tests\util.rs:414:13:
+
+
+==========
+command failed but expected success!
+
+command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--line-number" "--multiline" "--only-matching" "--replace" "${value}" "^(?P<indent>\\s*)a=(?P<value>(?ms:[(].*?[)])|.*?)$" "test"
+
+cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r2095\267
+
+dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\r2095\\267"]
+
+status: exit code: 2
+
+stdout: 
+
+stderr: rg: test: IO error for operation on test: The system cannot find the file specified. (os error 2)
+
+
+==========
+
+
+---- regression::r270 stdout ----
+
+thread 'regression::r270' (3984) panicked at tests\util.rs:335:44:
+called `Result::unwrap()` on an `Err` value: Os { code: 267, kind: NotADirectory, message: "The directory name is invalid." }
+
+---- regression::r391 stdout ----
+
+thread 'regression::r391' (25572) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r391\292: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+
+---- regression::r428_unrecognized_style stdout ----
+
+thread 'regression::r428_unrecognized_style' (25184) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r428_unrecognized_style\294: Os { code: 145, kind: DirectoryNotEmpty, message: "The directory is not empty." }
+
+---- regression::r3179_global_gitignore_cwd stdout ----
+
+thread 'regression::r3179_global_gitignore_cwd' (7780) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r3179_global_gitignore_cwd\290: Os { code: 145, kind: DirectoryNotEmpty, message: "The directory is not empty." }
+
+---- regression::r829_2731 stdout ----
+
+thread 'regression::r829_2731' (5328) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r829_2731\312: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+
+---- regression::r829_2747 stdout ----
+
+thread 'regression::r829_2747' (1488) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r829_2747\313: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+
+---- regression::r829_2933 stdout ----
+
+thread 'regression::r829_2933' (15788) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r829_2933\316: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+
+---- regression::r807 stdout ----
+
+thread 'regression::r807' (3208) panicked at tests\util.rs:441:21:
+C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r807\311: Os { code: 145, kind: DirectoryNotEmpty, message: "The directory is not empty." }
+
+
+failures:
+    binary::before_match1_explicit
+    feature::f1842_field_context_separator
+    feature::f1_utf16_explicit
+    feature::f740_passthru
+    feature::f917_trim_max_columns_matches
+    feature::stop_on_nonmatch
+    json::quiet_stats
+    json::r1095_crlf_empty_match
+    misc::after_context_line_numbers
+    misc::before_context
+    misc::binary_convert
+    misc::count_matches
+    misc::count_matches_inverted
+    misc::file_type_add_compose
+    misc::file_type_clear
+    misc::file_types_negate_all
+    misc::files
+    misc::files_without_match
+    misc::glob
+    misc::no_ignore
+    misc::quiet
+    misc::sort_accessed
+    misc::sort_files
+    misc::vimgrep
+    multiline::vimgrep
+    regression::r1173
+    regression::r1334_crazy_literals
+    regression::r1866
+    regression::r206
+    regression::r2094
+    regression::r2095
+    regression::r229
+    regression::r270
+    regression::r3179_global_gitignore_cwd
+    regression::r391
+    regression::r428_unrecognized_style
+    regression::r807
+    regression::r829_2731
+    regression::r829_2747
+    regression::r829_2933
+
+test result: FAILED. 283 passed; 40 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s
+
+error: test failed, to rerun pass `--test integration`

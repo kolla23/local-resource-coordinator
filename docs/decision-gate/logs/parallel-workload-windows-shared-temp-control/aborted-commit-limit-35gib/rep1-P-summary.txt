@@ -1,0 +1,15 @@
+label: rep1-P
+mode: parallel
+command: set "PATH=C:\Users\kolla\.cargo\bin;%PATH%" && cargo build --locked && cargo test --locked
+workloads: 3
+machine: physical 16069 MiB, commit limit 35320 MiB | idle before start: commit 27940 MiB, available 4723 MiB
+makespan_s: 3.4
+aborted: commit 33422 MiB within 2 GiB of limit 35320 MiB
+w0: dir C:/Users/kolla/AppData/Local/lrc-bench/wt1 | exit 1 | wall_s 3.4 | job_peak_commit_mib 1878 | processes_total 29 | still_running_after_root_exit 0
+w1: dir C:/Users/kolla/AppData/Local/lrc-bench/wt2 | exit 1 | wall_s 3.3 | job_peak_commit_mib 1776 | processes_total 28 | still_running_after_root_exit 0
+w2: dir C:/Users/kolla/AppData/Local/lrc-bench/wt3 | exit 1 | wall_s 3.3 | job_peak_commit_mib 1732 | processes_total 28 | still_running_after_root_exit 0
+sum_of_job_peaks_mib: 5386
+system_max_commit_mib: 33422 (+5482 over idle)
+system_min_available_mib: 1999
+responsiveness_100ms_timer: samples 39 | worst_late_ms 61 | late_over_1s 0 | late_over_2s 0
+typeperf_csv: C:/Users/kolla/projects/local-resource-coordinator/docs/decision-gate/logs/parallel-workload-windows-shared-temp-control\rep1-P-typeperf.csv
