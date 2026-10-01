@@ -544,7 +544,10 @@ fn bound_the_age(
     ConfigFile::Text(bytes, Some(bounded))
 }
 
-pub fn reload_config(state: &mut State, read: ConfigFile) {
+/// `reload_config_at` with the clocks of now. The scheduler passes the
+/// clocks of its read; tests use this.
+#[cfg(test)]
+fn reload_config(state: &mut State, read: ConfigFile) {
     reload_config_at(state, read, LookClocks::now());
 }
 
