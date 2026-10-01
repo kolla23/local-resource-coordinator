@@ -65,6 +65,36 @@ Paging from `typeperf`:
 - `feature::f1414_no_require_git` failed in **every** run, both arms.
 - The test expects `.gitignore` to be ignored when there's no git repository. But `%TEMP%` (`C:\Users\kolla\AppData\Local\Temp`) is **inside the git repository at `C:\Users\kolla`**, so ripgrep finds a repository and respects it.
 - That's an environment artefact of this machine, and it's counted as 1 failure per worktree in the table.
+- *Update, 2026-10-01:* the owner renamed that repository's `.git`, and in the follow-up run below `f1414` passed in all 9 worktree runs.
+
+## Follow-up (2026-10-01): a separate TEMP/TMP per workload
+**Question:** were the false failures in rep1-P and rep2-P caused by the shared `%TEMP%`? To find out, I repeated the parallel arm only, giving each workload its own fresh, empty `TEMP`/`TMP`.
+
+**Answer:** yes, very likely. **3 of 3 parallel reps were clean:** all 9 worktree runs passed 437 of 437 tests, and "os error 32" appeared **0** times.
+
+- **Setup:** same ripgrep worktrees, command and runner as above. Two changes:
+  - `--temp-root` gives workload *i* its own folder, `%LOCALAPPDATA%\lrc-bench\tmp\<rep>-w<i>`.
+  - `run-gate.sh … P <temp-root>` runs the P arm 3 times.
+- **Each workload used its own folder:** each of the 9 TEMP folders contains its own `ripgrep-tests` folder with 321 entries. The shared `%TEMP%\ripgrep-tests` was last modified on 2026-09-30 at 21:30, before this run.
+- **Machine:** the owner closed apps first (`wsl --shutdown`, among others). Just before the run: 27.6 GiB committed of a 35.3 GiB limit, 4.0 GiB of RAM available ([environment.txt](logs/parallel-workload-windows-temp/environment.txt)). The commit limit was 44.8 GiB in the first run, so the page file had shrunk since.
+
+| Run | Makespan | Peak memory per workload (kernel job commit) | System commit increase | Lowest available RAM | Worst timer delay | Failed tests per worktree |
+|---|---|---|---|---|---|---|
+| rep1-P | 103.2 s | 1607 / 1610 / 1594 MiB | +4848 MiB | 1373 MiB | 123 ms | 0 / 0 / 0 |
+| rep2-P | 92.7 s | 1832 / 1723 / 1859 MiB | +4843 MiB | 2648 MiB | 106 ms | 0 / 0 / 0 |
+| rep3-P | 91.2 s | 1993 / 2091 / 1820 MiB | +5836 MiB | 2024 MiB | 98 ms | 0 / 0 / 0 |
+
+The median makespan was 92.7 s, against 97.5 s for P in the first run. Raw logs are in [logs/parallel-workload-windows-temp/](logs/parallel-workload-windows-temp/).
+
+**What this means:**
+- A per-job `TEMP`/`TMP` removed the collisions, without serializing anything or losing parallel speed.
+- For the coordinator, this makes per-job temp directories the main candidate for the ADR named in point 2 above. That ADR needs to settle how this fits SPEC §8.1 / S08 (environment changes). A named lock is the fallback for tools that ignore `TEMP`.
+- **How strong is the evidence?** If the original 2-in-3 collision rate still held, 3 clean reps would happen by chance about 4% of the time ((1/3)³). So this is strong evidence, but not proof. It covers one test harness (ripgrep's), and it doesn't cover tools that use fixed paths outside `TEMP`.
+- **Lowest available RAM was 1.4–2.6 GiB this time**, against 1 MiB to 1.3 GiB in the first run. That's mainly because the owner freed memory first, so it isn't evidence that per-job TEMP saves memory.
+
+**Two runner problems found on the way (both fixed, neither produced data):**
+- `%PATH%` now contains `C:\Program Files (x86)\Windows Kits\…`. The `)` closed the runner's `( … )` group, and cmd failed with "\Windows was unexpected at this time". This affected the unchanged gate 2 command too. The fix quotes the assignment: `set "PATH=…"`.
+- I passed a relative output directory, which the workloads, running with their worktree as the current directory, couldn't find. The output directory has to be an absolute path.
 
 ## Not tested
 - **Through a coordinator.** Unchanged qex can't run natively here. A qex-in-WSL2 comparison is reference-only (see [DECISION_NATIVE_WINDOWS.md](../fork/DECISION_NATIVE_WINDOWS.md)) and wasn't run in this step.
@@ -72,4 +102,4 @@ Paging from `typeperf`:
 - A quiet machine. Background apps weren't controlled, which makes the results realistic but noisier. The serial per-workload times varied from 36 to 60 s.
 - SPEC §21's 16/32 GiB configurations, at least 10 repetitions, randomized blocks and bootstrap confidence intervals. With 3 repetitions these numbers are indicative, not statistically strong.
 - Disk I/O and CPU pressure measured separately; only memory and paging were recorded.
-- Whether a per-job `TEMP` fixes the collisions. It's very likely, but unverified.
+- Whether a per-job `TEMP` fixes the collisions. It's very likely, but unverified. *(Tested on 2026-10-01: see the follow-up above.)*

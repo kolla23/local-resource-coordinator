@@ -2,7 +2,7 @@
 # Decision gate step 2: 3 ripgrep worktrees, cargo build + cargo test, native Windows.
 # Arms: P = all 3 at once (uncoordinated); S = one at a time (static cap 1).
 # 3 repetitions, alternating order, cold target dirs, dependencies pre-fetched.
-# Usage (Git Bash): run-gate.sh <bench-dir with wt1 wt2 wt3> <out-dir> [arms] [temp-root]
+# Usage (Git Bash): run-gate.sh <bench-dir with wt1 wt2 wt3> <absolute out-dir> [arms] [temp-root]
 #   arms: "P S" (default, alternating order per rep) or just "P" / "S".
 #   temp-root: give each workload its own fresh TEMP/TMP under this directory.
 set -u
