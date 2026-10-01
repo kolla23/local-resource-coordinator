@@ -1,5 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: the peer test holds the env lock (issue #5).
-// Modified by the local-resource-coordinator fork, 2026-10-01: test State gains the config-look fields (issue #17).
+// Modified by the local-resource-coordinator fork, 2026-10-01: test State gains the config-look fields; the config read takes its clocks before the lock (issue #17).
 //! This module decides when each job starts.
 //!
 //! The rule is simple: a job starts when the machine has capacity for its
@@ -1000,7 +1000,9 @@ pub fn run(coord: Arc<Coordinator>) {
         // of `qex submit` running, with a minimum of 1.2ms. `reload_config`
         // therefore measures TIME, and it must never count turns.
         let config = crate::config::read_config_file();
-        crate::daemon::reload_config(&mut coord.state.lock().unwrap(), config);
+        // The clocks of THIS read, before the wait for the mutex (issue #17).
+        let clocks = crate::daemon::LookClocks::now();
+        crate::daemon::reload_config_at(&mut coord.state.lock().unwrap(), config, clocks);
 
         // Read the status file of each job that operates. The supervisors write
         // those files, so this is how the coordinator learns that a job started.

@@ -423,8 +423,34 @@ pub struct ConfigLook {
 
 impl ConfigLook {
     pub fn now(fingerprint: u64) -> Self {
+        Self::at(fingerprint, LookClocks::now())
+    }
+
+    fn at(fingerprint: u64, clocks: LookClocks) -> Self {
         Self {
             fingerprint,
+            mono: clocks.mono,
+            wall: clocks.wall,
+        }
+    }
+}
+
+/// Both clocks, read together at one look.
+///
+/// TAKE THEM RIGHT AFTER THE READ of the file, before anything waits: the
+/// read runs outside the mutex, and a time taken after the lock would add
+/// that wait to the gap between two looks and put a clock step in the wrong
+/// window. Taken after the read, the gap can only come out shorter than the
+/// true bound, and the clocks agree with the age that the read computed.
+#[derive(Clone, Copy, Debug)]
+pub struct LookClocks {
+    pub mono: Instant,
+    pub wall: std::time::SystemTime,
+}
+
+impl LookClocks {
+    pub fn now() -> Self {
+        Self {
             mono: Instant::now(),
             wall: std::time::SystemTime::now(),
         }
@@ -481,8 +507,13 @@ fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
 /// a step gives a small wall age, and the `min` takes it. Every bound is a
 /// `min` or a subtraction, so a file only looks younger, never older. An age
 /// that cannot be computed stays unknown.
-fn bound_the_age(state: &mut State, fingerprint: u64, read: ConfigFile) -> ConfigFile {
-    let look = ConfigLook::now(fingerprint);
+fn bound_the_age(
+    state: &mut State,
+    fingerprint: u64,
+    read: ConfigFile,
+    clocks: LookClocks,
+) -> ConfigFile {
+    let look = ConfigLook::at(fingerprint, clocks);
     let last = state.config_last_look.replace(look);
     let carried = state.config_bounded_age.take();
 
@@ -514,8 +545,13 @@ fn bound_the_age(state: &mut State, fingerprint: u64, read: ConfigFile) -> Confi
 }
 
 pub fn reload_config(state: &mut State, read: ConfigFile) {
+    reload_config_at(state, read, LookClocks::now());
+}
+
+/// `reload_config` with the clocks of the read. See `LookClocks`.
+pub fn reload_config_at(state: &mut State, read: ConfigFile, clocks: LookClocks) {
     let now = config_fingerprint(&read);
-    let read = bound_the_age(state, now, read);
+    let read = bound_the_age(state, now, read, clocks);
     if now == state.config_seen {
         state.config_settling = None;
         // The file gives what the coordinator holds, so no writer is in the
@@ -3411,8 +3447,9 @@ mod tests {
     }
 
     /// A coordinator that STALLS past the settle time while the wall clock
-    /// steps forward: the monotonic bound is then large, and only the
-    /// measured step keeps the half file out.
+    /// steps forward: the gap since the last look is then large, so it does
+    /// not bound the age. A step above `CLOCK_STEP_TOLERANCE` in that window
+    /// makes the new content start at zero, and that keeps the half file out.
     #[test]
     fn a_stall_and_a_clock_step_together_do_not_settle_a_new_file() {
         let whole = ConfigFile::Text(
@@ -3437,7 +3474,7 @@ mod tests {
         reload_config(&mut state, clone_of(&half));
         assert_eq!(
             state.config_seen, taken,
-            "the measured step must come off the age, even after a stall"
+            "a step above the tolerance must start new content at zero, even after a stall"
         );
     }
 
@@ -3516,11 +3553,13 @@ mod tests {
         );
     }
 
-    /// A step AFTER the content was first seen came after the file was
-    /// written, so it comes off the age exactly. It matters after a stall,
-    /// when the monotonic bound alone is large.
+    /// A step AFTER the content was first seen must not age it. The step
+    /// here is above `CLOCK_STEP_TOLERANCE`, so the wall age is not reduced;
+    /// the bound carried from the last look plus the monotonic gap keeps the
+    /// file young. It matters after a stall, when the gap before the first
+    /// look is large.
     #[test]
-    fn a_clock_step_after_the_first_look_comes_off_the_age() {
+    fn a_clock_step_after_the_first_look_does_not_age_the_file() {
         let whole = ConfigFile::Text(
             b"[budget]\ncpu = \"2\"\nmem = \"1GB\"\n".to_vec(),
             Some(CONFIG_SETTLE * 4),
@@ -3542,7 +3581,7 @@ mod tests {
         reload_config(&mut state, half(Duration::from_millis(800)));
         assert_eq!(
             state.config_seen, taken,
-            "a step after the first look must come off the age"
+            "a step after the first look must not age the file"
         );
     }
 
@@ -3633,6 +3672,40 @@ mod tests {
         assert_ne!(
             state.config_seen, before,
             "ten looks 100ms apart add up past the settle time"
+        );
+    }
+
+    /// The clocks of a look are the clocks of its READ, which the scheduler
+    /// takes before it waits for the mutex. A step that the read's clocks
+    /// show must count, whatever the time is when the lock is taken.
+    #[test]
+    fn a_look_uses_the_clocks_of_its_read() {
+        let whole = ConfigFile::Text(
+            b"[budget]
+cpu = \"2\"
+mem = \"1GB\"
+"
+            .to_vec(),
+            Some(CONFIG_SETTLE * 4),
+        );
+        let mut state = State::for_a_test();
+        let read_then = LookClocks {
+            mono: Instant::now() - Duration::from_secs(1),
+            wall: std::time::SystemTime::now() - Duration::from_secs(1),
+        };
+        reload_config_at(&mut state, clone_of(&whole), read_then);
+        let taken = state.config_seen;
+
+        // The next read: 1s later on the monotonic clock, and the wall
+        // clock 600ms further. Measured at the lock instead, there is no step.
+        let read_now = LookClocks {
+            mono: read_then.mono + Duration::from_secs(1),
+            wall: read_then.wall + Duration::from_millis(1600),
+        };
+        reload_config_at(&mut state, half_file(Duration::from_millis(750)), read_now);
+        assert_eq!(
+            state.config_seen, taken,
+            "the step that the read's clocks show must count"
         );
     }
 
