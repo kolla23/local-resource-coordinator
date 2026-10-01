@@ -470,9 +470,11 @@ fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
 ///   not taken off: it may have come before or after the write);
 /// - the bound of the last look plus the monotonic time since it, for the
 ///   same content. Content that the last look did not see arrived after it,
-///   so it starts at the monotonic time since that look, or at ZERO when a
-///   larger step falls in that window: its age is then counted only on the
-///   monotonic clock, from the first look that saw it.
+///   so it starts at the monotonic time since that look. When a larger step
+///   falls in the window, ANY content starts at ZERO: the same bytes may be
+///   a new file that a writer put down again during the gap, so the carried
+///   bound is no bound, and the age is counted only on the monotonic clock
+///   from this look.
 ///
 /// So a file must pass its wall age, as the code before this change asked,
 /// AND every bound; it can never be taken where the wall age alone refused
@@ -508,10 +510,15 @@ fn bound_the_age(
             } else {
                 age
             };
+            // A step that cannot be placed leaves no bound to carry: the
+            // same bytes may be a NEW file that a writer put down again
+            // during the gap (half, whole, half), and its wall age is
+            // inflated by the step. Start again at zero; the content then
+            // settles on the monotonic clock, within about `CONFIG_SETTLE`.
             let since = match carried {
+                _ if !placed => Duration::ZERO,
                 Some(before) if last.fingerprint == fingerprint => before + gap,
-                _ if placed => gap,
-                _ => Duration::ZERO,
+                _ => gap,
             };
             wall.min(since)
         }
