@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests that read the peer directory hold the env lock (issue #5).
 //! This module shares the resource claims between the users of one machine.
 //!
 //! Each coordinator writes its claims to a file in a shared directory. Each
@@ -419,6 +420,7 @@ mod tests {
 
     #[test]
     fn a_record_of_this_user_does_not_count() {
+        let _env = crate::testutil::peers_env();
         let dir = tmpdir("self");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
         let cfg = cfg_for(&dir);
@@ -433,6 +435,7 @@ mod tests {
 
     #[test]
     fn a_directory_without_the_sticky_bit_is_refused() {
+        let _env = crate::testutil::peers_env();
         let dir = tmpdir("nosticky");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
         let cfg = cfg_for(&dir);
@@ -444,6 +447,7 @@ mod tests {
 
     #[test]
     fn a_file_in_place_of_the_directory_is_refused() {
+        let _env = crate::testutil::peers_env();
         let dir = tmpdir("isfile");
         std::fs::remove_dir_all(&dir).ok();
         std::fs::write(&dir, b"not a directory").unwrap();
@@ -454,6 +458,7 @@ mod tests {
 
     #[test]
     fn a_record_with_the_wrong_owner_is_refused() {
+        let _env = crate::testutil::peers_env();
         let dir = tmpdir("wrongowner");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
 
@@ -485,6 +490,7 @@ mod tests {
 
     #[test]
     fn an_old_record_and_a_dead_process_do_not_count() {
+        let _env = crate::testutil::peers_env();
         let dir = tmpdir("stale");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
         let cfg = cfg_for(&dir);
@@ -514,6 +520,7 @@ mod tests {
 
     #[test]
     fn a_damaged_file_does_not_stop_the_reader() {
+        let _env = crate::testutil::peers_env();
         let dir = tmpdir("garbage");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
         let other = dir.join("u12345");
@@ -535,6 +542,7 @@ mod tests {
     /// test does not fail: it hangs.
     #[test]
     fn a_fifo_in_place_of_a_record_does_not_stop_the_reader() {
+        let _env = crate::testutil::peers_env();
         let dir = tmpdir("fifo");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
         let other = dir.join("u12345");
@@ -558,6 +566,7 @@ mod tests {
 
     #[test]
     fn a_symbolic_link_is_not_read() {
+        let _env = crate::testutil::peers_env();
         let dir = tmpdir("symlink");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
 
@@ -613,6 +622,7 @@ mod tests {
     /// devices, two users give the device 0 to two jobs.
     #[test]
     fn a_peer_record_carries_the_pools_and_the_devices() {
+        let _env = crate::testutil::peers_env();
         let dir = tmpdir("pools");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
         let cfg = cfg_for(&dir);
@@ -638,6 +648,7 @@ mod tests {
 
     #[test]
     fn the_peer_system_is_off_when_the_config_says_so() {
+        let _env = crate::testutil::peers_env();
         let dir = tmpdir("disabled");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
         let mut cfg = cfg_for(&dir);

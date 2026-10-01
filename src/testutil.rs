@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: add peers_env (issue #5).
 //! Test-only helpers.
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -53,5 +54,26 @@ impl Drop for EnvVar {
             Some(v) => std::env::set_var(&self.key, v),
             None => std::env::remove_var(&self.key),
         }
+    }
+}
+
+/// Holds the environment lock and unsets `QEX_PEERS_DIR` for one test.
+///
+/// A test that reads the peer directory must not run while a different test
+/// sets `QEX_PEERS_DIR` or `TMPDIR`: the reader then reads the directory of
+/// the other test and counts no peer. The tests that set those variables hold
+/// `env_lock`, so a reader must hold it too.
+pub struct PeersEnv {
+    // Fields drop in order: the variable is put back while the lock is held.
+    _var: EnvVar,
+    _lock: MutexGuard<'static, ()>,
+}
+
+/// Gives a `PeersEnv` for a test that reads the peer directory.
+pub fn peers_env() -> PeersEnv {
+    let lock = env_lock();
+    PeersEnv {
+        _var: EnvVar::unset(crate::peers::DIR_VARIABLE),
+        _lock: lock,
     }
 }
