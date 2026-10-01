@@ -68,6 +68,15 @@ These change upstream interfaces, so each needs an ADR before the CLI implements
 3. **Per-job TEMP/TMP** (decision D). Already pending from gate 2; listed here because the recipe relies on it.
 4. **`inspect` reports what a queued job waits behind**: the jobs ahead of it (IDs, groups, claims) in `inspect --json`. The SPEC only defines wait reason codes (L284), and the owner's WAIT requirement needs more.
 
+## Open questions for the ADRs
+Found in review round 3 and left open by the owner (2026-10-01). Each has a suggested answer; the ADRs decide.
+1. **Job ID after a tool-timeout kill.** The result file is written by the submitting CLI when it finishes (SPEC L421), so if the tool limit kills `coord run`, the agent has no machine-readable job ID to report, and parsing stderr is not allowed (L456).
+   *Suggested answer:* every `coord run` also writes the machine-readable event file (SPEC L417), which records the job ID at acceptance. Alternative: write the result file at acceptance and update it at the end. Add this case to acceptance check 5.
+2. **"What it's queued behind" after the queue timeout.** By the time the agent reports, the job is terminal (`QUEUE_EXPIRED`), so a live jobs-ahead view (ADR 4) has nothing to show.
+   *Suggested answer:* ADR 4 keeps the last wait reason and jobs-ahead snapshot on the terminal `QUEUE_EXPIRED` (and withdrawn) record, and an acceptance check reads it after expiry.
+3. **A killed client can still leave a queued job.** If an agent's tool limit is shorter than its `--queue-timeout`, the client dies while the job is queued; ADR 1 currently only *recommends* withdrawing it, so it could start later with nobody watching.
+   *Suggested answer:* make withdrawal of a queued job a required part of ADR 1 (this extends decision B, which covered running jobs), and add an acceptance check under 4: kill the client while its job is queued and confirm the job never starts.
+
 ## Acceptance checks (once the CLI exists)
 Run through the real CLI, in the same spirit as the repo's e2e tests:
 1. The generated `SKILL.md` and AGENTS.md snippet match `coord help agents` byte for byte (test fails on drift).
