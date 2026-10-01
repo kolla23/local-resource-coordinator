@@ -50,7 +50,8 @@ fn main() {
     let temp_root = args
         .iter()
         .position(|a| a == "--temp-root")
-        .map(|i| PathBuf::from(args.get(i + 1).expect("missing --temp-root value")));
+        // Absolute: each workload resolves TEMP from its own worktree.
+        .map(|i| std::path::absolute(args.get(i + 1).expect("missing --temp-root value")).unwrap());
     let dirs: Vec<PathBuf> = {
         let mut skip = false;
         let mut v = Vec::new();
