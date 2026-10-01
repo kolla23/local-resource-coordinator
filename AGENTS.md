@@ -44,4 +44,5 @@ An independently maintained fork of qex (Apache-2.0). It is a local coordinator 
 Add one line each time the same mistake happens twice.
 - On Windows, Git Bash's `/usr/bin/link.exe` can shadow the MSVC linker. From Git Bash, pass Linux paths to `wsl.exe` with `MSYS_NO_PATHCONV=1`.
 - Keep this repo's `core.autocrlf=false`, so upstream files stay LF.
+- PR titles must match `type(scope): summary` and be at most 72 characters (`.github/scripts/check-title.sh`); count before `gh pr create`.
 - The unit test `sched::tests::a_job_that_another_user_holds_back_says_so_and_never_keeps_capacity` fails in the full `cargo test --bins` run on WSL2 (2 out of 2) and passes alone (3 out of 3). This happens on unchanged upstream code, so it isn't a regression.
