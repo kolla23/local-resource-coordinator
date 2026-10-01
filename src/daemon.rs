@@ -3540,6 +3540,69 @@ mod tests {
         );
     }
 
+    /// Sets up a coordinator that took the whole file, then stalled 2s while
+    /// the wall clock stepped `step` forward, so the next look sees content
+    /// first with a step of `step` in the window before it.
+    fn after_a_stall_with_a_step(step: Duration) -> State {
+        let whole = ConfigFile::Text(
+            b"[budget]\ncpu = \"2\"\nmem = \"1GB\"\n".to_vec(),
+            Some(CONFIG_SETTLE * 4),
+        );
+        let mut state = State::for_a_test();
+        reload_config(&mut state, clone_of(&whole));
+        time_passes(&mut state, Duration::from_secs(2));
+        state.config_last_look.as_mut().unwrap().wall -= step;
+        state
+    }
+
+    fn half_file(age: Duration) -> ConfigFile {
+        ConfigFile::Text(b"[budget]\ncpu = \"2\"\n".to_vec(), Some(age))
+    }
+
+    /// THE KNOWN LIMIT OF ISSUE #64 MUST NOT GET WORSE. A writer that puts
+    /// a half file down again and again, a coordinator that looks 600ms
+    /// apart, and a clock step in the window: every look gives the same half
+    /// content, and every half file is young by its own wall age. The old
+    /// code refused it on that age. The new code must refuse it too, and
+    /// never take a file that the wall age alone would have refused.
+    #[test]
+    fn an_unknown_age_never_takes_a_file_that_its_wall_age_refuses() {
+        let mut state = after_a_stall_with_a_step(Duration::from_millis(100));
+        let taken = state.config_seen;
+
+        reload_config(&mut state, half_file(Duration::from_millis(200)));
+        time_passes(&mut state, Duration::from_millis(600));
+        reload_config(&mut state, half_file(Duration::from_millis(200)));
+        assert_eq!(
+            state.config_seen, taken,
+            "a file whose wall age says young must not be taken, as the old code did not"
+        );
+    }
+
+    /// The tolerance at its edge. A step of up to `CLOCK_STEP_TOLERANCE` in
+    /// the window before the first look is taken off the age, and the file
+    /// keeps its single look. A larger one also needs the monotonic looks.
+    #[test]
+    fn a_step_at_the_tolerance_keeps_the_single_look_and_one_above_does_not() {
+        let below = CLOCK_STEP_TOLERANCE - Duration::from_millis(1);
+        let mut state = after_a_stall_with_a_step(below);
+        reload_config(&mut state, half_file(Duration::from_millis(600)));
+        assert_eq!(
+            state.config_seen,
+            config_fingerprint(&half_file(Duration::ZERO)),
+            "a step of {below:?} keeps the single look"
+        );
+
+        let above = CLOCK_STEP_TOLERANCE + Duration::from_millis(1);
+        let mut state = after_a_stall_with_a_step(above);
+        let taken = state.config_seen;
+        reload_config(&mut state, half_file(Duration::from_millis(600)));
+        assert_eq!(
+            state.config_seen, taken,
+            "a step of {above:?} needs the monotonic looks as well"
+        );
+    }
+
     /// A BACKWARD step must never make a file look older. The wall time
     /// since the last look is then less than the monotonic time; the
     /// difference must count as no step, never as a negative one.
