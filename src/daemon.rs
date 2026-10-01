@@ -451,9 +451,10 @@ fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
 /// The age of a file is wall-clock time minus its mtime, and a wall clock
 /// STEPS: WSL2 measured forward steps of 450ms and 407ms within three
 /// minutes of a busy build, which made a half file that had been at the path
-/// 302ms read 732ms old. So each look takes the smaller of two bounds that
-/// are LOWER bounds on the true age as long as the wall clock moves one way
-/// within each window between two looks (see the limit below):
+/// 302ms read 732ms old. So each look takes the smaller of two terms. The
+/// first is a LOWER bound on the true age, as long as the wall clock moves
+/// one way within each window between two looks (see the limit below) and
+/// the mtime is honest; the second caps it:
 ///
 /// - the wall age that this read gives, less the forward step of the wall
 ///   clock since the last look. If the file was written in that window, no
@@ -465,9 +466,10 @@ fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
 ///   the last look (the content arrived after it).
 ///
 /// THE SAME BYTES ARE NOT THE SAME FILE: a writer can put the same half file
-/// down again between two looks. The first bound covers that case, and the
+/// down again between two looks. The first term covers that case, and the
 /// second covers an old file whose earlier steps the first does not see; the
-/// `min` is a lower bound in both. A step of any size, or a suspend (the
+/// `min` is at most the first term, so it stays a lower bound whenever that
+/// term is one. A step of any size, or a suspend (the
 /// monotonic clock of Linux stops in a suspend and the wall clock does
 /// not), lowers the bound of ONE look; the bound then grows again on the
 /// monotonic clock, so a change waits about `CONFIG_SETTLE`, never the
@@ -476,11 +478,13 @@ fn forward_step(from: &ConfigLook, to: &ConfigLook) -> Duration {
 /// THE LIMIT. `forward_step` sees only the two ends of a window, so steps in
 /// opposite directions inside ONE window cancel: the wall clock steps back,
 /// a writer puts a file down, the clock steps forward again before the next
-/// look. The wall term is then not a lower bound, and if the carried bound
-/// has already passed the settle time (the same bytes put down again and
-/// again, the pattern of issue #64), the file is judged by its raw wall age:
+/// look. The wall term is then not a lower bound, and if the other term has
+/// already passed the settle time (the carried bound for the same bytes put
+/// down again and again, the pattern of issue #64; or the monotonic gap for
+/// new content, which an idle coordinator, looking about every 500ms, can
+/// reach on an ordinary look), the file is judged by its raw wall age:
 /// exactly as the code before this change judged it. Two clock samples per
-/// look cannot see this, and it needs two opposite steps within one look.
+/// look cannot see this, and it needs two opposite steps within one window.
 ///
 /// Every bound is a `min` or a subtraction, so a file only looks younger,
 /// never older: it can never be taken where the wall age alone refused it,

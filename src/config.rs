@@ -1,7 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: unit test for the automatic CPU budget.
 // Modified by the local-resource-coordinator fork, 2026-10-01: default [update] check = "never" (issue #4).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a config file replaced during the read is young (issue #17).
-// Modified by the local-resource-coordinator fork, 2026-10-01: a read returns the clocks its age was measured against; tests that a clock step or an unknown age never settles a config file (issue #17).
+// Modified by the local-resource-coordinator fork, 2026-10-01: a read returns the clocks its age was measured against; a read with a future mtime has no age (issue #17).
 //! This module reads the config file `~/.config/qex.toml`.
 //!
 //! Each field has a default value. The config file is thus optional. If the
