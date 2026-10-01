@@ -1305,11 +1305,7 @@ fn read_config_at(path: &std::path::Path, after_read: impl FnOnce()) -> ConfigFi
             _ => true,
         }
     };
-    let age = if replaced {
-        Some(Duration::ZERO)
-    } else {
-        age
-    };
+    let age = if replaced { Some(Duration::ZERO) } else { age };
 
     match read {
         Ok(_) => ConfigFile::Text(bytes, age),
