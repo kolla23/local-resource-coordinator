@@ -639,7 +639,7 @@ impl State {
     /// reads. A test of the reload must not need a coordinator, a socket or a
     /// directory.
     #[cfg(test)]
-    fn for_a_test() -> Self {
+    pub(crate) fn for_a_test() -> Self {
         Self {
             cfg: Config::default(),
             jobs: BTreeMap::new(),
@@ -3482,30 +3482,7 @@ mod tests {
     }
 
     fn empty_state() -> State {
-        State {
-            cfg: Config::default(),
-            jobs: BTreeMap::new(),
-            stopped: BTreeMap::new(),
-            index: crate::resolve::Index::default(),
-            retiring: Vec::new(),
-            queue: Vec::new(),
-            dedupe: BTreeMap::new(),
-            last_contact: Instant::now(),
-            idle_since: None,
-            next_sequence: 1,
-            started_at: 0,
-            paused: crate::pause::Paused::default(),
-            last_start_at: None,
-            head: None,
-            peer_claims: Default::default(),
-            stop: false,
-            config_seen: 0,
-            config_settling: None,
-            config_last_look: None,
-            config_changed_after: None,
-            config_error: None,
-            events: crate::events::EventLog::new(),
-        }
+        State::for_a_test()
     }
 
     /// Puts one job with a key in the state, and gives its id.

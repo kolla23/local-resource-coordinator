@@ -816,28 +816,9 @@ mod tests {
             },
         );
         State {
-            cfg: Default::default(),
             jobs,
-            stopped: Default::default(),
-            index: Default::default(),
-            retiring: Vec::new(),
-            queue: Vec::new(),
-            last_contact: Instant::now(),
-            idle_since: None,
-            next_sequence: 1,
-            started_at: 0,
-            dedupe: BTreeMap::new(),
-            config_seen: 0,
-            config_settling: None,
-            config_last_look: None,
-            config_changed_after: None,
-            config_error: None,
             events: EventLog::with_capacity(RETAINED),
-            paused: crate::pause::Paused::default(),
-            last_start_at: None,
-            head: None,
-            peer_claims: Default::default(),
-            stop: false,
+            ..State::for_a_test()
         }
     }
 

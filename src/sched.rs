@@ -2492,26 +2492,9 @@ mod tests {
         crate::daemon::State {
             cfg: cfg_with("4", "8GB"),
             jobs,
-            stopped: Default::default(),
-            index: Default::default(),
-            retiring: Vec::new(),
             queue: vec![id],
-            last_contact: Instant::now(),
-            idle_since: None,
-            next_sequence: 1,
             started_at: sys::now_secs(),
-            config_seen: 0,
-            config_settling: None,
-            config_last_look: None,
-            config_changed_after: None,
-            config_error: None,
-            dedupe: Default::default(),
-            events: crate::events::EventLog::new(),
-            paused: crate::pause::Paused::default(),
-            last_start_at: None,
-            head: None,
-            peer_claims: Default::default(),
-            stop: false,
+            ..crate::daemon::State::for_a_test()
         }
     }
 
