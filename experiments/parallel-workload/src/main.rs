@@ -37,11 +37,11 @@ unsafe impl Sync for Job {}
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
-    // The value after flag `n`; a following flag is not a value.
+    // The value after flag `n`; an empty string or a following flag is not a value.
     let value = |n: &str| {
         args.iter().position(|a| a == n).map(|i| {
             args.get(i + 1)
-                .filter(|v| !v.starts_with("--"))
+                .filter(|v| !v.is_empty() && !v.starts_with("--"))
                 .unwrap_or_else(|| panic!("missing {n} value"))
                 .clone()
         })

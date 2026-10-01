@@ -12,7 +12,7 @@ BENCH=${1:?bench dir}
 OUT=${2:?out dir}
 ARMS=${3:-P S}
 TEMP_ROOT=${4:-}
-HERE=$(cd "$(dirname "$0")" && pwd)
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
 RUNNER="$HERE/target/release/parallel-workload.exe"
 mkdir -p "$OUT" || exit 1
 # CDPATH= keeps cd from printing a matched directory into the captured value.
