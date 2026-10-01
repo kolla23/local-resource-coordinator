@@ -50,7 +50,7 @@ fn main() {
     let temp_root = args
         .iter()
         .position(|a| a == "--temp-root")
-        .map(|i| PathBuf::from(&args[i + 1]));
+        .map(|i| PathBuf::from(args.get(i + 1).expect("missing --temp-root value")));
     let dirs: Vec<PathBuf> = {
         let mut skip = false;
         let mut v = Vec::new();
@@ -327,7 +327,8 @@ fn run(mode: &str, out: &Path, label: &str, cmd: &str, temp_root: Option<&Path>,
     let mut s = String::new();
     let _ = writeln!(
         s,
-        "label: {label}\nmode: {mode}\ncommand: {cmd}\nworkloads: {}",
+        "label: {label}\nmode: {mode}\ncommand: {cmd}\ntemp_root: {}\nworkloads: {}",
+        temp_root.map_or("none (shared %TEMP%)".into(), |r| r.display().to_string()),
         runs.len()
     );
     let _ = writeln!(
