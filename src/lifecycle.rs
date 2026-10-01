@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests pass the clocks Coordinator::new now takes (issue #17).
 //! This module stops jobs and deletes job records.
 //!
 //! qex signals the process group of a job, and not the first process only. A
@@ -831,7 +832,11 @@ mod tests {
     #[test]
     fn a_record_from_an_earlier_start_of_the_machine_is_outside_the_context() {
         let (_lock, _var, dir) = isolated_state();
-        let coord = Arc::new(Coordinator::new(crate::config::Config::default(), 0));
+        let coord = Arc::new(Coordinator::new(
+            crate::config::Config::default(),
+            0,
+            crate::config::LookClocks::now(),
+        ));
         let mut state = coord.state.lock().unwrap();
         let this_start = queued_job(Some("boot-now"), chain());
         let earlier_start = queued_job(Some("boot-before"), chain());
@@ -874,7 +879,11 @@ mod tests {
         use std::os::unix::process::CommandExt;
 
         let (_lock, _var, dir) = isolated_state();
-        let coord = Arc::new(Coordinator::new(crate::config::Config::default(), 0));
+        let coord = Arc::new(Coordinator::new(
+            crate::config::Config::default(),
+            0,
+            crate::config::LookClocks::now(),
+        ));
         let mut job = queued_job(Some("boot"), chain());
         job.status.state = JobState::Starting;
         job.status.pid = None;
