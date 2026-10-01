@@ -3308,6 +3308,12 @@ mod tests {
 
         // The same content, once the file is old enough. ONE look is enough:
         // the file itself proves that it held this content.
+        //
+        // Fork (issue #17): the settle time must also PASS for the
+        // coordinator. A file seen young cannot be old an instant later
+        // unless the wall clock stepped, so the age is bounded by the
+        // monotonic time since that look.
+        time_passes(&mut state, CONFIG_SETTLE * 2);
         let old = ConfigFile::Text(b"[budget]\ncpu = \"1\"\n".to_vec(), Some(CONFIG_SETTLE * 2));
         reload_config(&mut state, clone_of(&old));
         assert_ne!(
@@ -3608,6 +3614,25 @@ mod tests {
         assert_eq!(
             state.config_seen, taken,
             "a step of {above:?} needs the monotonic looks as well"
+        );
+    }
+
+    /// A file seen at many quick looks settles as the monotonic time adds up
+    /// across them: the bound is carried from look to look, so no single gap
+    /// has to reach the settle time.
+    #[test]
+    fn a_file_settles_over_many_quick_looks() {
+        let mut state = State::for_a_test();
+        let before = state.config_seen;
+        let file = |age| ConfigFile::Text(b"[budget]\ncpu = \"1\"\n".to_vec(), Some(age));
+        reload_config(&mut state, file(Duration::ZERO));
+        for i in 1..=10u32 {
+            time_passes(&mut state, Duration::from_millis(100));
+            reload_config(&mut state, file(Duration::from_millis(100) * i));
+        }
+        assert_ne!(
+            state.config_seen, before,
+            "ten looks 100ms apart add up past the settle time"
         );
     }
 
