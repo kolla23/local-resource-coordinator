@@ -9633,14 +9633,24 @@ fn a_file_that_goes_back_and_forth_does_not_change_the_budget() {
         let deadline = Instant::now() + Duration::from_secs(12);
         let mut looks = 0;
         let mut fault = None;
+        // When the last look that gave the whole budget began: qex still held
+        // the whole file then, so the half file it took was at the path, or
+        // held open by a read, at some moment after it.
+        let mut last_good: Option<Instant> = None;
         while Instant::now() < deadline {
+            let asked = Instant::now();
             let out = h.qex(&["info", "--json"]);
             if let Ok(info) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
                 looks += 1;
                 if info["mem_budget"].as_u64() != Some(1024 * 1024 * 1024) {
-                    fault = Some((Instant::now(), format!("{looks} looks, then {info}")));
+                    fault = Some((
+                        Instant::now(),
+                        last_good,
+                        format!("{looks} looks, then {info}"),
+                    ));
                     break;
                 }
+                last_good = Some(asked);
             }
         }
         stop.store(true, Ordering::Relaxed);
@@ -9650,15 +9660,20 @@ fn a_file_that_goes_back_and_forth_does_not_change_the_budget() {
             "the test must look many times, and it looked {looks}"
         );
 
-        let Some((seen_at, fault)) = fault else {
+        let Some((seen_at, last_good, fault)) = fault else {
             return;
         };
-        // The half file that qex took was put down before qex reported it,
-        // and the whole file that follows it waits the settle time again, so
-        // that half file started within a few seconds before the report.
+        // Only a half file that qex could have taken between the last good look
+        // and the report counts: one put down before the report, and whose
+        // age could still grow after the last good look (a half file replaced
+        // more than the settle time before it was too young to take then, and
+        // could not age once replaced). A stall of some OTHER half file must
+        // not excuse this fault.
         let longest = halves
             .iter()
-            .filter(|(put, _)| *put <= seen_at && seen_at - *put < Duration::from_secs(5))
+            .filter(|(put, replaced)| {
+                *put <= seen_at && last_good.is_none_or(|good| *replaced + SETTLE >= good)
+            })
             .map(|(put, replaced)| *replaced - *put)
             .max()
             .unwrap_or_default();
