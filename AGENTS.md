@@ -45,4 +45,3 @@ Add one line each time the same mistake happens twice.
 - On Windows, Git Bash's `/usr/bin/link.exe` can shadow the MSVC linker. From Git Bash, pass Linux paths to `wsl.exe` with `MSYS_NO_PATHCONV=1`.
 - Keep this repo's `core.autocrlf=false`, so upstream files stay LF.
 - PR titles must match `type(scope): summary` (lower-case type, scope optional), be at most 72 characters and not end with a full stop (`.github/scripts/check-title.sh`); count before `gh pr create`.
-- A unit test that reads or changes a process-wide environment variable (e.g. `QEX_PEERS_DIR`, `TMPDIR`) must hold `testutil::env_lock()`, or parallel tests flake only in the full run (#5, fixed in #14).
