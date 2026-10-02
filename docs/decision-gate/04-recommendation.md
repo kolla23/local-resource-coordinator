@@ -47,7 +47,7 @@
   - ≈1,575 lines, in five areas, are design changes
 - The other ≈90% is logic that a new core would have to rebuild: the scheduler, claims and pools, learned history, restart recovery, the CLI and protocol, `top`, the hooks, and the tested behaviour behind 610 unit and 326 e2e tests.
 - The five design changes aren't fork-only costs. A new core would make the same decisions (pipes, signalling, the metric, peers) from a blank page.
-- The Unix code is spread over many files: 24 of 39 files have a hit, and 22 fail to compile. But the weight is at the OS-facing edge: 7 files (paths, supervisor, keys, client, hook, sys, update) hold 72% of the compile errors. The scheduler's logic has no OS calls.
+- The Unix code is spread over many files: 24 of 39 files have a hit, and 22 fail to compile. But the weight is at the OS-facing edge: 7 files (paths, supervisor, keys, client, hook, sys, update) hold 72% of the compile errors. The scheduler's logic is OS-independent; only its inputs go through the OS.
 
 ## The case for a new core, weighed
 - **Windows-only gains:**
