@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: pin the CPU budget and default memory claim of with_default_config; match the long config-fault text, not the bare word "coordinator"; wait for the peer reason after the small jobs end (issue #5); the e2e tests may read temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-02: a zombie counts as a stopped coordinator (issue #30).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a coordinator with no [update] check writes no update record (issue #4).
 //! End-to-end tests for qex.
 //!
@@ -790,6 +791,18 @@ impl Harness {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
         let (_, after) = stat.rsplit_once(')')?;
         after.trim_start().chars().next()
+    }
+
+    /// Says whether a process has stopped running (issue #30).
+    ///
+    /// A process that SIGKILL stopped stays a zombie until its parent collects
+    /// it, and `kill(pid, 0)` still succeeds on a zombie. The parent of a
+    /// coordinator is the system's reaper, which can be slow on a busy build
+    /// machine. A zombie runs nothing and holds nothing, so it has stopped. A
+    /// system with no `/proc` gives no state, and only `kill` decides there.
+    fn stopped(pid: i32) -> bool {
+        (unsafe { libc::kill(pid, 0) }) != 0
+            || matches!(Self::state_in_proc(pid), Some('Z') | Some('X'))
     }
 
     /// Finds processes that still hold a file under this harness root.
@@ -2978,10 +2991,7 @@ fn a_job_survives_the_failure_of_the_coordinator() {
         libc::kill(pid, libc::SIGKILL);
     }
     std::thread::sleep(Duration::from_millis(300));
-    assert!(
-        unsafe { libc::kill(pid, 0) } != 0,
-        "the coordinator did not stop"
-    );
+    assert!(Harness::stopped(pid), "the coordinator did not stop");
 
     // `qex wait` must read the status file when no coordinator operates.
     let out = h.qex(&["wait", &id, "--timeout", "30s"]);
@@ -17653,7 +17663,7 @@ fn the_harness_stops_a_coordinator_whose_socket_it_cannot_reach() {
     std::fs::rename(run.join("s"), run.join("real")).unwrap();
     drop(h);
     assert!(
-        unsafe { libc::kill(pid, 0) } != 0,
+        Harness::stopped(pid),
         "the coordinator {pid} stayed after the test hid its socket"
     );
 }
@@ -17696,7 +17706,7 @@ fn the_harness_names_a_process_that_it_could_not_stop() {
     let stayed = h.stop_holders(libc::SIGKILL, Duration::from_secs(5)).pids;
     assert!(stayed.is_empty(), "SIGKILL must stop it: {stayed:?}");
     assert!(
-        unsafe { libc::kill(pid, 0) } != 0,
+        Harness::stopped(pid),
         "the coordinator {pid} stayed after SIGKILL"
     );
 }
@@ -17731,7 +17741,7 @@ fn a_drop_with_a_process_that_stayed_keeps_the_directory_and_says_so() {
         };
         drop(again);
         assert!(
-            unsafe { libc::kill(pid, 0) } != 0,
+            Harness::stopped(pid),
             "the coordinator {pid} stayed after a drop with SIGKILL"
         );
         assert!(
@@ -17849,7 +17859,7 @@ fn a_drop_that_could_not_look_asks_the_socket_and_says_so() {
     };
     again.stop_coordinator();
     assert!(
-        unsafe { libc::kill(pid, 0) } != 0,
+        Harness::stopped(pid),
         "the coordinator {pid} stayed after SIGKILL"
     );
     again.look_fails = true;
@@ -17946,6 +17956,43 @@ fn a_drop_that_could_not_look_says_only_what_it_saw() {
     std::fs::remove_dir_all(&elsewhere).unwrap();
 }
 
+/// A process that ended is stopped, even before its parent collects it.
+///
+/// After SIGKILL the system keeps a zombie until the parent collects it, and
+/// `kill(pid, 0)` still succeeds on it. The harness tests asserted "stayed"
+/// with that one call, so a slow parent failed them (issue #30). A process
+/// that still runs must never count as stopped.
+#[test]
+fn a_zombie_counts_as_stopped_and_a_running_process_does_not() {
+    let mut running = Command::new("sleep").arg("30").spawn().unwrap();
+    assert!(
+        !Harness::stopped(running.id() as i32),
+        "a running process must not count as stopped"
+    );
+    running.kill().unwrap();
+    running.wait().unwrap();
+
+    // `true` ends at once, and this test does not collect it yet.
+    let mut ended = Command::new("true").spawn().unwrap();
+    let pid = ended.id() as i32;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Harness::state_in_proc(pid) != Some('Z') && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        Harness::state_in_proc(pid),
+        Some('Z'),
+        "the child must be a zombie"
+    );
+    assert_eq!(
+        unsafe { libc::kill(pid, 0) },
+        0,
+        "kill(pid, 0) succeeds on a zombie"
+    );
+    assert!(Harness::stopped(pid), "a zombie has stopped running");
+    ended.wait().unwrap();
+}
+
 /// A test that deletes the pid file must still stop its coordinator.
 ///
 /// `a_socket_that_answers_stops_a_new_coordinator` unlinks that file. A later
@@ -17958,7 +18005,7 @@ fn the_harness_stops_a_coordinator_whose_pid_file_is_gone() {
     std::fs::remove_file(h.root.join("state/qex/run/pid")).unwrap();
     drop(h);
     assert!(
-        unsafe { libc::kill(pid, 0) } != 0,
+        Harness::stopped(pid),
         "the coordinator {pid} stayed after the test deleted its pid file"
     );
 }
@@ -17989,7 +18036,7 @@ fn the_harness_stops_a_coordinator_on_a_long_socket_path() {
     );
     drop(h);
     assert!(
-        unsafe { libc::kill(pid, 0) } != 0,
+        Harness::stopped(pid),
         "the coordinator {pid} stayed after a long socket path"
     );
 }
