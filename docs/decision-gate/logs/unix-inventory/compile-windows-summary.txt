@@ -1,9 +1,9 @@
-# compile-windows.sh at f2d96f0 on 2026-10-02T03:53:45Z
+# compile-windows.sh, src/ at c693c90
 rustc 1.98.1 (48a229cea 2026-09-01)
 host: x86_64-pc-windows-msvc
 
-292 errors in 22 files
-by code: E0425 177, E0433 50, E0599 41, E0308 13, E0422 5, E0428 1, E0432 1, E0531 1, E0061 1, E0317 1, E0609 1
+291 errors in 22 files
+by code: E0425 177, E0433 50, E0599 41, E0308 13, E0422 5, E0432 1, E0531 1, E0061 1, E0317 1, E0609 1
 most named items: unix 50, SIGKILL 12, mode 12, killpg 10, sockaddr_un 8, flock 7, STDIN_FILENO 7, sigaction 6, fcntl 6, as_raw_fd 6, pollfd 5, POLLIN 5, poll 5, STDOUT_FILENO 5, pre_exec 5, LOCK_EX 4, total_memory 4, O_NONBLOCK 4, from_mode 4, uid 4, LOCK_NB 3, LOCK_UN 3, setpgid 3, tcsetattr 3, TCSANOW 3
 
 src/paths.rs: 71
@@ -298,10 +298,6 @@ src/daemon.rs: 7
    1383 E0433  cannot find `unix` in `os`
    1384 E0599  no associated function or constant named `from_mode` found for struct `Permissions` in the current scope
    2043 E0425  cannot find function `process_info` in module `sys`
-src/main.rs: 3
-     75 E0428  the name `main` is defined multiple times
-     83 E0425  cannot find value `SIGPIPE` in crate `libc`
-    741 E0425  cannot find function `total_memory` in module `sys`
 src/history.rs: 2
      65 E0433  cannot find `unix` in `os`
      71 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
@@ -314,6 +310,9 @@ src/logcap.rs: 2
 src/top.rs: 2
     570 E0425  cannot find function `available_memory` in module `sys`
     571 E0425  cannot find function `total_memory` in module `sys`
+src/main.rs: 2
+     81 E0425  cannot find value `SIGPIPE` in crate `libc`
+    739 E0425  cannot find function `total_memory` in module `sys`
 src/sched.rs: 1
     367 E0425  cannot find function `available_memory` in module `sys`
 src/style.rs: 1

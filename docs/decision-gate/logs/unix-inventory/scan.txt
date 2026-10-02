@@ -1,6 +1,6 @@
-# scan.py at f2d96f0
-production lines in src/: 37956
-files with a Unix API hit: 24 of 40 (28843 production lines)
+# scan.py, src/ at c693c90
+production lines in src/: 37867
+files with a Unix API hit: 24 of 39 (28843 production lines)
 
 file               prod  hits by category (lines/functions)
 commands.rs        7053  other libc 14/5, signals 12/6, std::os::unix 1/1, users/permissions 2/2
@@ -41,7 +41,6 @@ deps.rs             188  -
 context.rs          173  -
 claim.rs            152  -
 style.rs            130  terminal/tty 1/1, other libc 1/1
-testutil.rs          89  -
 version.rs           55  -
 
 totals by category (production lines, files):

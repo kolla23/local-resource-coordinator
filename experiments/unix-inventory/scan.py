@@ -86,9 +86,26 @@ def scan(path):
     return out
 
 
+def test_only_modules(root):
+    """Modules that main.rs declares under `#[cfg(test)]`: all of them is test code."""
+    lines = (root / "main.rs").read_text(encoding="utf-8").splitlines()
+    names = set()
+    for i, line in enumerate(lines):
+        m = re.match(r"\s*mod (\w+);", line)
+        if not m:
+            continue
+        k = i - 1
+        while k >= 0 and lines[k].lstrip().startswith("#["):
+            if lines[k].strip() == "#[cfg(test)]":
+                names.add(m.group(1) + ".rs")
+            k -= 1
+    return names
+
+
 def main():
     root = Path("src")
-    result = {p.name: scan(p) for p in sorted(root.glob("*.rs"))}
+    skip = test_only_modules(root)
+    result = {p.name: scan(p) for p in sorted(root.glob("*.rs")) if p.name not in skip}
     if "--json" in sys.argv:
         json.dump(result, sys.stdout, indent=1)
         return

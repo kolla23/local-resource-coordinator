@@ -38,6 +38,10 @@ s = open(p, encoding="utf-8").read()
 # Remove the stop for non-Unix builds.
 s, n = re.subn(r'#\[cfg\(not\(unix\)\)\]\ncompile_error!\((?:.|\n)*?\);\n', '', s, count=1)
 assert n == 1, "compile_error! block not found"
+# Remove the empty `main` for non-Unix builds: with the gates gone, it would be
+# a second `main` and add an error that a port would never meet.
+s, k = re.subn(r'#\[cfg\(not\(unix\)\)\]\nfn main\(\) \{\}\n', '', s, count=1)
+assert k == 1, "the non-Unix main stub was not found"
 # Remove the module gates (`#[cfg(unix)]` directly above `mod x;`).
 s, m = re.subn(r'#\[cfg\(unix\)\]\n(mod \w+;)', r'\1', s)
 # Remove the gates on main's own items too.
