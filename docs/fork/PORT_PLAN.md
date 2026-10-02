@@ -43,7 +43,7 @@ Every step is its own PR under about 400 changed lines and runs the review loop.
 |---|---|---|---|---|
 | R1 | Memory, CPU and clocks | Move the `sys.rs` memory, CPU and clock bodies into `os/{linux,macos}.rs`. `sys.rs` keeps its signatures and forwards to them. Adds the move checker. | none | — |
 | R2 | Process identity | `pid_alive`, `job_pid_alive`, `own_pid_alive`, `process_start_token`, `same_process_start`, `process_info`, `process_exe`, `boot_id`, `pid_namespace`, `submitter_chain`, `group_usage` | none (still through `sys::`) | — |
-| R3 | File modes and locks | `ensure_dir(mode)`, owner-only writes, `flock` → `os::fs::{set_owner_only, lock_exclusive}`. e2e already pins the job folder (0700), `spec.json` and the stdout/stderr logs (0600). R3 first adds characterization tests for every private file that no test pins yet: history, `usage.json`, `paused.json`, `daemon.log`, `status.json`, `supervisor.log`, `hook.log` and `update.json`. The PR checks that list against a grep of the mode calls. These tests pass today, so they change no behaviour. | every caller of `ensure_dir`, owner-only modes or `flock`: client, commands, daemon, history, hook, job, logcap, paths, pause, supervisor, update, usage (peers waits for R10). Likely split into R3a (modes) and R3b (locks). | — |
+| R3 | File modes and locks | `ensure_dir(mode)`, owner-only writes, `flock` → `os::fs::{set_owner_only, lock_exclusive}`. e2e already pins the job folder (0700), `spec.json` and the stdout/stderr logs (0600). R3 first adds characterization tests for every file, folder and socket that the code creates owner-only and no test pins yet. The list comes from a grep of the mode calls (`ensure_dir`, `.mode(0o…)`, `write_atomic`, `restrict_socket`), and the PR shows that grep. At the time of writing it is: history, `usage.json`, `paused.json`, `daemon.log`, `status.json`, `supervisor.log`, `supervisor.pid`, `hook.log`, `hook.ran`, `update.json`, `update.lock`, the coordinator's `run/pid`, the control socket and the logcap tail file. These tests pass today, so they change no behaviour. | every caller of `ensure_dir`, owner-only modes or `flock`: client, commands, daemon, history, hook, job, logcap, paths, pause, supervisor, update, usage (peers waits for R10). Likely split into R3a (modes) and R3b (locks). | — |
 | R4 | Terminal and console | `isatty`, terminal size, raw keys (`keys.rs`), the `SIGPIPE` gates in `main.rs`, Ctrl-C while waiting | style, top, keys, main, client | — |
 | R5 | Detached start and reaping | Starting the supervisor and the coordinator (`setsid`), the `waitpid` reaper → `os::spawn_detached`, `os::wait_child` | supervisor, client, daemon | — |
 | R6 | Sub-processes with a time limit | The stop hook and the update check's `curl`: `poll` and kill → `os::run_bounded` | hook, update | — |
@@ -80,6 +80,8 @@ This answers 04-recommendation's other tripwire: does the test port cost more th
     - `ci.yml` (clippy `--all-targets`, the e2e job, the MSRV `check --all-targets`)
     - `macos.yml` and `release.yml` (their e2e steps)
     - `docs/baseline/run-baseline-linux.sh` and the commands in AGENTS.md
+    - the test commands in README.md and CONTRIBUTING.md (upstream's shipped docs, which e2e scans; a plain `cargo test` would silently skip e2e)
+    - any other hit of a repo-wide grep for `cargo test`, `cargo clippy` and `--all-targets`, which the PR shows
 - **Sample of 10 tests.** In each category, the first tests in file order, skipping any with an open flaky-test issue. The occurrence counts are multi-line-aware matches in `tests/e2e.rs` at the time of writing; they are not test counts:
 
   | Category (occurrences) | Tests in sample |
@@ -131,6 +133,7 @@ The Windows backend is not done, and no Windows release is made, until this chec
      - any ACE grants access to a SID other than the user, SYSTEM or Administrators
      - an owner is not the user
   4. Create the pipe name first from a process that runs as a second local account, which the test setup creates. Then start a coordinator: it must refuse to serve, and a client must refuse to send to that process. (A squatter running as the same user is out of scope: same-user processes are trusted, as on Unix.)
+  5. After the job ends, search for the secret value from step 1 in the user's `%TEMP%`, `%LOCALAPPDATA%`, `%ProgramData%` and the job's working folder. Fail if it appears anywhere outside the objects checked in step 3. This search covers the likely places, not the whole disk, and the test says so.
 - **Manual check, recorded in `docs/baseline/`:**
   1. Log in as a second, standard (non-admin) local account.
   2. Try to read a job file, its log and the history with `type` and `Get-Content`, and try to connect to the pipe. Each attempt fails with "access denied".
