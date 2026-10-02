@@ -2504,8 +2504,7 @@ fn a_restart_gives_the_key_to_the_job_that_still_operates() {
         libc::kill(pid, libc::SIGKILL);
     }
     h.until("the coordinator stops", Duration::from_secs(30), || {
-        let alive = unsafe { libc::kill(pid, 0) } == 0;
-        !alive
+        Harness::stopped(pid)
     });
 
     let again = h.submit(&["submit", "--dedupe-key", "two", "--", "sleep", "30"]);
@@ -2717,8 +2716,7 @@ fn a_key_stays_with_its_job_after_the_coordinator_stops() {
         libc::kill(pid, libc::SIGKILL);
     }
     h.until("the coordinator stops", Duration::from_secs(30), || {
-        let alive = unsafe { libc::kill(pid, 0) } == 0;
-        !alive
+        Harness::stopped(pid)
     });
 
     // The next command starts a new coordinator, and it reads the records.
@@ -3707,8 +3705,7 @@ fn a_dead_supervisor_does_not_leave_the_job_alive() {
     // job still alive, is the worst result: the memory is in use and no command
     // can free it.
     h.until("the job process stops", Duration::from_secs(30), || {
-        let rc = unsafe { libc::kill(job_pid, 0) };
-        rc != 0
+        Harness::stopped(job_pid)
     });
 
     // The budget must show the capacity as free again.
@@ -3771,8 +3768,7 @@ fn a_recovered_job_without_a_supervisor_does_not_stay_running() {
     // The job process must stop. A record that says the job stopped, with the
     // job still alive, leaves memory in use that no command can free.
     h.until("the job process stops", Duration::from_secs(30), || {
-        let rc = unsafe { libc::kill(job_pid, 0) };
-        rc != 0
+        Harness::stopped(job_pid)
     });
 
     // The record must name the cause.
@@ -3960,8 +3956,7 @@ fn a_new_process_with_the_supervisor_pid_is_not_the_supervisor() {
         "the record must say that the supervisor is the cause: {error}"
     );
     h.until("the job process stops", Duration::from_secs(30), || {
-        let rc = unsafe { libc::kill(job_pid, 0) };
-        rc != 0
+        Harness::stopped(job_pid)
     });
 
     // The stand-in was never the supervisor, so no signal may reach it.
@@ -12919,8 +12914,7 @@ fn the_pause_survives_a_coordinator_that_stops() {
         libc::kill(first, libc::SIGKILL);
     }
     h.until("the coordinator stopped", Duration::from_secs(30), || {
-        let alive = unsafe { libc::kill(first, 0) } == 0;
-        !alive
+        Harness::stopped(first)
     });
 
     // This command starts a new coordinator.
@@ -13300,8 +13294,7 @@ fn a_pause_record_that_qex_cannot_read_holds_the_queue() {
         libc::kill(pid, libc::SIGKILL);
     }
     h.until("the coordinator stopped", Duration::from_secs(30), || {
-        let alive = unsafe { libc::kill(pid, 0) } == 0;
-        !alive
+        Harness::stopped(pid)
     });
 
     std::fs::write(&file, "{\"queue\": {\"paused_at\": ").unwrap();
@@ -13643,8 +13636,7 @@ fn a_pause_from_inside_a_job_is_unknown_after_a_coordinator_restart() {
         libc::kill(pid, libc::SIGKILL);
     }
     h.until("the coordinator stops", Duration::from_secs(30), || {
-        let alive = unsafe { libc::kill(pid, 0) } == 0;
-        !alive
+        Harness::stopped(pid)
     });
     // A submission starts the new coordinator, which finds the job again.
     let other = h.submit(&["submit", "--cpu", "1", "--mem", "64MB", "--", "true"]);
