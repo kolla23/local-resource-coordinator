@@ -25,7 +25,7 @@ Every step is its own PR under about 400 changed lines and runs the review loop.
 ## The backend layer: small PRs that change no behaviour on Linux
 
 **Shape:**
-- A module `src/os/` with `linux.rs` and `macos.rs` now, and `windows.rs` later.
+- A module `src/os/` with `unix.rs` (code shared by Linux and macOS), `linux.rs` and `macos.rs` now, and `windows.rs` later. Code that is the same on every platform (plain std, such as `cpu_count`) stays where it is. Each moved body goes to exactly one file, so a move is never a copy.
 - Its functions are plain functions chosen at compile time by `cfg`. No trait objects and no plugin framework (SPEC.md:885, "small backend contracts").
 - Callers name what they need (`os::available_memory()`, `os::lock_exclusive(&file)`) and never `libc` or `std::os::unix`.
 - Every modified upstream file gets the fork header line.
@@ -41,7 +41,7 @@ Every step is its own PR under about 400 changed lines and runs the review loop.
 
 | # | PR | Contents | Expected callers (estimate; the PR's own grep decides) | Waits for |
 |---|---|---|---|---|
-| R1 | Memory, CPU and clocks | Move the `sys.rs` memory, CPU and clock bodies into `os/{linux,macos}.rs`. `sys.rs` keeps its signatures and forwards to them. Adds the move checker. | none | — |
+| R1 | Memory and clocks | Move the `sys.rs` memory and clock bodies into `os/{unix,linux,macos}.rs`, each to the one file whose `cfg` it has today. `sys.rs` keeps its signatures and forwards to them. Adds the move checker. | none | — |
 | R2 | Process identity | `pid_alive`, `job_pid_alive`, `own_pid_alive`, `process_start_token`, `same_process_start`, `process_info`, `process_exe`, `boot_id`, `pid_namespace`, `submitter_chain`, `group_usage` | none (still through `sys::`) | — |
 | R3 | File modes and locks | `ensure_dir(mode)`, owner-only writes, `flock` → `os::fs::{set_owner_only, lock_exclusive}`. Before moving code, R3 adds characterization tests, built by a method; this plan gives no list of files. (1) Grep the production code for every place that creates a file, folder or socket, wherever it is (the state root, the socket folder and its TMPDIR fallback, or elsewhere): `OpenOptions` with `create`, `fs::write`, `File::create`, `write_atomic`, `ensure_dir`, `create_dir*` and socket binds; the PR shows the grep and its full result, with the location of each hit. (2) Sort each hit into "owner-only today" (an explicit 0600/0700 mode), "wider mode today" (an explicit mode that others can read, such as 0644, 0755 or 1777), or "no mode today" (the umask decides). (3) Pin each hit as it is today; where an existing e2e or unit test already pins a hit, the PR names that test and adds none. These tests pass today, so they change no behaviour. Making the "wider mode today" and "no mode today" hits that hold job or coordinator data owner-only does change behaviour, so it is a separate fix PR after R3, which lists which hits it changes and why. | every caller of `ensure_dir`, owner-only modes or `flock`: client, commands, daemon, history, hook, job, logcap, paths, pause, supervisor, update, usage (peers waits for R10). Likely split into R3a (modes) and R3b (locks). | — |
 | R4 | Terminal and console | `isatty`, terminal size, raw keys (`keys.rs`), the `SIGPIPE` gates in `main.rs`, Ctrl-C while waiting | style, top, keys, main, client, commands | — |
@@ -125,6 +125,7 @@ The Windows backend is not done, and no Windows release is made, until this chec
     - accepts local clients only (SPEC.md:615)
     - is created with `FILE_FLAG_FIRST_PIPE_INSTANCE`, so its server never joins a pipe that someone else created
     - is used by clients only after they check that the server process runs as the same user. Otherwise another user could create the name first and receive submitted environments.
+  - A named Job Object, if ADR 2 chooses one, is created new: if `CreateJobObjectW` reports `ERROR_ALREADY_EXISTS`, the coordinator does not use it (or the object lives in a private namespace). Otherwise another user could create the name first and control the user's jobs.
 - **Automated Windows e2e test:**
   1. Submit a job whose record holds a known secret value in its environment.
   2. Walk the state root, and the per-job TEMP folders if they are elsewhere. Read each object's owner and DACL with `GetNamedSecurityInfoW`; read each pipe's and the Job Object's with `GetSecurityInfo`.
@@ -134,7 +135,7 @@ The Windows backend is not done, and no Windows release is made, until this chec
      - an owner is not the user
 
      Steps 1–3 run twice: once with the coordinator not elevated and once elevated. If the test machine cannot run one of them, the test reports that run as "not evaluated" and does not pass.
-  4. For each pipe, create its name first from a process that runs as a second local account, which the test setup creates. Then start the pipe's server (the coordinator, or a supervisor): it must refuse to serve, and a client must refuse to send to that process. (A squatter running as the same user is out of scope: same-user processes are trusted, as on Unix.)
+  4. For each pipe, and the named Job Object if there is one, create its name first from a process that runs as a second local account, which the test setup creates. Then start the pipe's server (the coordinator, or a supervisor): it must refuse to serve, and a client must refuse to send to that process. For the Job Object, submit a job: it must not run inside the squatter's object. (A squatter running as the same user is out of scope: same-user processes are trusted, as on Unix.)
   5. Connect to each pipe through the SMB loopback path `\\127.0.0.1\pipe\<name>`, which arrives as a remote client. The connection must be refused. If the test machine cannot make such a connection at all (for example, SMB is off), the test reports "local-only: not evaluated" and does not pass that step.
   6. After the job ends, search for the secret value from step 1 in the user's `%TEMP%`, `%LOCALAPPDATA%`, `%ProgramData%` and the job's working folder. Fail if it appears anywhere outside the objects checked in step 3. This search covers the likely places, not the whole disk, and the test says so.
 - **Manual check, recorded in `docs/baseline/`:**
