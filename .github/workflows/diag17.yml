@@ -1,0 +1,37 @@
+name: diag 17 (temporary, never merged)
+
+# Reproduces issue #17 on GitHub's 4-CPU runners. The e2e suite runs as in
+# CI (--test-threads=2), plus an instrumented copy of the reload test that
+# reports how long the accepted half file had really been at the path.
+on:
+  push:
+    branches: ["diag/issue-17-ci-repro"]
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: diag ${{ matrix.os }} #${{ matrix.n }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        n: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - run: nproc; free -m
+      - name: e2e suite, then the instrumented test 15 times
+        run: |
+          cargo test --test e2e --no-run -q
+          f=0
+          for i in $(seq 1 3); do
+            cargo test --test e2e -- --test-threads=2 2>&1 | grep -E "^test .*FAILED|DIAG|panicked|test result" || true
+          done
+          for i in $(seq 1 15); do
+            cargo test --test e2e diag3_back_and_forth -- --exact 2>&1 | grep -E "DIAG|test result" || true
+          done

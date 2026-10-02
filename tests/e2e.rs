@@ -19594,3 +19594,87 @@ fn a_cancel_of_many_ids_gives_a_line_for_each() {
         "a kill of one job that waits names the command that fits"
     );
 }
+
+#[test]
+fn diag3_back_and_forth() {
+    let whole = "[peers]\nenabled = false\n\
+                 [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+                 [budget]\ncpu = \"2\"\nmem = \"1GB\"\n";
+    // The same file, stopped before `mem`. It parses, it validates, and `mem`
+    // takes its default value: 75% of the memory of the machine.
+    let half = whole.strip_suffix("mem = \"1GB\"\n").unwrap().to_string();
+
+    let h = Harness::new("reload-diag3", whole);
+    let path = h.root.join("cfg/qex.toml");
+
+    h.ok(&["list"]);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&h.qex(&["info", "--json"]).stdout).unwrap()
+            ["mem_budget"]
+            .as_u64(),
+        Some(1024 * 1024 * 1024)
+    );
+
+    let placed: Arc<std::sync::Mutex<Vec<(Instant, Instant, bool, std::time::SystemTime, Option<std::time::SystemTime>)>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let (path, stop, whole, placed) = (path.clone(), stop.clone(), whole.to_string(), placed.clone());
+        let temp = h.root.join("cfg/.qex.toml.new");
+        std::thread::spawn(move || {
+            let mut turn = false;
+            while !stop.load(Ordering::Relaxed) {
+                let text = if turn { &whole } else { &half };
+                std::fs::write(&temp, text).unwrap();
+                let written = Instant::now();
+                let mtime = std::fs::metadata(&temp).and_then(|m| m.modified()).ok();
+                std::fs::rename(&temp, &path).unwrap();
+                placed.lock().unwrap().push((written, Instant::now(), turn, std::time::SystemTime::now(), mtime));
+                turn = !turn;
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            // Leave the whole file behind, whatever the turn.
+            std::fs::write(&temp, &whole).unwrap();
+            std::fs::rename(&temp, &path).unwrap();
+        })
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(12);
+    let mut looks = 0;
+    let mut fault = None;
+    while Instant::now() < deadline {
+        let out = h.qex(&["info", "--json"]);
+        if let Ok(info) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
+            looks += 1;
+            if info["mem_budget"].as_u64() != Some(1024 * 1024 * 1024) {
+                let now = Instant::now();
+                let p = placed.lock().unwrap().clone();
+                // The half placement in force at the read, and its dwell so far.
+                let mut lines = Vec::new();
+                let halves: Vec<f64> = p.windows(2).filter(|w| !w[0].2).map(|w| (w[1].1 - w[0].1).as_secs_f64()*1000.0).collect();
+                let maxhalf = halves.iter().cloned().fold(0.0, f64::max);
+                for (i, (wrote, at, whole_turn, wall_at, mtime)) in p.iter().enumerate().rev().take(4) {
+                    let next = p.get(i + 1).map(|n| n.1).unwrap_or(now);
+                    let wall_now = std::time::SystemTime::now();
+                    let wall_ms = wall_now.duration_since(*wall_at).map(|d| d.as_secs_f64()*1000.0).unwrap_or(-1.0);
+                    let mono_ms = (now - *at).as_secs_f64()*1000.0;
+                    let mtime_age = mtime.and_then(|m| wall_now.duration_since(m).ok()).map(|d| d.as_secs_f64()*1000.0).unwrap_or(-1.0);
+                    lines.push(format!("{}: written {:.0}ms before rename, placed {:.0}ms before read (wall says {:.0}ms, mtime age at read {:.0}ms), stayed {:.0}ms{}", if *whole_turn {"whole"} else {"HALF "}, (*at - *wrote).as_secs_f64()*1000.0, mono_ms, wall_ms, mtime_age, (next - *at).as_secs_f64()*1000.0, if i + 1 == p.len() {" (still in place)"} else {""}));
+                }
+                fault = Some(format!("DIAG {} looks; max half dwell so far {:.0}ms over {} halves; last placements (newest first): {}", looks, maxhalf, halves.len(), lines.join(" | ")));
+                break;
+            }
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    writer.join().unwrap();
+
+    assert!(
+        fault.is_none(),
+        "a file that goes back and forth must not change the budget: {}",
+        fault.unwrap_or_default()
+    );
+    assert!(
+        looks > 20,
+        "the test must look many times, and it looked {looks}"
+    );
+}
