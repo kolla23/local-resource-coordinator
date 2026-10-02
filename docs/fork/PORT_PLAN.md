@@ -133,7 +133,8 @@ The Windows backend is not done, and no Windows release is made, until this chec
      - any ACE grants access to a SID other than the user, SYSTEM or Administrators
      - an owner is not the user
   4. Create the pipe name first from a process that runs as a second local account, which the test setup creates. Then start a coordinator: it must refuse to serve, and a client must refuse to send to that process. (A squatter running as the same user is out of scope: same-user processes are trusted, as on Unix.)
-  5. After the job ends, search for the secret value from step 1 in the user's `%TEMP%`, `%LOCALAPPDATA%`, `%ProgramData%` and the job's working folder. Fail if it appears anywhere outside the objects checked in step 3. This search covers the likely places, not the whole disk, and the test says so.
+  5. Connect to the pipe through the SMB loopback path `\\127.0.0.1\pipe\<name>`, which arrives as a remote client. The connection must be refused. If the test machine cannot make such a connection at all (for example, SMB is off), the test reports "local-only: not evaluated" and does not pass that step.
+  6. After the job ends, search for the secret value from step 1 in the user's `%TEMP%`, `%LOCALAPPDATA%`, `%ProgramData%` and the job's working folder. Fail if it appears anywhere outside the objects checked in step 3. This search covers the likely places, not the whole disk, and the test says so.
 - **Manual check, recorded in `docs/baseline/`:**
   1. Log in as a second, standard (non-admin) local account.
   2. Try to read a job file, its log and the history with `type` and `Get-Content`, and try to connect to the pipe. Each attempt fails with "access denied".
