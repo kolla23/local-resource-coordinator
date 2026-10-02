@@ -16929,25 +16929,42 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
     // exists to span the death; any other failure is a fault. Say each one, so
     // a tolerated failure is never silent.
     //
-    // Only the KILLED coordinator can leave a question without an answer here.
-    // If it had already stopped when the question began, its socket was closed,
-    // so the question reached the new coordinator, and a failure is a fault.
+    // Only the KILLED coordinator can leave a question without an answer here,
+    // and only until the system has collected it: its threads close its socket
+    // as they exit, and the process is gone only after the last one. So the
+    // question is tolerated while `kill(pid, 0)` still finds the old process.
+    // Once it is gone, a question reaches the new coordinator, and a failure
+    // is a fault. (While the old process is a zombie, a failure of the new
+    // coordinator is also tolerated; it is printed, and the ownership is still
+    // checked after the wait.)
+    let met_the_death = std::sync::atomic::AtomicUsize::new(0);
     let ask = |args: &[&str]| -> Option<serde_json::Value> {
-        let old_was_alive = !Harness::stopped(pid);
+        let old_not_collected = unsafe { libc::kill(pid, 0) } == 0;
         let out = h.qex(args);
         if out.status.success() {
             return Some(serde_json::from_slice(&out.stdout).unwrap());
         }
         let err = String::from_utf8_lossy(&out.stderr);
+        let lost = [
+            "reading the answer of the coordinator",
+            "the coordinator closed the connection without an answer",
+            "sending the request to the coordinator",
+        ]
+        .iter()
+        .any(|m| err.contains(m));
         assert!(
-            old_was_alive
-                && (err.contains("reading the answer of the coordinator")
-                    || err.contains("the coordinator closed the connection without an answer")),
-            "`qex {}` failed with {:?}, and not because the killed coordinator died              (it was {} when the question began): {err}",
+            old_not_collected && lost,
+            "`qex {}` failed with {:?}, and not because the killed coordinator died \
+             (it was {} when the question began): {err}",
             args.join(" "),
             out.status.code(),
-            if old_was_alive { "alive" } else { "already stopped" }
+            if old_not_collected {
+                "still there"
+            } else {
+                "already gone"
+            }
         );
+        met_the_death.fetch_add(1, Ordering::Relaxed);
         use std::io::Write as _;
         writeln!(
             std::io::stderr(),
@@ -16975,13 +16992,13 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
             let question = scope.spawn(poll);
             std::thread::sleep(Duration::from_secs(1));
             unsafe { libc::kill(pid, libc::SIGKILL) };
-            match question.join() {
-                Err(panic) => std::panic::resume_unwind(panic),
-                Ok(answered) => assert!(
-                    !answered,
-                    "the question did not meet the dying coordinator, so this test proved nothing"
-                ),
+            if let Err(panic) = question.join() {
+                std::panic::resume_unwind(panic);
             }
+            assert!(
+                met_the_death.load(Ordering::Relaxed) > 0,
+                "the question did not meet the dying coordinator, so this test proved nothing"
+            );
         });
     } else {
         unsafe { libc::kill(pid, libc::SIGKILL) };
