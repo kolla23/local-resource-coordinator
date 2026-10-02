@@ -43,7 +43,7 @@ Every step is its own PR under about 400 changed lines and runs the review loop.
 |---|---|---|---|---|
 | R1 | Memory, CPU and clocks | Move the `sys.rs` memory, CPU and clock bodies into `os/{linux,macos}.rs`. `sys.rs` keeps its signatures and forwards to them. Adds the move checker. | none | — |
 | R2 | Process identity | `pid_alive`, `job_pid_alive`, `own_pid_alive`, `process_start_token`, `same_process_start`, `process_info`, `process_exe`, `boot_id`, `pid_namespace`, `submitter_chain`, `group_usage` | none (still through `sys::`) | — |
-| R3 | File modes and locks | `ensure_dir(mode)`, owner-only writes, `flock` → `os::fs::{set_owner_only, lock_exclusive}`. Before moving code, R3 adds characterization tests, built by a method; this plan gives no list of files. (1) Grep the production code for every place that creates a file, folder or socket, wherever it is (the state root, the socket folder and its TMPDIR fallback, or elsewhere): `OpenOptions` with `create`, `fs::write`, `File::create`, `write_atomic`, `ensure_dir`, `create_dir*` and socket binds; the PR shows the grep and its full result, with the location of each hit. (2) Sort each hit into "owner-only today" (an explicit 0600/0700 mode) or "no mode today" (the umask decides). (3) Pin each hit as it is today; where an existing e2e or unit test already pins a hit, the PR names that test and adds none. These tests pass today, so they change no behaviour. Making the "no mode today" hits that hold job or coordinator data owner-only does change behaviour, so it is a separate fix PR after R3, which lists which hits it changes and why. | every caller of `ensure_dir`, owner-only modes or `flock`: client, commands, daemon, history, hook, job, logcap, paths, pause, supervisor, update, usage (peers waits for R10). Likely split into R3a (modes) and R3b (locks). | — |
+| R3 | File modes and locks | `ensure_dir(mode)`, owner-only writes, `flock` → `os::fs::{set_owner_only, lock_exclusive}`. Before moving code, R3 adds characterization tests, built by a method; this plan gives no list of files. (1) Grep the production code for every place that creates a file, folder or socket, wherever it is (the state root, the socket folder and its TMPDIR fallback, or elsewhere): `OpenOptions` with `create`, `fs::write`, `File::create`, `write_atomic`, `ensure_dir`, `create_dir*` and socket binds; the PR shows the grep and its full result, with the location of each hit. (2) Sort each hit into "owner-only today" (an explicit 0600/0700 mode), "wider mode today" (an explicit mode that others can read, such as 0644, 0755 or 1777), or "no mode today" (the umask decides). (3) Pin each hit as it is today; where an existing e2e or unit test already pins a hit, the PR names that test and adds none. These tests pass today, so they change no behaviour. Making the "wider mode today" and "no mode today" hits that hold job or coordinator data owner-only does change behaviour, so it is a separate fix PR after R3, which lists which hits it changes and why. | every caller of `ensure_dir`, owner-only modes or `flock`: client, commands, daemon, history, hook, job, logcap, paths, pause, supervisor, update, usage (peers waits for R10). Likely split into R3a (modes) and R3b (locks). | — |
 | R4 | Terminal and console | `isatty`, terminal size, raw keys (`keys.rs`), the `SIGPIPE` gates in `main.rs`, Ctrl-C while waiting | style, top, keys, main, client, commands | — |
 | R5 | Detached start and reaping | Starting the supervisor and the coordinator (`setsid`), the `waitpid` reaper → `os::spawn_detached`, `os::wait_child` | supervisor, client | — |
 | R6 | Sub-processes with a time limit | The stop hook and the update check's `curl`: `poll` and kill → `os::run_bounded` | hook, update | — |
@@ -114,30 +114,30 @@ The Windows backend is not done, and no Windows release is made, until this chec
   - the state root, every job record and log or output capture, history, usage and the pause file
   - the per-job TEMP folders, wherever the per-job TEMP ADR puts them
   - the named Job Object, if ADR 2 chooses one
-  - the coordinator's named pipe
+  - every named pipe the port creates: the coordinator's, and a supervisor channel if ADR 2 routes stop requests through one
 - **Rule:**
   - "The user" means the SID of the user who runs the coordinator, read from its process token. It is not read from the descriptor being checked.
   - Every such object gets an explicit, protected, non-NULL DACL with inheritance turned off. The inherited profile ACL is *not verified* and is not relied on.
   - The DACL holds allow ACEs only for the user, SYSTEM and the Administrators group. Everyone else is denied because no ACE allows them; there is no deny ACE for Everyone, since that would also deny the user (owner decision 2).
   - The descriptor's owner is the user, even when the coordinator runs elevated (an elevated process would otherwise make Administrators the owner).
   - Atomic replace: a rename keeps the *source* file's DACL, so the temporary file is created with the restricted DACL, not fixed after the rename.
-  - The pipe also:
+  - Each such pipe also:
     - accepts local clients only (SPEC.md:615)
-    - is created with `FILE_FLAG_FIRST_PIPE_INSTANCE`, so the coordinator never joins a pipe that someone else created
+    - is created with `FILE_FLAG_FIRST_PIPE_INSTANCE`, so its server never joins a pipe that someone else created
     - is used by clients only after they check that the server process runs as the same user. Otherwise another user could create the name first and receive submitted environments.
 - **Automated Windows e2e test:**
   1. Submit a job whose record holds a known secret value in its environment.
-  2. Walk the state root, and the per-job TEMP folders if they are elsewhere. Read each object's owner and DACL with `GetNamedSecurityInfoW`; read the pipe's and the Job Object's with `GetSecurityInfo`.
+  2. Walk the state root, and the per-job TEMP folders if they are elsewhere. Read each object's owner and DACL with `GetNamedSecurityInfoW`; read each pipe's and the Job Object's with `GetSecurityInfo`.
   3. Fail if:
      - a DACL is NULL or inheritance is on
      - any ACE grants access to a SID other than the user, SYSTEM or Administrators
      - an owner is not the user
 
      Steps 1–3 run twice: once with the coordinator not elevated and once elevated. If the test machine cannot run one of them, the test reports that run as "not evaluated" and does not pass.
-  4. Create the pipe name first from a process that runs as a second local account, which the test setup creates. Then start a coordinator: it must refuse to serve, and a client must refuse to send to that process. (A squatter running as the same user is out of scope: same-user processes are trusted, as on Unix.)
-  5. Connect to the pipe through the SMB loopback path `\\127.0.0.1\pipe\<name>`, which arrives as a remote client. The connection must be refused. If the test machine cannot make such a connection at all (for example, SMB is off), the test reports "local-only: not evaluated" and does not pass that step.
+  4. For each pipe, create its name first from a process that runs as a second local account, which the test setup creates. Then start the pipe's server (the coordinator, or a supervisor): it must refuse to serve, and a client must refuse to send to that process. (A squatter running as the same user is out of scope: same-user processes are trusted, as on Unix.)
+  5. Connect to each pipe through the SMB loopback path `\\127.0.0.1\pipe\<name>`, which arrives as a remote client. The connection must be refused. If the test machine cannot make such a connection at all (for example, SMB is off), the test reports "local-only: not evaluated" and does not pass that step.
   6. After the job ends, search for the secret value from step 1 in the user's `%TEMP%`, `%LOCALAPPDATA%`, `%ProgramData%` and the job's working folder. Fail if it appears anywhere outside the objects checked in step 3. This search covers the likely places, not the whole disk, and the test says so.
 - **Manual check, recorded in `docs/baseline/`:**
   1. Log in as a second, standard (non-admin) local account.
-  2. Try to read a job file, its log and the history with `type` and `Get-Content`, and try to connect to the pipe. Each attempt fails with "access denied".
-- **Linux counterpart:** R3's tests pin every file, folder and socket the code creates, as it is today. Until the fix PR after R3 merges, the "no mode today" hits rely on their parent folder's mode, so Linux is not yet held to the same rule as Windows. Once it merges, the objects it changes are.
+  2. Try to read a job file, its log and the history with `type` and `Get-Content`, and try to connect to each pipe. Each attempt fails with "access denied".
+- **Linux counterpart:** R3's tests pin every file, folder and socket the code creates, as it is today. Until the fix PR after R3 merges, the "wider mode today" and "no mode today" hits that hold job or coordinator data are not owner-only themselves, so Linux is not yet held to the same rule as Windows. Once it merges, the objects it changes are.
