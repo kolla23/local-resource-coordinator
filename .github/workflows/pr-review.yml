@@ -17,6 +17,10 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, edited]
 
+# The job only reads the event and the checkout, so the token can only read.
+permissions:
+  contents: read
+
 concurrency:
   group: pr-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
