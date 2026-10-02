@@ -1,5 +1,7 @@
 # Modified by the local-resource-coordinator fork, 2026-09-30: macOS jobs moved
 # to macos.yml (weekly and on demand) to save private-repo Actions minutes.
+# Modified by the local-resource-coordinator fork, 2026-10-02: the Style job
+# rejects raw control characters in text files.
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -26,6 +28,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+      # Test the check first: a broken check that passes everything would look
+      # like a clean repository.
+      - name: The tests of the control-character check
+        run: python3 .github/scripts/check-control-chars-test.py
+      - name: No raw control characters in text files
+        run: python3 .github/scripts/check-control-chars.py
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
       - uses: Swatinem/rust-cache@v2

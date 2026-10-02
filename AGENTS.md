@@ -16,6 +16,7 @@ An independently maintained fork of qex (Apache-2.0). It is a local coordinator 
 - Release build: `cargo build --release --locked`
 - MSRV check: `cargo +1.85 check --all-targets --locked`
 - The whole baseline, with logs: `docs/baseline/run-baseline-linux.sh <clone> <log-dir>`
+- Control characters: stage your changes (by name), then `python3 .github/scripts/check-control-chars.py`. It checks staged content only and names any unstaged or untracked files it skipped. Tests: `check-control-chars-test.py`
 
 ## Structure
 - `src/`: upstream qex (coordinator `daemon.rs`, scheduler `sched.rs`, per-job `supervisor.rs`, platform metrics `sys.rs`).
@@ -48,3 +49,4 @@ Add one line each time the same mistake happens twice.
 - Keep this repo's `core.autocrlf=false`, so upstream files stay LF.
 - PR titles must match `type(scope): summary` (lower-case type, scope optional), be at most 72 characters and not end with a full stop (`.github/scripts/check-title.sh`); count before `gh pr create`.
 - A Rust string with a `\` line continuation, written through a Python edit script, came out as one long line with the spaces inside the string (twice). Edit those lines with the Edit tool, then check the added lines: `git diff -U0 | grep '^+[^+]' | awk 'length > 101'` (the fork header lines are expected to show up).
+- A `\0` written through a Python edit script inside a shell heredoc came out as a raw NUL byte (three times). Write escapes with the Write or Edit tool; CI rejects raw control bytes and bare CRs (`.github/scripts/check-control-chars.py`).
