@@ -16925,7 +16925,7 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
     //
     // A QUESTION CAN MEET THE COORDINATOR AS IT DIES. The coordinator accepted
     // it and then got SIGKILL, so it never answers, and the command fails with
-    // one of the two messages below. That is "not yet" for this wait, which
+    // one of the three messages below. That is "not yet" for this wait, which
     // exists to span the death; any other failure is a fault. Say each one, so
     // a tolerated failure is never silent.
     //
