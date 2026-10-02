@@ -23,6 +23,10 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, edited]
 
+# The job only reads the event and the checkout, so the token can only read.
+permissions:
+  contents: read
+
 # A second edit while the first test runs makes the first answer old.
 concurrency:
   group: pr-title-${{ github.event.pull_request.number }}

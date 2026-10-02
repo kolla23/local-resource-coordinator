@@ -1,0 +1,44 @@
+name: Pull request review
+
+# Every pull request, however small, goes through the review loop: a fresh
+# reviewer reads the whole diff, every real issue is fixed, and a new round
+# starts after each push. The loop ends only when a round finds no real issues.
+# Read `.github/scripts/check-review-rounds.sh` for the line that records a
+# round.
+#
+# The check is red until the last round names the head commit, so a push after
+# the review shows at once. This repository cannot require a check before a
+# merge, so the owner reads this check before merging.
+#
+# `edited` fires when a round is added to the body, and that must re-run the
+# check with no new commit. This is a workflow of its own for the same reason as
+# `pr-title.yml`: `edited` in `ci.yml` would build and test everything again.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+# The job only reads the event and the checkout, so the token can only read.
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: The review loop ended on the head commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      # Test the check first. A broken check that accepts every body would stay
+      # green and look like a pass.
+      - run: .github/scripts/check-review-rounds-test.sh
+      - name: The last review round must name the head commit and find no real issues
+        # The body goes through the environment, never into the text of the
+        # command. A person outside this project can write it.
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: printf '%s' "$BODY" | .github/scripts/check-review-rounds.sh "$HEAD_SHA"

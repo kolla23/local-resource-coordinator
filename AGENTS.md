@@ -37,6 +37,8 @@ An independently maintained fork of qex (Apache-2.0). It is a local coordinator 
 - Git:
   - `upstream` is fetch-only (push URL `DISABLED`); never contact or contribute upstream.
   - One purpose per branch and PR, under about 400 changed lines. Never commit directly to `main`; never merge without the owner's OK.
+  - Start each branch from a fresh `origin/main` (`git fetch` first).
+  - Every PR, however small, runs the review loop until a round finds no real issues; any push starts a new round. Record each round in the PR body under `## Review rounds` as `Round N @ <head commit>: <verdict>`. The CI check "The review loop ended on the head commit" (`.github/scripts/check-review-rounds.sh`) stays red until the last round names the head commit and its verdict starts with "no real issues".
 - Don't add fork documents directly in `docs/`; use `docs/fork/` or another subfolder.
 - Decisions that change upstream interfaces (persistence, IPC framing, CLI compatibility, launch protocol) need an ADR first.
 
