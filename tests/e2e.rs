@@ -1652,7 +1652,7 @@ fn a_job_that_does_not_exist_answers_at_once_with_no_coordinator() {
         libc::kill(pid, libc::SIGKILL);
     }
     h.until("the coordinator is gone", Duration::from_secs(10), || {
-        (unsafe { libc::kill(pid, 0) }) != 0
+        Harness::stopped(pid)
     });
 
     // `--quiet` is the form that shows the fault: it writes no line about a
@@ -2062,7 +2062,7 @@ fn a_wait_survives_a_coordinator_that_stops() {
     }
 
     h.until("the coordinator is gone", Duration::from_secs(10), || {
-        (unsafe { libc::kill(pid, 0) }) != 0
+        Harness::stopped(pid)
     });
 
     let out = child.wait_with_output().expect("the wait did not stop");
@@ -3746,7 +3746,7 @@ fn a_recovered_job_without_a_supervisor_does_not_stay_running() {
         libc::kill(supervisor, libc::SIGKILL);
     }
     let deadline = Instant::now() + Duration::from_secs(30);
-    while unsafe { libc::kill(coordinator, 0) } == 0 || unsafe { libc::kill(supervisor, 0) } == 0 {
+    while !Harness::stopped(coordinator) || !Harness::stopped(supervisor) {
         assert!(
             Instant::now() < deadline,
             "the coordinator and the supervisor did not stop"
@@ -3827,7 +3827,7 @@ fn a_record_from_an_earlier_start_of_the_machine_is_dead() {
         libc::kill(coordinator, libc::SIGKILL);
     }
     let deadline = Instant::now() + Duration::from_secs(30);
-    while unsafe { libc::kill(coordinator, 0) } == 0 {
+    while !Harness::stopped(coordinator) {
         assert!(Instant::now() < deadline, "the coordinator did not stop");
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -3918,7 +3918,7 @@ fn a_new_process_with_the_supervisor_pid_is_not_the_supervisor() {
         libc::kill(supervisor, libc::SIGKILL);
     }
     let deadline = Instant::now() + Duration::from_secs(30);
-    while unsafe { libc::kill(coordinator, 0) } == 0 || unsafe { libc::kill(supervisor, 0) } == 0 {
+    while !Harness::stopped(coordinator) || !Harness::stopped(supervisor) {
         assert!(
             Instant::now() < deadline,
             "the coordinator and the supervisor did not stop"
@@ -4001,7 +4001,7 @@ fn an_old_record_from_before_the_boot_is_dead() {
         libc::kill(coordinator, libc::SIGKILL);
     }
     let deadline = Instant::now() + Duration::from_secs(30);
-    while unsafe { libc::kill(coordinator, 0) } == 0 {
+    while !Harness::stopped(coordinator) {
         assert!(Instant::now() < deadline, "the coordinator did not stop");
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -8112,7 +8112,7 @@ fn a_job_notifies_from_its_supervisor_when_no_coordinator_operates() {
     // coordinator that was still alive could notify, and the test would pass
     // while measuring the path that it means to take away.
     let deadline = Instant::now() + Duration::from_secs(30);
-    while unsafe { libc::kill(coordinator, 0) } == 0 {
+    while !Harness::stopped(coordinator) {
         assert!(
             Instant::now() < deadline,
             "the coordinator {coordinator} did not stop"
@@ -12756,7 +12756,7 @@ fn a_number_from_a_coordinator_that_stopped_gives_a_gap() {
         libc::kill(pid, libc::SIGKILL);
     }
     h.until("the coordinator goes away", Duration::from_secs(20), || {
-        (unsafe { libc::kill(pid, 0) }) != 0
+        Harness::stopped(pid)
     });
 
     let lines = events_lines(events_reader(
@@ -15727,7 +15727,7 @@ fn a_gpu_assignment_survives_a_coordinator_that_stops_and_starts() {
         libc::kill(pid, libc::SIGKILL);
     }
     h.until("the coordinator stops", Duration::from_secs(20), || {
-        (unsafe { libc::kill(pid, 0) }) != 0
+        Harness::stopped(pid)
     });
 
     // The next command starts a new coordinator. It reads the records, so the
@@ -17958,19 +17958,23 @@ fn a_drop_that_could_not_look_says_only_what_it_saw() {
 
 /// A process that ended is stopped, even before its parent collects it.
 ///
+/// Linux only: the state of a process comes from `/proc`.
+///
 /// After SIGKILL the system keeps a zombie until the parent collects it, and
 /// `kill(pid, 0)` still succeeds on it. The harness tests asserted "stayed"
 /// with that one call, so a slow parent failed them (issue #30). A process
 /// that still runs must never count as stopped.
 #[test]
+#[cfg(target_os = "linux")]
 fn a_zombie_counts_as_stopped_and_a_running_process_does_not() {
     let mut running = Command::new("sleep").arg("30").spawn().unwrap();
-    assert!(
-        !Harness::stopped(running.id() as i32),
-        "a running process must not count as stopped"
-    );
+    let running_stopped = Harness::stopped(running.id() as i32);
     running.kill().unwrap();
     running.wait().unwrap();
+    assert!(
+        !running_stopped,
+        "a running process must not count as stopped"
+    );
 
     // `true` ends at once, and this test does not collect it yet.
     let mut ended = Command::new("true").spawn().unwrap();
@@ -18902,7 +18906,7 @@ fn a_coordinator_that_dies_during_an_abort_leaves_every_cancel_on_the_disk() {
         "the command must say what the reader does next: {err}"
     );
     h.until("the coordinator stopped", Duration::from_secs(30), || {
-        (unsafe { libc::kill(coordinator, 0) }) != 0
+        Harness::stopped(coordinator)
     });
 
     // The disk, before any coordinator reads it.
