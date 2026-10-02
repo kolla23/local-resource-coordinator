@@ -66,7 +66,7 @@
 
 **The trade-off in plain terms:**
 - **The fork** keeps ~34k lines of working, tested behaviour. It pays with a refactor (the backend layer), five ADRs, and a large test-port job: at least 281 of the 326 e2e tests use Unix commands, APIs or paths.
-- **A new core** starts clean. It pays by rebuilding and re-proving everything else, and it has no tests at all.
+- **A new core** starts clean. It pays by rebuilding and re-proving everything else. Only the black-box e2e tests could carry over, and only if it kept qex's CLI; even then most of them need the same portable fixtures as the fork's.
 
 ## What would change it
 Recommend **(c)** instead if any of these turns out true:

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Count the Unix-only code in src/ (decision gate, step 3).
 
-For each .rs file in src/ this prints the production lines (the lines above
-the first `#[cfg(test)]`), and, for each category of Unix API, the number of
-production lines that use it and the functions they are in. Test code is not
+For each .rs file in src/ this prints the production lines (every line except
+`#[cfg(test)]` items and the modules that main.rs declares only for tests), and,
+for each category of Unix API, the number of production lines that use it and
+the functions they are in. Test code is not
 counted: a port has to rewrite the tests too, but the product is the measure.
 
 The categories are text patterns, so a hit is a place to read, not a proof of

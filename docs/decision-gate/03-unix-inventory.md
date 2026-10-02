@@ -4,7 +4,7 @@
 
 **Short answer:**
 - **Production code is 37,867 lines**, not counting tests. About **3,635 lines (≈10%)** sit in code that has to change for Windows.
-- **15 files (9,024 lines) contain no Unix API**, among them the scheduler. Counting three files whose only Unix content is text, that's **12,581 lines (33%)**.
+- **15 files (9,024 lines) contain no Unix API**, among them the scheduler. Counting two files whose only Unix content is text, that's **12,451 lines (33%)**.
 - By depth, the affected code splits like this:
   - **THIN:** ≈625 lines. A call is swapped behind a function, and the callers don't change.
   - **MODULE:** ≈1,435 lines. A rework inside one module, whose interface holds.
@@ -140,7 +140,7 @@ Before this was tested, I had listed the atomic-replace contract (`job::write_at
 ## Portable code
 **15 files contain no Unix API**, together **9,024 lines**: `sched.rs` 2,081, `top.rs` 1,451, `spec.rs` 1,271, `proto.rs` 695, `logsel.rs` 549, `resolve.rs` 537, `schema.rs` 536, `capabilities.rs` 483, `fanout.rs` 369, `pipeline.rs` 284, `units.rs` 200, `deps.rs` 188, `context.rs` 173, `claim.rs` 152 and `version.rs` 55.
 
-`help.rs`, `cli.rs` and `style.rs` (3,557 lines) only mention Unix in text or defaults.
+`help.rs` and `cli.rs` (3,427 lines) only mention Unix in text or defaults. (`style.rs` is not text-only: it calls `isatty`, a THIN item.)
 
 "No Unix API" doesn't mean "untouched". Four of these files (`top`, `spec`, `schema`, `proto`) carry the `max_rss` field that DESIGN area 4 changes.
 
@@ -159,7 +159,7 @@ These can't be tested until the coordinator builds on Windows. The likely answer
 | Item | Class | Likely Windows answer |
 |---|---|---|
 | `Instant` across sleep/hibernate | THIN | std uses QueryPerformanceCounter. Whether it counts during sleep is *not verified*. Either answer falls on the safe side, as the issue argues. |
-| NTFS mtime and rename | THIN | `ftLastWriteTime` at 100 ns (FAT: 2 s). A rename probably keeps the mtime (*not verified*). The reload guard reads with std's default open, and the rename test above shows that doesn't block an atomic save. |
+| NTFS mtime and rename | THIN | `ftLastWriteTime` at 100 ns (FAT: 2 s). A rename probably keeps the mtime (*not verified*). The reload guard reads with std's default open. The rename test shows that this read doesn't block a *std* rename over the file; an editor's own atomic save (`MoveFileExW` or `ReplaceFileW`) is *not verified*. |
 | `dev`/`ino` file identity | THIN | Volume serial + 128-bit file ID (`GetFileInformationByHandleEx`). Probably needs the `windows-sys` crate. |
 | The 15 reload unit tests + the e2e test | — | Most inject their clocks, so they should port once `config` and `daemon` compile. |
 | Manual sleep/wake check | — | Needs real hardware after the port. |
