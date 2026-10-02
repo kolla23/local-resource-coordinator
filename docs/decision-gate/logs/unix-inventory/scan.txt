@@ -1,0 +1,60 @@
+# scan.py, src/ at c693c90
+production lines in src/: 37867
+files with a Unix API hit: 24 of 39 (28843 production lines)
+
+file               prod  hits by category (lines/functions)
+commands.rs        7053  other libc 14/5, signals 12/6, std::os::unix 1/1, users/permissions 2/2
+daemon.rs          3083  unix-socket IPC 4/4, std::os::unix 2/2, cfg(unix)/target_os 1/1, users/permissions 7/3, other libc 2/1
+help.rs            2406  signals 11/1, wait/reap 1/1, /proc, /sys, PSI, cgroups 7/1, terminal/tty 1/1, process-group/session 2/1
+sched.rs           2081  -
+config.rs          1907  /proc, /sys, PSI, cgroups 1/1, file identity/metadata 3/1, std::os::unix 1/1
+top.rs             1451  -
+supervisor.rs      1449  fork/exec/fds 1/1, std::os::unix 4/4, users/permissions 3/3, process-group/session 9/3, other libc 34/11, wait/reap 2/2, signals 9/5, cfg(unix)/target_os 7/3, /proc, /sys, PSI, cgroups 1/1, resource usage/limits 1/1
+client.rs          1391  unix-socket IPC 9/7, std::os::unix 8/8, fork/exec/fds 6/6, other libc 24/8, users/permissions 2/2, process-group/session 2/1, file identity/metadata 2/2
+spec.rs            1271  -
+pause.rs           1222  users/permissions 2/1
+cli.rs             1021  signals 1/1
+paths.rs            950  file identity/metadata 10/7, std::os::unix 11/9, users/permissions 10/3, other libc 47/9, fork/exec/fds 2/2, unix-socket IPC 4/3
+main.rs             930  cfg(unix)/target_os 61/15, wait/reap 1/1, signals 1/1, other libc 1/1
+job.rs              882  std::os::unix 1/1, users/permissions 3/3
+update.rs           826  std::os::unix 4/3, users/permissions 4/2, fork/exec/fds 3/2, file identity/metadata 2/1, other libc 8/3, process-group/session 2/1, cfg(unix)/target_os 1/1, signals 2/2
+sys.rs              784  cfg(unix)/target_os 27/15, /proc, /sys, PSI, cgroups 10/9, other libc 56/17, macOS kernel APIs 4/3, resource usage/limits 3/2, signals 2/2, process-group/session 6/2, unix-socket IPC 2/1, std::os::unix 2/1, fork/exec/fds 1/1, terminal/tty 3/2
+lifecycle.rs        741  signals 8/3, other libc 12/3, process-group/session 2/1
+proto.rs            695  -
+hook.rs             689  std::os::unix 4/3, users/permissions 3/3, fork/exec/fds 5/2, process-group/session 5/2, other libc 6/3, signals 3/2
+events.rs           664  unix-socket IPC 3/3, std::os::unix 4/3, fork/exec/fds 1/1, other libc 8/1
+logcap.rs           644  std::os::unix 1/1, users/permissions 1/1
+logsel.rs           549  -
+usage.rs            539  users/permissions 2/2, fork/exec/fds 3/3, std::os::unix 3/3, file identity/metadata 2/2, other libc 2/2
+resolve.rs          537  -
+schema.rs           536  -
+capabilities.rs     483  -
+peers.rs            400  file identity/metadata 2/2, std::os::unix 4/4, users/permissions 11/4, other libc 2/2
+fanout.rs           369  -
+watchers.rs         362  cfg(unix)/target_os 6/5, /proc, /sys, PSI, cgroups 3/3, resource usage/limits 1/1, other libc 2/1, process-group/session 2/1
+pipeline.rs         284  -
+keys.rs             279  terminal/tty 6/4, other libc 31/6, signals 4/1
+enforce.rs          253  /proc, /sys, PSI, cgroups 12/5, cfg(unix)/target_os 2/2
+history.rs          238  users/permissions 3/2, std::os::unix 1/1
+units.rs            200  -
+deps.rs             188  -
+context.rs          173  -
+claim.rs            152  -
+style.rs            130  terminal/tty 1/1, other libc 1/1
+version.rs           55  -
+
+totals by category (production lines, files):
+  process-group/session           30 lines in  8 files
+  wait/reap                        4 lines in  3 files
+  signals                         53 lines in 10 files
+  fork/exec/fds                   22 lines in  8 files
+  unix-socket IPC                 22 lines in  5 files
+  users/permissions               53 lines in 13 files
+  file identity/metadata          21 lines in  6 files
+  /proc, /sys, PSI, cgroups       34 lines in  6 files
+  macOS kernel APIs                4 lines in  1 files
+  terminal/tty                    11 lines in  4 files
+  resource usage/limits            5 lines in  3 files
+  other libc                     250 lines in 16 files
+  std::os::unix                   51 lines in 15 files
+  cfg(unix)/target_os            105 lines in  7 files

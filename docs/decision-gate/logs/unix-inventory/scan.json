@@ -1,0 +1,1025 @@
+{
+ "capabilities.rs": {
+  "production_lines": 483,
+  "categories": {}
+ },
+ "claim.rs": {
+  "production_lines": 152,
+  "categories": {}
+ },
+ "cli.rs": {
+  "production_lines": 1021,
+  "categories": {
+   "signals": {
+    "lines": 1,
+    "functions": [
+     "(module level)"
+    ]
+   }
+  }
+ },
+ "client.rs": {
+  "production_lines": 1391,
+  "categories": {
+   "unix-socket IPC": {
+    "lines": 9,
+    "functions": [
+     "(module level)",
+     "say_that_qex_still_waits",
+     "quiet_a_broken_pipe",
+     "with_stream",
+     "try_connect",
+     "wait_for_socket",
+     "probe_a_socket"
+    ]
+   },
+   "std::os::unix": {
+    "lines": 8,
+    "functions": [
+     "(module level)",
+     "quiet_a_broken_pipe",
+     "write_quietly",
+     "wait_readable",
+     "probe_a_socket",
+     "spawn_daemon",
+     "acquire",
+     "drop"
+    ]
+   },
+   "fork/exec/fds": {
+    "lines": 6,
+    "functions": [
+     "quiet_a_broken_pipe",
+     "write_quietly",
+     "wait_readable",
+     "spawn_daemon",
+     "acquire",
+     "drop"
+    ]
+   },
+   "other libc": {
+    "lines": 24,
+    "functions": [
+     "quiet_a_broken_pipe",
+     "write_quietly",
+     "wait_readable",
+     "a_refusal",
+     "looks_like_a_sandbox",
+     "spawn_daemon",
+     "acquire",
+     "drop"
+    ]
+   },
+   "users/permissions": {
+    "lines": 2,
+    "functions": [
+     "spawn_daemon",
+     "acquire"
+    ]
+   },
+   "process-group/session": {
+    "lines": 2,
+    "functions": [
+     "spawn_daemon"
+    ]
+   },
+   "file identity/metadata": {
+    "lines": 2,
+    "functions": [
+     "acquire",
+     "drop"
+    ]
+   }
+  }
+ },
+ "commands.rs": {
+  "production_lines": 7053,
+  "categories": {
+   "other libc": {
+    "lines": 14,
+    "functions": [
+     "on_wait_signal",
+     "catch_signals_while_waiting",
+     "on_interrupt",
+     "catch_run_signals",
+     "stop_own_job"
+    ]
+   },
+   "signals": {
+    "lines": 12,
+    "functions": [
+     "catch_signals_while_waiting",
+     "catch_run_signals",
+     "run",
+     "ownership_message",
+     "stop_own_job",
+     "status_without_the_coordinator"
+    ]
+   },
+   "std::os::unix": {
+    "lines": 1,
+    "functions": [
+     "follow"
+    ]
+   },
+   "users/permissions": {
+    "lines": 2,
+    "functions": [
+     "follow",
+     "write_id_file"
+    ]
+   }
+  }
+ },
+ "config.rs": {
+  "production_lines": 1907,
+  "categories": {
+   "/proc, /sys, PSI, cgroups": {
+    "lines": 1,
+    "functions": [
+     "default"
+    ]
+   },
+   "file identity/metadata": {
+    "lines": 3,
+    "functions": [
+     "read_config_inner"
+    ]
+   },
+   "std::os::unix": {
+    "lines": 1,
+    "functions": [
+     "read_config_inner"
+    ]
+   }
+  }
+ },
+ "context.rs": {
+  "production_lines": 173,
+  "categories": {}
+ },
+ "daemon.rs": {
+  "production_lines": 3083,
+  "categories": {
+   "unix-socket IPC": {
+    "lines": 4,
+    "functions": [
+     "(module level)",
+     "run",
+     "serve",
+     "idle_watch"
+    ]
+   },
+   "std::os::unix": {
+    "lines": 2,
+    "functions": [
+     "(module level)",
+     "restrict_socket"
+    ]
+   },
+   "cfg(unix)/target_os": {
+    "lines": 1,
+    "functions": [
+     "enqueue"
+    ]
+   },
+   "users/permissions": {
+    "lines": 7,
+    "functions": [
+     "run",
+     "restrict_socket",
+     "handle_submit"
+    ]
+   },
+   "other libc": {
+    "lines": 2,
+    "functions": [
+     "run"
+    ]
+   }
+  }
+ },
+ "deps.rs": {
+  "production_lines": 188,
+  "categories": {}
+ },
+ "enforce.rs": {
+  "production_lines": 253,
+  "categories": {
+   "/proc, /sys, PSI, cgroups": {
+    "lines": 12,
+    "functions": [
+     "read_oom_counts",
+     "classify_oom",
+     "own_cgroup",
+     "start",
+     "record"
+    ]
+   },
+   "cfg(unix)/target_os": {
+    "lines": 2,
+    "functions": [
+     "classify_oom",
+     "own_cgroup"
+    ]
+   }
+  }
+ },
+ "events.rs": {
+  "production_lines": 664,
+  "categories": {
+   "unix-socket IPC": {
+    "lines": 3,
+    "functions": [
+     "stream",
+     "reader_is_gone",
+     "send"
+    ]
+   },
+   "std::os::unix": {
+    "lines": 4,
+    "functions": [
+     "stream",
+     "reader_is_gone",
+     "send"
+    ]
+   },
+   "fork/exec/fds": {
+    "lines": 1,
+    "functions": [
+     "reader_is_gone"
+    ]
+   },
+   "other libc": {
+    "lines": 8,
+    "functions": [
+     "reader_is_gone"
+    ]
+   }
+  }
+ },
+ "fanout.rs": {
+  "production_lines": 369,
+  "categories": {}
+ },
+ "help.rs": {
+  "production_lines": 2406,
+  "categories": {
+   "signals": {
+    "lines": 11,
+    "functions": [
+     "topic"
+    ]
+   },
+   "wait/reap": {
+    "lines": 1,
+    "functions": [
+     "topic"
+    ]
+   },
+   "/proc, /sys, PSI, cgroups": {
+    "lines": 7,
+    "functions": [
+     "topic"
+    ]
+   },
+   "terminal/tty": {
+    "lines": 1,
+    "functions": [
+     "topic"
+    ]
+   },
+   "process-group/session": {
+    "lines": 2,
+    "functions": [
+     "topic"
+    ]
+   }
+  }
+ },
+ "history.rs": {
+  "production_lines": 238,
+  "categories": {
+   "users/permissions": {
+    "lines": 3,
+    "functions": [
+     "append",
+     "prune"
+    ]
+   },
+   "std::os::unix": {
+    "lines": 1,
+    "functions": [
+     "append"
+    ]
+   }
+  }
+ },
+ "hook.rs": {
+  "production_lines": 689,
+  "categories": {
+   "std::os::unix": {
+    "lines": 4,
+    "functions": [
+     "note",
+     "claim",
+     "run"
+    ]
+   },
+   "users/permissions": {
+    "lines": 3,
+    "functions": [
+     "note",
+     "claim",
+     "run"
+    ]
+   },
+   "fork/exec/fds": {
+    "lines": 5,
+    "functions": [
+     "run",
+     "pipe"
+    ]
+   },
+   "process-group/session": {
+    "lines": 5,
+    "functions": [
+     "run",
+     "stop"
+    ]
+   },
+   "other libc": {
+    "lines": 6,
+    "functions": [
+     "run",
+     "pipe",
+     "stop"
+    ]
+   },
+   "signals": {
+    "lines": 3,
+    "functions": [
+     "run",
+     "stop"
+    ]
+   }
+  }
+ },
+ "job.rs": {
+  "production_lines": 882,
+  "categories": {
+   "std::os::unix": {
+    "lines": 1,
+    "functions": [
+     "write_atomic_with"
+    ]
+   },
+   "users/permissions": {
+    "lines": 3,
+    "functions": [
+     "write_status",
+     "write_status_unsynced",
+     "write_spec"
+    ]
+   }
+  }
+ },
+ "keys.rs": {
+  "production_lines": 279,
+  "categories": {
+   "terminal/tty": {
+    "lines": 6,
+    "functions": [
+     "(module level)",
+     "restore",
+     "on_signal",
+     "watch"
+    ]
+   },
+   "other libc": {
+    "lines": 31,
+    "functions": [
+     "(module level)",
+     "restore",
+     "on_signal",
+     "watch",
+     "read_fd",
+     "stdin_ready"
+    ]
+   },
+   "signals": {
+    "lines": 4,
+    "functions": [
+     "watch"
+    ]
+   }
+  }
+ },
+ "lifecycle.rs": {
+  "production_lines": 741,
+  "categories": {
+   "signals": {
+    "lines": 8,
+    "functions": [
+     "parse_signal",
+     "kill",
+     "abort"
+    ]
+   },
+   "other libc": {
+    "lines": 12,
+    "functions": [
+     "parse_signal",
+     "kill",
+     "abort"
+    ]
+   },
+   "process-group/session": {
+    "lines": 2,
+    "functions": [
+     "kill"
+    ]
+   }
+  }
+ },
+ "logcap.rs": {
+  "production_lines": 644,
+  "categories": {
+   "std::os::unix": {
+    "lines": 1,
+    "functions": [
+     "create"
+    ]
+   },
+   "users/permissions": {
+    "lines": 1,
+    "functions": [
+     "create"
+    ]
+   }
+  }
+ },
+ "logsel.rs": {
+  "production_lines": 549,
+  "categories": {}
+ },
+ "main.rs": {
+  "production_lines": 930,
+  "categories": {
+   "cfg(unix)/target_os": {
+    "lines": 61,
+    "functions": [
+     "(module level)",
+     "main",
+     "say_that_a_newer_qex_exists",
+     "speaks_for_a_job",
+     "subcommand_word",
+     "run",
+     "cmd_completions",
+     "remove_hidden",
+     "options_that_take_a_value",
+     "zsh_jobs",
+     "dynamic_part",
+     "print_root_help",
+     "cmd_help",
+     "cmd_schema",
+     "cmd_config"
+    ]
+   },
+   "wait/reap": {
+    "lines": 1,
+    "functions": [
+     "(module level)"
+    ]
+   },
+   "signals": {
+    "lines": 1,
+    "functions": [
+     "main"
+    ]
+   },
+   "other libc": {
+    "lines": 1,
+    "functions": [
+     "main"
+    ]
+   }
+  }
+ },
+ "paths.rs": {
+  "production_lines": 950,
+  "categories": {
+   "file identity/metadata": {
+    "lines": 10,
+    "functions": [
+     "short_socket_dir",
+     "sweep_socket_dirs",
+     "try_lock",
+     "hold_pid_file",
+     "connect_once",
+     "connect_within",
+     "open_once"
+    ]
+   },
+   "std::os::unix": {
+    "lines": 11,
+    "functions": [
+     "short_socket_dir",
+     "sweep_socket_dirs",
+     "try_lock",
+     "hold_pid_file",
+     "unix_address",
+     "connect_once",
+     "connect_within",
+     "path_hash",
+     "ensure_dir"
+    ]
+   },
+   "users/permissions": {
+    "lines": 10,
+    "functions": [
+     "short_socket_dir",
+     "sweep_socket_dirs",
+     "ensure_dir"
+    ]
+   },
+   "other libc": {
+    "lines": 47,
+    "functions": [
+     "short_socket_dir",
+     "sweep_socket_dirs",
+     "try_lock",
+     "unix_address",
+     "answer_of",
+     "finish_connect",
+     "connect_once",
+     "connect_within",
+     "open_once"
+    ]
+   },
+   "fork/exec/fds": {
+    "lines": 2,
+    "functions": [
+     "try_lock",
+     "connect_within"
+    ]
+   },
+   "unix-socket IPC": {
+    "lines": 4,
+    "functions": [
+     "unix_address",
+     "connect_once",
+     "connect_within"
+    ]
+   }
+  }
+ },
+ "pause.rs": {
+  "production_lines": 1222,
+  "categories": {
+   "users/permissions": {
+    "lines": 2,
+    "functions": [
+     "write"
+    ]
+   }
+  }
+ },
+ "peers.rs": {
+  "production_lines": 400,
+  "categories": {
+   "file identity/metadata": {
+    "lines": 2,
+    "functions": [
+     "(module level)",
+     "read_peer"
+    ]
+   },
+   "std::os::unix": {
+    "lines": 4,
+    "functions": [
+     "(module level)",
+     "peer_dir",
+     "publish",
+     "read_peer"
+    ]
+   },
+   "users/permissions": {
+    "lines": 11,
+    "functions": [
+     "peer_dir",
+     "current_uid",
+     "publish",
+     "read_peer"
+    ]
+   },
+   "other libc": {
+    "lines": 2,
+    "functions": [
+     "current_uid",
+     "read_peer"
+    ]
+   }
+  }
+ },
+ "pipeline.rs": {
+  "production_lines": 284,
+  "categories": {}
+ },
+ "proto.rs": {
+  "production_lines": 695,
+  "categories": {}
+ },
+ "resolve.rs": {
+  "production_lines": 537,
+  "categories": {}
+ },
+ "sched.rs": {
+  "production_lines": 2081,
+  "categories": {}
+ },
+ "schema.rs": {
+  "production_lines": 536,
+  "categories": {}
+ },
+ "spec.rs": {
+  "production_lines": 1271,
+  "categories": {}
+ },
+ "style.rs": {
+  "production_lines": 130,
+  "categories": {
+   "terminal/tty": {
+    "lines": 1,
+    "functions": [
+     "enabled"
+    ]
+   },
+   "other libc": {
+    "lines": 1,
+    "functions": [
+     "enabled"
+    ]
+   }
+  }
+ },
+ "supervisor.rs": {
+  "production_lines": 1449,
+  "categories": {
+   "fork/exec/fds": {
+    "lines": 1,
+    "functions": [
+     "(module level)"
+    ]
+   },
+   "std::os::unix": {
+    "lines": 4,
+    "functions": [
+     "(module level)",
+     "spawn",
+     "create_private",
+     "exit_signal"
+    ]
+   },
+   "users/permissions": {
+    "lines": 3,
+    "functions": [
+     "spawn",
+     "record_supervisor_pid",
+     "create_private"
+    ]
+   },
+   "process-group/session": {
+    "lines": 9,
+    "functions": [
+     "spawn",
+     "stop_process_group",
+     "main"
+    ]
+   },
+   "other libc": {
+    "lines": 34,
+    "functions": [
+     "spawn",
+     "reap",
+     "stop_process_group",
+     "main",
+     "spawn_fault_message",
+     "apply_politeness",
+     "write_oom_score",
+     "wait_without_reaping",
+     "classify",
+     "unexplained_kill_note",
+     "read_usage"
+    ]
+   },
+   "wait/reap": {
+    "lines": 2,
+    "functions": [
+     "reap",
+     "exit_signal"
+    ]
+   },
+   "signals": {
+    "lines": 9,
+    "functions": [
+     "stop_process_group",
+     "main",
+     "classify",
+     "unexplained_kill_note",
+     "exit_signal"
+    ]
+   },
+   "cfg(unix)/target_os": {
+    "lines": 7,
+    "functions": [
+     "apply_politeness",
+     "write_oom_score",
+     "read_usage"
+    ]
+   },
+   "/proc, /sys, PSI, cgroups": {
+    "lines": 1,
+    "functions": [
+     "write_oom_score"
+    ]
+   },
+   "resource usage/limits": {
+    "lines": 1,
+    "functions": [
+     "read_usage"
+    ]
+   }
+  }
+ },
+ "sys.rs": {
+  "production_lines": 784,
+  "categories": {
+   "cfg(unix)/target_os": {
+    "lines": 27,
+    "functions": [
+     "cpu_count",
+     "total_memory",
+     "available_memory",
+     "memory_pressure",
+     "meminfo_field",
+     "sysctl_u64",
+     "boot_id",
+     "boot_time_secs",
+     "process_start_token",
+     "process_info",
+     "peer_pid",
+     "process_exe",
+     "pid_namespace",
+     "now_secs",
+     "group_usage"
+    ]
+   },
+   "/proc, /sys, PSI, cgroups": {
+    "lines": 10,
+    "functions": [
+     "memory_pressure",
+     "meminfo_field",
+     "boot_id",
+     "boot_time_secs",
+     "process_start_token",
+     "process_info",
+     "process_exe",
+     "pid_namespace",
+     "group_usage"
+    ]
+   },
+   "other libc": {
+    "lines": 56,
+    "functions": [
+     "sysctl_u64",
+     "vm_available",
+     "boot_time_secs",
+     "pid_alive",
+     "job_pid_alive",
+     "own_pid_alive",
+     "process_start_token",
+     "process_info",
+     "submitter_chain",
+     "peer_pid",
+     "process_exe",
+     "group_usage",
+     "local_parts",
+     "offset_text",
+     "clock_text",
+     "stdin_is_terminal",
+     "terminal_size"
+    ]
+   },
+   "macOS kernel APIs": {
+    "lines": 4,
+    "functions": [
+     "vm_available",
+     "process_start_token",
+     "process_info"
+    ]
+   },
+   "resource usage/limits": {
+    "lines": 3,
+    "functions": [
+     "vm_available",
+     "group_usage"
+    ]
+   },
+   "signals": {
+    "lines": 2,
+    "functions": [
+     "pid_alive",
+     "own_pid_alive"
+    ]
+   },
+   "process-group/session": {
+    "lines": 6,
+    "functions": [
+     "job_pid_alive",
+     "group_usage"
+    ]
+   },
+   "unix-socket IPC": {
+    "lines": 2,
+    "functions": [
+     "peer_pid"
+    ]
+   },
+   "std::os::unix": {
+    "lines": 2,
+    "functions": [
+     "peer_pid"
+    ]
+   },
+   "fork/exec/fds": {
+    "lines": 1,
+    "functions": [
+     "peer_pid"
+    ]
+   },
+   "terminal/tty": {
+    "lines": 3,
+    "functions": [
+     "stdin_is_terminal",
+     "terminal_size"
+    ]
+   }
+  }
+ },
+ "top.rs": {
+  "production_lines": 1451,
+  "categories": {}
+ },
+ "units.rs": {
+  "production_lines": 200,
+  "categories": {}
+ },
+ "update.rs": {
+  "production_lines": 826,
+  "categories": {
+   "std::os::unix": {
+    "lines": 4,
+    "functions": [
+     "(module level)",
+     "with_the_record_in",
+     "fetch"
+    ]
+   },
+   "users/permissions": {
+    "lines": 4,
+    "functions": [
+     "write_record_in",
+     "with_the_record_in"
+    ]
+   },
+   "fork/exec/fds": {
+    "lines": 3,
+    "functions": [
+     "with_the_record_in",
+     "fetch"
+    ]
+   },
+   "file identity/metadata": {
+    "lines": 2,
+    "functions": [
+     "with_the_record_in"
+    ]
+   },
+   "other libc": {
+    "lines": 8,
+    "functions": [
+     "with_the_record_in",
+     "fetch",
+     "stop_the_group"
+    ]
+   },
+   "process-group/session": {
+    "lines": 2,
+    "functions": [
+     "fetch"
+    ]
+   },
+   "cfg(unix)/target_os": {
+    "lines": 1,
+    "functions": [
+     "fetch"
+    ]
+   },
+   "signals": {
+    "lines": 2,
+    "functions": [
+     "fetch",
+     "stop_the_group"
+    ]
+   }
+  }
+ },
+ "usage.rs": {
+  "production_lines": 539,
+  "categories": {
+   "users/permissions": {
+    "lines": 2,
+    "functions": [
+     "add",
+     "write_store"
+    ]
+   },
+   "fork/exec/fds": {
+    "lines": 3,
+    "functions": [
+     "add",
+     "lock_exclusive",
+     "release"
+    ]
+   },
+   "std::os::unix": {
+    "lines": 3,
+    "functions": [
+     "add",
+     "lock_exclusive",
+     "release"
+    ]
+   },
+   "file identity/metadata": {
+    "lines": 2,
+    "functions": [
+     "lock_exclusive",
+     "release"
+    ]
+   },
+   "other libc": {
+    "lines": 2,
+    "functions": [
+     "lock_exclusive",
+     "release"
+    ]
+   }
+  }
+ },
+ "version.rs": {
+  "production_lines": 55,
+  "categories": {}
+ },
+ "watchers.rs": {
+  "production_lines": 362,
+  "categories": {
+   "cfg(unix)/target_os": {
+    "lines": 6,
+    "functions": [
+     "classify",
+     "find",
+     "parse_elapsed",
+     "ancestors_of",
+     "read_uptime"
+    ]
+   },
+   "/proc, /sys, PSI, cgroups": {
+    "lines": 3,
+    "functions": [
+     "find",
+     "ancestors_of",
+     "read_uptime"
+    ]
+   },
+   "resource usage/limits": {
+    "lines": 1,
+    "functions": [
+     "find"
+    ]
+   },
+   "other libc": {
+    "lines": 2,
+    "functions": [
+     "find"
+    ]
+   },
+   "process-group/session": {
+    "lines": 2,
+    "functions": [
+     "find"
+    ]
+   }
+  }
+ }
+}

@@ -1,0 +1,10 @@
+# rename-over-open.rs, rustc 1.98.1, Version 10.0.26200.9457, NTFS, 3 runs
+rename over an open file: OK
+open reader still reads: old
+path now holds: new
+rename over an open file: OK
+open reader still reads: old
+path now holds: new
+rename over an open file: OK
+open reader still reads: old
+path now holds: new
