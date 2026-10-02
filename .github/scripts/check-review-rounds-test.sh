@@ -143,6 +143,14 @@ among_others() { printf 'first\0'; report 2 "$head"; printf '\0last'; }
 not_first() { printf 'Pasted below:\n'; report 2 "$head"; }
 crlf() { report 2 "$head" | sed 's/$/\r/'; }
 indented() { report 2 "$head" | sed 's/^/    /'; }
+# Reports that quote the clean form below their own header (review round 1 of
+# PR #37): only the header may count.
+quotes_clean_verdict() { report 2 "$head" "1 real issue"; printf '    Verdict: no real issues\n'; }
+quotes_model() { report 2 "$head" "no real issues" ""; printf '    Reviewer model: <model name>\n'; }
+second_verdict() { report 2 "$head" "2 real issues"; printf 'Verdict: no real issues\n'; }
+# A report longer than a pipe buffer (64 KiB) once could end the check by
+# SIGPIPE under pipefail.
+long_report() { report 2 "$head"; head -c 150000 /dev/zero | tr '\0' 'x'; printf '\n'; }
 
 expect "a typed line with no comment fails" 1 "$clean" ":"
 expect "a typed line with only unrelated comments fails" 1 "$clean" unrelated
@@ -156,5 +164,9 @@ expect "a report with no model fails" 1 "$clean" 'report 2 "$head" "no real issu
 expect "a report whose heading is not its first line fails" 1 "$clean" not_first
 expect "a CRLF report passes" 0 "$clean" crlf
 expect "an indented report, as the prompt shows it, passes" 0 "$clean" indented
+expect "a report that found issues and quotes a clean verdict fails" 1 "$clean" quotes_clean_verdict
+expect "a report with no model that quotes the model line fails" 1 "$clean" quotes_model
+expect "a report whose second verdict line is clean fails" 1 "$clean" second_verdict
+expect "a report longer than a pipe buffer passes" 0 "$clean" long_report
 
 exit "$fail"

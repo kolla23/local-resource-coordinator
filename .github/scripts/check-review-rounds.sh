@@ -112,19 +112,26 @@ if [[ "$verdict_lc" != "no real issues"* ]]; then
 fi
 
 if [ "$bad" -eq 0 ]; then
-    # The report of that round must be a PR comment. Its first non-empty line
-    # names the round and the head commit; it names a model and a clean verdict.
-    # Lines may be indented: the prompt shows the report as an indented block.
+    # The report of that round must be a PR comment. Its first three non-empty
+    # lines are its header: the round and the head commit, the model, the
+    # verdict. Only the header counts, so a report that quotes the clean form
+    # further down still shows its own verdict. Lines may be indented: the
+    # prompt shows the report as an indented block.
     found=0
     heading='^[[:space:]]*#*[[:space:]]*Review round[[:space:]]+([0-9]+)[[:space:]]*@[[:space:]]*`?([0-9a-fA-F]{7,40})`?[[:space:]]*$'
+    model='^[[:space:]]*Reviewer model:[[:space:]]*[^[:space:]]'
+    verdict='^[[:space:]]*Verdict:[[:space:]]*no real issues'
     while IFS= read -r -d '' c || [ -n "$c" ]; do
         c="${c//$'\r'/}"
-        first="$(printf '%s\n' "$c" | awk 'NF { print; exit }')"
-        if [[ "$first" =~ $heading ]] \
+        # A here-string, not a pipe: awk reads it all, so a long report can't
+        # end in SIGPIPE under pipefail.
+        mapfile -t header < <(awk 'NF && n < 3 { print; n++ }' <<<"$c")
+        if [ "${#header[@]}" -eq 3 ] \
+            && [[ "${header[0]}" =~ $heading ]] \
             && [ "$((10#${BASH_REMATCH[1]}))" -eq "$best_n" ] \
             && [ "${head_lc#"${BASH_REMATCH[2],,}"}" != "$head_lc" ] \
-            && grep -qiE '^[[:space:]]*Reviewer model:[[:space:]]*[^[:space:]]' <<<"$c" \
-            && grep -qiE '^[[:space:]]*Verdict:[[:space:]]*no real issues' <<<"$c"; then
+            && [[ "${header[1],,}" =~ ${model,,} ]] \
+            && [[ "${header[2],,}" =~ ${verdict,,} ]]; then
             found=1
         fi
         c=""
