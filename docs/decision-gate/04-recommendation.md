@@ -38,14 +38,14 @@
   - admission against a memory budget, not serial running
   - whole-tree memory
   - a per-job `TEMP`
-- qex already has the first: the scheduler admits work up to a memory budget, and its admission logic is OS-independent. Its inputs (memory, pressure, peer claims) and the modules it calls to start supervisors, run hooks and write job files need the backend; those are counted in step 3. The second comes from step 1. The third neither option has yet; it's an ADR either way, because SPEC says a job's environment is preserved and rules out automatic environment changes (`SPEC.md:37`, `:52`).
+- qex already has the first: the scheduler admits work up to a memory budget, and its admission logic is OS-independent. Its inputs (memory, pressure, peer claims) and the modules it calls to start supervisors, run hooks and write job files need the backend; those are counted in step 3. The second comes from step 1. The third neither option has yet; it's an ADR either way, because SPEC preserves the submitted environment (`SPEC.md:37`) and allows only documented coordinator-owned additions (`SPEC.md:999`); a per-job TEMP overrides a submitted value.
 
 **Step 3: [Unix inventory](03-unix-inventory.md).**
 - About 10% of the production code (≈3,635 of 37,867 lines) is in code that changes for Windows:
   - ≈625 lines are thin call swaps
   - ≈1,435 lines are rework inside one module
   - ≈1,575 lines, in five areas, are design changes
-- The other ≈90% of the lines stay as they are. A new core would have to rebuild what they do: the scheduler, claims and pools, learned history, restart recovery, the CLI and protocol, `top`, the hooks, and the tested behaviour behind 610 unit and 326 e2e tests.
+- The other ≈90% of the lines carry over largely intact. The exceptions are the help text, which needs a large Windows rewrite, and the `max_rss` fields that design area 4 changes. A new core would have to rebuild what they do: the scheduler, claims and pools, learned history, restart recovery, the CLI and protocol, `top`, the hooks, and the tested behaviour behind 610 unit and 326 e2e tests.
 - The five design changes aren't fork-only costs. A new core would make the same decisions (pipes, signalling, the metric, peers) from a blank page.
 - The Unix code is spread over many files: 24 of 39 files have a hit, and 22 fail to compile. But the weight is at the OS-facing edge: 7 files (paths, supervisor, keys, client, hook, sys, update) hold 72% of the compile errors. The scheduler's admission logic is OS-independent; its inputs and the modules it calls go through the OS.
 
