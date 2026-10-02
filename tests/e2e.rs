@@ -9714,12 +9714,17 @@ fn back_and_forth(name: &str, stall: Option<Duration>) -> Vec<String> {
              {:?} before the report",
             last_good.map(|good| seen_at - good)
         );
-        // SAY IT. An excused attempt is never silent.
+        // SAY IT. An excused attempt is never silent. Write to stderr itself:
+        // the test harness captures `eprintln!` and drops it when the test
+        // passes, so CI would never show the stall.
         let said = format!(
-            "attempt {attempt}: the writer stalled, a half file stayed {longest:?} (half files \
-             qex could have taken: {spans:?}), so qex was right to take it; trying again"
+            "{name}: attempt {attempt}: the writer stalled, a half file stayed {longest:?} (half \
+             files qex could have taken: {spans:?}), so qex was right to take it; trying again"
         );
-        eprintln!("{said}");
+        {
+            use std::io::Write as _;
+            writeln!(std::io::stderr(), "{said}").ok();
+        }
         stalls.push(said);
 
         // Start again from the whole file.
