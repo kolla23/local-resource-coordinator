@@ -2,6 +2,8 @@
 """Tests check-control-chars.py on throwaway git repositories.
 
 Each case stages files in a new repository and runs the real script there.
+Symlinks and file names that are not UTF-8 go straight into git's index
+(`update-index --index-info`), so the cases run the same on every platform.
 Usage: check-control-chars-test.py
 """
 import os
@@ -13,7 +15,9 @@ import tempfile
 CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check-control-chars.py")
 
 
-def run(files, untracked=None):
+def run(files, untracked=None, index=None):
+    """`files` are written and staged; `index` entries (mode, path bytes, content
+    bytes) are added to the index only; `untracked` files are written only."""
     repo = tempfile.mkdtemp()
     try:
         subprocess.run(["git", "init", "-q", repo], check=True)
@@ -23,6 +27,14 @@ def run(files, untracked=None):
             with open(os.path.join(repo, name), "wb") as f:
                 f.write(data)
         subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
+        lines = b""
+        for mode, path, data in index or []:
+            blob = subprocess.run(["git", "-C", repo, "hash-object", "-w", "--stdin"],
+                                  input=data, capture_output=True, check=True).stdout.strip()
+            lines += mode + b" " + blob + b"\t" + path + b"\n"
+        if lines:
+            subprocess.run(["git", "-C", repo, "update-index", "--index-info"],
+                           input=lines, check=True)
         for name, data in (untracked or {}).items():
             with open(os.path.join(repo, name), "wb") as f:
                 f.write(data)
@@ -35,9 +47,9 @@ def run(files, untracked=None):
 def main():
     failed = 0
 
-    def expect(name, want_rc, words, files, untracked=None):
+    def expect(name, want_rc, words, files, untracked=None, index=None):
         nonlocal failed
-        rc, out = run(files, untracked)
+        rc, out = run(files, untracked, index)
         ok = rc == want_rc and words in out
         failed += not ok
         print(f"{'ok  ' if ok else 'FAIL'} {name}")
@@ -45,7 +57,7 @@ def main():
             print(f"     rc {rc}, want {want_rc}; output: {out.strip()}")
 
     clean = {"src/a.rs": b"fn main() {}\n", "README.md": b"text\r\nmore\n"}
-    expect("clean text files pass", 0, "no control characters", clean)
+    expect("clean text files pass", 0, "2 text files checked; no control characters", clean)
     expect("a NUL in a text file fails, with its line", 1,
            "t.sh: control character(s) 0x00, first on line 2",
            {**clean, "t.sh": b"#!/bin/sh\nprintf '\x00'\n"})
@@ -71,6 +83,16 @@ def main():
            clean, untracked={"scratch.txt": b"\x00"})
     expect("a binary extension is matched without case", 0, "no control characters",
            {**clean, "I.PNG": b"\x00"})
+    # What git tracks is checked, not the working tree (review round 2 of PR #38).
+    expect("symlinks are skipped and counted, never followed", 0,
+           "2 text files checked; no control characters (2 symlinks and submodules skipped)",
+           clean, index=[(b"120000", b"tool", b"/usr/bin/true"),
+                         (b"120000", b"zero", b"/dev/zero")])
+    expect("a file name that is not UTF-8 is still checked", 1,
+           "caf\\xe9.txt: control character(s) 0x00",
+           clean, index=[(b"100644", b"caf\xe9.txt", b"a\x00b\n")])
+    expect("an executable file is checked", 1, "run.sh: control character(s) 0x00",
+           clean, index=[(b"100755", b"run.sh", b"\x00")])
 
     print(f"\n{failed} failed")
     return 1 if failed else 0
