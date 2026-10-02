@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: pin the CPU budget and default memory claim of with_default_config; match the long config-fault text, not the bare word "coordinator"; wait for the peer reason after the small jobs end (issue #5); the e2e tests may read temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-02: the back-and-forth reload test excuses, and says, a measured writer stall (issue #17).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a coordinator with no [update] check writes no update record (issue #4).
 //! End-to-end tests for qex.
 //!
@@ -9560,6 +9561,28 @@ fn a_write_that_is_not_finished_does_not_change_the_budget() {
 /// never a file that a write is inside.
 #[test]
 fn a_file_that_goes_back_and_forth_does_not_change_the_budget() {
+    back_and_forth("reload-alternating", None);
+}
+
+/// A writer that stalls is not a fault of qex, and the test says so.
+///
+/// A half file that stays at the path past `daemon::CONFIG_SETTLE` IS the
+/// configuration, so qex is right to take it (issue #17). This test holds the
+/// first half file for 1.5s, so qex takes it. The test above must excuse that
+/// attempt, say why, and pass on the next one.
+#[test]
+fn a_writer_stall_in_the_reload_test_is_excused_and_said() {
+    let excused = back_and_forth("reload-stalled", Some(Duration::from_millis(1500)));
+    assert!(
+        !excused.is_empty(),
+        "qex must take a half file that stayed 1.5s, and the test must excuse it"
+    );
+}
+
+/// The body of the two tests above. `stall` holds the first half file of the
+/// first attempt for that long. Returns the attempts that a writer stall
+/// excused.
+fn back_and_forth(name: &str, stall: Option<Duration>) -> Vec<String> {
     let whole = "[peers]\nenabled = false\n\
                  [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
                  [budget]\ncpu = \"2\"\nmem = \"1GB\"\n";
@@ -9567,7 +9590,7 @@ fn a_file_that_goes_back_and_forth_does_not_change_the_budget() {
     // takes its default value: 75% of the memory of the machine.
     let half = whole.strip_suffix("mem = \"1GB\"\n").unwrap().to_string();
 
-    let h = Harness::new("reload-alternating", whole);
+    let h = Harness::new(name, whole);
     let path = h.root.join("cfg/qex.toml");
 
     h.ok(&["list"]);
@@ -9578,49 +9601,145 @@ fn a_file_that_goes_back_and_forth_does_not_change_the_budget() {
         Some(1024 * 1024 * 1024)
     );
 
-    let stop = Arc::new(AtomicBool::new(false));
-    let writer = {
-        let (path, stop, whole) = (path.clone(), stop.clone(), whole.to_string());
-        let temp = h.root.join("cfg/.qex.toml.new");
-        std::thread::spawn(move || {
-            let mut turn = false;
-            while !stop.load(Ordering::Relaxed) {
-                let text = if turn { &whole } else { &half };
-                std::fs::write(&temp, text).unwrap();
-                std::fs::rename(&temp, &path).unwrap();
-                turn = !turn;
-                std::thread::sleep(Duration::from_millis(300));
-            }
-            // Leave the whole file behind, whatever the turn.
-            std::fs::write(&temp, &whole).unwrap();
-            std::fs::rename(&temp, &path).unwrap();
-        })
-    };
+    // THE PROMISE HAS A LIMIT, AND THE TEST MUST MEASURE IT (issue #17).
+    //
+    // The coordinator takes a file whose age reaches `daemon::CONFIG_SETTLE`
+    // (500ms): a file that stays half-written that long IS the configuration.
+    // The writer means each half file to stay 300ms, but a busy machine can
+    // hold its thread past 500ms, and qex is then right to take that file. So
+    // the writer records, by the monotonic clock, how long each half file
+    // stayed. A fault after a half file that stayed under the settle time is a
+    // fault of qex, and fails with the timings. A fault after the writer
+    // stalled proves nothing: the test says so, and that attempt runs again.
+    const SETTLE: Duration = Duration::from_millis(500);
+    // The kernel stamps a file with a coarse clock that rounds down, which
+    // makes a file look up to a tick older than it is.
+    const TICK: Duration = Duration::from_millis(20);
 
-    let deadline = Instant::now() + Duration::from_secs(12);
-    let mut looks = 0;
-    let mut fault = None;
-    while Instant::now() < deadline {
-        let out = h.qex(&["info", "--json"]);
-        if let Ok(info) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
-            looks += 1;
-            if info["mem_budget"].as_u64() != Some(1024 * 1024 * 1024) {
-                fault = Some(format!("{} looks, then {info}", looks));
-                break;
+    let mut stalls = Vec::new();
+    for attempt in 1..=3 {
+        let stop = Arc::new(AtomicBool::new(false));
+        let writer = {
+            let (path, stop, whole, half) =
+                (path.clone(), stop.clone(), whole.to_string(), half.clone());
+            let temp = h.root.join("cfg/.qex.toml.new");
+            let mut stall = if attempt == 1 { stall } else { None };
+            std::thread::spawn(move || {
+                // (put down, replaced) for each half file. `put down` is taken
+                // BEFORE the write, so each span is an upper bound on the age
+                // that the coordinator could see.
+                let mut halves: Vec<(Instant, Instant)> = Vec::new();
+                let mut half_since = None;
+                let mut turn = false;
+                while !stop.load(Ordering::Relaxed) {
+                    let before = Instant::now();
+                    let text = if turn { &whole } else { &half };
+                    std::fs::write(&temp, text).unwrap();
+                    std::fs::rename(&temp, &path).unwrap();
+                    if turn {
+                        if let Some(since) = half_since.take() {
+                            halves.push((since, Instant::now()));
+                        }
+                    } else {
+                        half_since = Some(before);
+                    }
+                    let hold = match (turn, stall.take()) {
+                        (false, Some(stall)) => stall,
+                        _ => Duration::from_millis(300),
+                    };
+                    turn = !turn;
+                    std::thread::sleep(hold);
+                }
+                // Leave the whole file behind, whatever the turn.
+                std::fs::write(&temp, &whole).unwrap();
+                std::fs::rename(&temp, &path).unwrap();
+                if let Some(since) = half_since {
+                    halves.push((since, Instant::now()));
+                }
+                halves
+            })
+        };
+
+        let deadline = Instant::now() + Duration::from_secs(12);
+        let mut looks = 0;
+        let mut fault = None;
+        // When the last look that gave the whole budget began: qex still held
+        // the whole file then, so the half file it took was at the path, or
+        // held open by a read, at some moment after it.
+        let mut last_good: Option<Instant> = None;
+        while Instant::now() < deadline {
+            let asked = Instant::now();
+            let out = h.qex(&["info", "--json"]);
+            if let Ok(info) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
+                looks += 1;
+                if info["mem_budget"].as_u64() != Some(1024 * 1024 * 1024) {
+                    fault = Some((
+                        Instant::now(),
+                        last_good,
+                        format!("{looks} looks, then {info}"),
+                    ));
+                    break;
+                }
+                last_good = Some(asked);
             }
         }
-    }
-    stop.store(true, Ordering::Relaxed);
-    writer.join().unwrap();
+        stop.store(true, Ordering::Relaxed);
+        let halves = writer.join().unwrap();
+        assert!(
+            looks > 20 || fault.is_some(),
+            "the test must look many times, and it looked {looks}"
+        );
 
-    assert!(
-        fault.is_none(),
-        "a file that goes back and forth must not change the budget: {}",
-        fault.unwrap_or_default()
-    );
-    assert!(
-        looks > 20,
-        "the test must look many times, and it looked {looks}"
+        let Some((seen_at, last_good, fault)) = fault else {
+            return stalls;
+        };
+        // Only a half file that qex could have taken between the last good look
+        // and the report counts: one put down before the report, and whose age
+        // could still grow after the last good look. A stall of some OTHER half
+        // file must not excuse this fault. Each span stops at the report: qex
+        // took the file before it, so it never saw an age past `seen_at`.
+        let spans: Vec<Duration> = halves
+            .iter()
+            .filter(|(put, replaced)| {
+                *put <= seen_at && last_good.is_none_or(|good| *replaced + SETTLE >= good)
+            })
+            .map(|(put, replaced)| (*replaced).min(seen_at) - *put)
+            .collect();
+        let longest = spans.iter().copied().max().unwrap_or_default();
+        assert!(
+            longest + TICK >= SETTLE,
+            "a file that goes back and forth must not change the budget: {fault}. No half \
+             file stayed {SETTLE:?}, so qex took a file younger than its settle time. The half \
+             files that qex could have taken stayed {spans:?}; the last good look was \
+             {:?} before the report",
+            last_good.map(|good| seen_at - good)
+        );
+        // SAY IT. An excused attempt is never silent. Write to stderr itself:
+        // the test harness captures `eprintln!` and drops it when the test
+        // passes, so CI would never show the stall.
+        let said = format!(
+            "{name}: attempt {attempt}: the writer stalled, a half file stayed {longest:?} (half \
+             files qex could have taken: {spans:?}), so qex was right to take it; trying again"
+        );
+        {
+            use std::io::Write as _;
+            writeln!(std::io::stderr(), "{said}").ok();
+        }
+        stalls.push(said);
+
+        // Start again from the whole file.
+        h.until(
+            "the whole file is the configuration again",
+            Duration::from_secs(10),
+            || {
+                serde_json::from_slice::<serde_json::Value>(&h.qex(&["info", "--json"]).stdout)
+                    .is_ok_and(|i| i["mem_budget"].as_u64() == Some(1024 * 1024 * 1024))
+            },
+        );
+    }
+    panic!(
+        "the writer stalled past the settle time in every attempt, so this machine cannot \
+         run this test: {stalls:?}"
     );
 }
 
