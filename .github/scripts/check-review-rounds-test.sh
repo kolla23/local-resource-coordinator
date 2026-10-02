@@ -142,6 +142,7 @@ unrelated() { printf 'Looks good to me\0Round 2 @ e5e4a3a: no real issues\0'; }
 among_others() { printf 'first\0'; report 2 "$head"; printf '\0last'; }
 not_first() { printf 'Pasted below:\n'; report 2 "$head"; }
 crlf() { report 2 "$head" | sed 's/$/\r/'; }
+indented() { report 2 "$head" | sed 's/^/    /'; }
 
 expect "a typed line with no comment fails" 1 "$clean" ":"
 expect "a typed line with only unrelated comments fails" 1 "$clean" unrelated
@@ -154,5 +155,6 @@ expect "a report that found issues fails" 1 "$clean" 'report 2 "$head" "1 real i
 expect "a report with no model fails" 1 "$clean" 'report 2 "$head" "no real issues" ""'
 expect "a report whose heading is not its first line fails" 1 "$clean" not_first
 expect "a CRLF report passes" 0 "$clean" crlf
+expect "an indented report, as the prompt shows it, passes" 0 "$clean" indented
 
 exit "$fail"

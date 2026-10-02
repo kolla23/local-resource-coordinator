@@ -114,16 +114,17 @@ fi
 if [ "$bad" -eq 0 ]; then
     # The report of that round must be a PR comment. Its first non-empty line
     # names the round and the head commit; it names a model and a clean verdict.
+    # Lines may be indented: the prompt shows the report as an indented block.
     found=0
-    heading='^#*[[:space:]]*Review round[[:space:]]+([0-9]+)[[:space:]]*@[[:space:]]*`?([0-9a-fA-F]{7,40})`?[[:space:]]*$'
+    heading='^[[:space:]]*#*[[:space:]]*Review round[[:space:]]+([0-9]+)[[:space:]]*@[[:space:]]*`?([0-9a-fA-F]{7,40})`?[[:space:]]*$'
     while IFS= read -r -d '' c || [ -n "$c" ]; do
         c="${c//$'\r'/}"
         first="$(printf '%s\n' "$c" | awk 'NF { print; exit }')"
         if [[ "$first" =~ $heading ]] \
             && [ "$((10#${BASH_REMATCH[1]}))" -eq "$best_n" ] \
             && [ "${head_lc#"${BASH_REMATCH[2],,}"}" != "$head_lc" ] \
-            && grep -qiE '^Reviewer model:[[:space:]]*[^[:space:]]' <<<"$c" \
-            && grep -qiE '^Verdict:[[:space:]]*no real issues' <<<"$c"; then
+            && grep -qiE '^[[:space:]]*Reviewer model:[[:space:]]*[^[:space:]]' <<<"$c" \
+            && grep -qiE '^[[:space:]]*Verdict:[[:space:]]*no real issues' <<<"$c"; then
             found=1
         fi
         c=""
