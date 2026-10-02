@@ -147,7 +147,8 @@ Before this was tested, I had listed the atomic-replace contract (`job::write_at
 **The scheduler's logic is OS-independent; its inputs are not.**
 - It reads memory and pressure through `Machine` (`sched.rs:358–375`).
 - It publishes and reads peer claims through `peers::` (`sched.rs:371`, `:1072`; DESIGN area 5).
-- The rest is arithmetic over claims and pools.
+- It starts supervisors (`supervisor::spawn`, `sched.rs:2010`), runs hooks and writes job files through other modules, which are counted under those modules above.
+- The admission decision itself is arithmetic over claims and pools.
 
 Caveats:
 - These files call `sys::` functions that are gated per OS. In all, 18 files call `sys::`, and there is no backend layer: the OS calls are free `#[cfg]` functions.

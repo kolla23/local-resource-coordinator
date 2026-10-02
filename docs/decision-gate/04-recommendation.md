@@ -31,23 +31,23 @@
 - This favours neither option on its own, but it shows **qex's process model doesn't have to be thrown away**. It ports to something stronger.
 
 **Step 2: [parallel workloads on Windows](02-parallel-workload-windows.md).**
-- Three uncoordinated build+test runs pushed available RAM as low as 1 MiB, 418 MiB and 1,337 MiB in the first run.
+- Three build+test workloads at once, uncoordinated, pushed available RAM as low as 1 MiB, 418 MiB and 1,337 MiB in the three reps of the first run.
 - On a shared `TEMP`, 5 of the 6 parallel reps across both shared-TEMP runs had collisions, with **9 to 66 false test failures in each worktree that collided**. Per-job `TEMP` removed them (3 of 3 clean).
 - One at a time cost 58% more time.
 - So the product needs:
   - admission against a memory budget, not serial running
   - whole-tree memory
   - a per-job `TEMP`
-- qex already has the first: the scheduler admits work up to a memory budget, and its logic is OS-independent. Only its inputs (memory, pressure, peer claims) need the backend. The second comes from step 1. The third neither option has yet; it's an ADR either way, because SPEC limits automatic environment changes.
+- qex already has the first: the scheduler admits work up to a memory budget, and its admission logic is OS-independent. Its inputs (memory, pressure, peer claims) and the modules it calls to start supervisors, run hooks and write job files need the backend; those are counted in step 3. The second comes from step 1. The third neither option has yet; it's an ADR either way, because SPEC says a job's environment is preserved and rules out automatic environment changes (`SPEC.md:37`, `:52`).
 
 **Step 3: [Unix inventory](03-unix-inventory.md).**
 - About 10% of the production code (≈3,635 of 37,867 lines) is in code that changes for Windows:
   - ≈625 lines are thin call swaps
   - ≈1,435 lines are rework inside one module
   - ≈1,575 lines, in five areas, are design changes
-- The other ≈90% is logic that a new core would have to rebuild: the scheduler, claims and pools, learned history, restart recovery, the CLI and protocol, `top`, the hooks, and the tested behaviour behind 610 unit and 326 e2e tests.
+- The other ≈90% of the lines stay as they are. A new core would have to rebuild what they do: the scheduler, claims and pools, learned history, restart recovery, the CLI and protocol, `top`, the hooks, and the tested behaviour behind 610 unit and 326 e2e tests.
 - The five design changes aren't fork-only costs. A new core would make the same decisions (pipes, signalling, the metric, peers) from a blank page.
-- The Unix code is spread over many files: 24 of 39 files have a hit, and 22 fail to compile. But the weight is at the OS-facing edge: 7 files (paths, supervisor, keys, client, hook, sys, update) hold 72% of the compile errors. The scheduler's logic is OS-independent; only its inputs go through the OS.
+- The Unix code is spread over many files: 24 of 39 files have a hit, and 22 fail to compile. But the weight is at the OS-facing edge: 7 files (paths, supervisor, keys, client, hook, sys, update) hold 72% of the compile errors. The scheduler's admission logic is OS-independent; its inputs and the modules it calls go through the OS.
 
 ## The case for a new core, weighed
 - **Windows-only gains:**
@@ -62,7 +62,7 @@
 - **Why this doesn't change the recommendation:**
   - These gaps are on every platform, so closing them is the same design work either way.
   - QEX_ASSESSMENT.md:110 already advises against rewriting persistence "solely for architectural uniformity" and says to keep safety outcomes and compatibility where possible.
-  - A new core pays for that cleanliness by rebuilding and re-proving the other ~34k lines, without the existing tests.
+  - A new core pays for that cleanliness by rebuilding and re-proving the other ~34k lines, with only the black-box e2e tests to carry over, and only if it kept qex's CLI.
 
 **The trade-off in plain terms:**
 - **The fork** keeps ~34k lines of working, tested behaviour. It pays with a refactor (the backend layer), five ADRs, and a large test-port job: at least 281 of the 326 e2e tests use Unix commands, APIs or paths.
@@ -76,10 +76,12 @@ Recommend **(c)** instead if any of these turns out true:
 
 ## What's not known yet
 - Every Windows line count is an estimate. No Windows port was written, and the compile error count (291) is a lower bound.
-- One Windows behaviour was tested: renaming over an open file works.
+- One Windows behaviour was tested: a std rename over a file that a std reader holds open works. Other readers, and an editor's own atomic save, weren't tested.
 - Several others are *not verified*:
   - `Instant` across sleep
   - rename keeping the mtime
+  - an editor's atomic save while the coordinator reads the file
+  - whether the inherited profile ACL keeps other users out of job records, which can hold secrets
   - reading another process's command line
   - I/O priority
 - Only one machine and one workload (ripgrep) were measured, with 3 repetitions per arm.
