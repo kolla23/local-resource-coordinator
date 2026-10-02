@@ -16,7 +16,7 @@
 2. The fixture-sample PR and R1, as separate PRs. R1 also adds the move checker.
 3. In parallel:
    - R2–R6, which wait for no ADR, in any order the reviews allow.
-   - ADR 1 and the per-job TEMP ADR, then ADRs 2–5 (see "ADRs").
+   - The ADRs in the order of the "ADRs" table: ADR 1 and the per-job TEMP ADR first, ADR 4 drafted alongside them if useful.
 4. R7–R10, each after its ADR.
 5. The Windows backend, starting with removing the `compile_error!` and the `#[cfg(unix)]` module gates in `main.rs`.
 
@@ -33,7 +33,7 @@ Every step is its own PR under about 400 changed lines and runs the review loop.
 **Evidence in every R-PR description:**
 1. **Tests unchanged.** No assertion in `tests/` or in a unit test changes. A unit test may only move with its code; `git diff --color-moved` shows that.
 2. **Code only moves.** The move checker, `.github/scripts/check-moves.py` (added in R1 with its own test, reused by every R-PR), compares each moved function body before and after and reports it byte-identical apart from the call path. The PR lists and explains every line that is not a move.
-3. **Public surface unchanged.** The help text for every subcommand and `protocol.schema.json` give identical output before and after.
+3. **Public surface unchanged.** The help text for every subcommand and `qex schema <name>` for each of `schema::NAMES` (job, status, pipeline, event) give identical output before and after.
 4. **Full Linux checks in WSL2:** fmt, clippy, unit tests, the e2e suite twice (to catch flakes), release build, MSRV; and CI passes.
 5. **macOS CI started by hand** on every PR that moves a `cfg(target_os = "macos")` branch. If it was not run, the PR says macOS is "not evaluated".
 
@@ -43,7 +43,7 @@ Every step is its own PR under about 400 changed lines and runs the review loop.
 |---|---|---|---|---|
 | R1 | Memory, CPU and clocks | Move the `sys.rs` memory, CPU and clock bodies into `os/{linux,macos}.rs`. `sys.rs` keeps its signatures and forwards to them. Adds the move checker. | none | — |
 | R2 | Process identity | `pid_alive`, `job_pid_alive`, `own_pid_alive`, `process_start_token`, `same_process_start`, `process_info`, `process_exe`, `boot_id`, `pid_namespace`, `submitter_chain`, `group_usage` | none (still through `sys::`) | — |
-| R3 | File modes and locks | `ensure_dir(mode)`, owner-only writes, `flock` → `os::fs::{set_owner_only, lock_exclusive}`. e2e already pins the job folder (0700), `spec.json` and the stdout/stderr logs (0600). R3 first adds characterization tests for the files not yet pinned (history, `usage.json`, `paused.json`, `daemon.log`); they pass today, so they change no behaviour. | paths, job, usage, history, logcap | — |
+| R3 | File modes and locks | `ensure_dir(mode)`, owner-only writes, `flock` → `os::fs::{set_owner_only, lock_exclusive}`. e2e already pins the job folder (0700), `spec.json` and the stdout/stderr logs (0600). R3 first adds characterization tests for every private file that no test pins yet: history, `usage.json`, `paused.json`, `daemon.log`, `status.json`, `supervisor.log`, `hook.log` and `update.json`. The PR checks that list against a grep of the mode calls. These tests pass today, so they change no behaviour. | every caller of `ensure_dir`, owner-only modes or `flock`: client, commands, daemon, history, hook, job, logcap, paths, pause, supervisor, update, usage (peers waits for R10). Likely split into R3a (modes) and R3b (locks). | — |
 | R4 | Terminal and console | `isatty`, terminal size, raw keys (`keys.rs`), the `SIGPIPE` gates in `main.rs`, Ctrl-C while waiting | style, top, keys, main, client | — |
 | R5 | Detached start and reaping | Starting the supervisor and the coordinator (`setsid`), the `waitpid` reaper → `os::spawn_detached`, `os::wait_child` | supervisor, client, daemon | — |
 | R6 | Sub-processes with a time limit | The stop hook and the update check's `curl`: `poll` and kill → `os::run_bounded` | hook, update | — |
@@ -60,7 +60,7 @@ Every step is its own PR under about 400 changed lines and runs the review loop.
 - **Not in these PRs:** the `compile_error!` and the 37 `#[cfg(unix)]` module gates in `main.rs` stay until the Windows backend exists.
 
 ## ADRs
-All ADRs go in `docs/fork/adr/`, one docs-only PR each, written while R1–R6 are in progress.
+All ADRs go in `docs/fork/adr/`, one docs-only PR each, written while R2–R6 are in progress.
 
 | Order | ADR | Why here |
 |---|---|---|
@@ -91,7 +91,11 @@ This answers 04-recommendation's other tripwire: does the test port cost more th
   | `libc::kill` (57) | 1 (its Windows meaning waits for ADRs 2 and 3; the sample records that cost) |
   | `/tmp` (12) | 1 |
 
-- **Not sampled, but counted:** other `libc::` uses (163 in all, 57 of them `kill`), `std::os::unix` mode checks (`PermissionsExt`), and other Unix tools that tests start (`ps`, `mkfifo`, `bwrap`, `lsof`, `chmod`, `cp`, `touch`, `printf`). They form an "other Unix" category in the estimate.
+- **Not sampled, but counted:** every other pattern that `experiments/unix-inventory/e2e-unix.py` scans for, plus the Unix tools that tests start. They form an "other Unix" category in the estimate:
+  - other `libc::` uses (163 in all, 57 of them `kill`), `SIG*` names and `"kill"`
+  - `std::os::unix` (`PermissionsExt`, `UnixListener`/`UnixStream` fake coordinators, `ExitStatusExt`, `CommandExt`, `MetadataExt`)
+  - `/proc`, `"/bin/` paths, `.sh"` scripts and `"cat"`
+  - other tools: `ps`, `mkfifo`, `bwrap`, `lsof`, `chmod`, `cp`, `touch`, `printf`
 
 - **Measured per test:** changed lines, time spent, whether the semantics shifted (shell features with no portable equivalent), whether it passes on Linux in 3 of 3 runs, runtime before and after.
 - **On Windows:** `testjob` is built natively and its subcommands are run. The converted e2e tests cannot run on Windows until the coordinator builds, and the write-up says so.
@@ -126,8 +130,8 @@ The Windows backend is not done, and no Windows release is made, until this chec
      - a DACL is NULL or inheritance is on
      - any ACE grants access to a SID other than the user, SYSTEM or Administrators
      - an owner is not the user
-  4. Create the pipe name first from a separate process, then start a coordinator: it must refuse to serve, and a client must refuse to send to that process.
+  4. Create the pipe name first from a process that runs as a second local account, which the test setup creates. Then start a coordinator: it must refuse to serve, and a client must refuse to send to that process. (A squatter running as the same user is out of scope: same-user processes are trusted, as on Unix.)
 - **Manual check, recorded in `docs/baseline/`:**
   1. Log in as a second, standard (non-admin) local account.
   2. Try to read a job file, its log and the history with `type` and `Get-Content`, and try to connect to the pipe. Each attempt fails with "access denied".
-- **Linux counterpart:** the existing e2e mode tests plus the characterization tests R3 adds (see R3) pin 0700 on folders and 0600 on files, so both backends are held to the same rule.
+- **Linux counterpart:** the existing e2e mode tests plus the characterization tests R3 adds (see R3) pin 0700 on folders and 0600 on every private file in the state root, so both backends are held to the same rule.
