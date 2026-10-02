@@ -1,25 +1,27 @@
 name: Pull request review
 
-# Every pull request, however small, goes through the review loop: a fresh
-# reviewer reads the whole diff, every real issue is fixed, and a new round
-# starts after each push. The loop ends only when a round finds no real issues.
-# Read `.github/scripts/check-review-rounds.sh` for the line that records a
-# round.
+# Every pull request is reviewed before it is ready: it opens as a draft, a
+# fresh reviewer reads the whole diff in rounds kept off GitHub, and when a
+# round on the head commit finds no real issues the author adds one line to
+# the body and marks it ready:
 #
-# The check is red until the last round names the head commit, so a push after
-# the review shows at once. This repository cannot require a check before a
-# merge, so the owner reads this check before merging.
+#     Reviewed at <full 40-character head commit id>: no real issues
 #
-# `edited` fires when a round is added to the body, and that must re-run the
-# check with no new commit. This is a workflow of its own for the same reason as
-# `pr-title.yml`: `edited` in `ci.yml` would build and test everything again.
+# This check confirms that line. It runs only when the pull request becomes
+# ready and on pushes to a ready pull request, never on drafts or on edits of
+# the body, so normal work on a draft sends no failed-run emails. A push to a
+# ready pull request needs a new review: convert it back to a draft first.
+#
+# The job runs the pull request's own copy of this file and the script, so a
+# pull request that changes `.github/` can turn the check green: read such
+# diffs yourself before merging.
 on:
   pull_request:
-    types: [opened, reopened, synchronize, edited]
+    types: [opened, reopened, ready_for_review, synchronize]
 
-# The job only reads the event and the checkout, so the token can only read.
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: pr-review-${{ github.event.pull_request.number }}
@@ -27,18 +29,23 @@ concurrency:
 
 jobs:
   review:
-    name: The review loop ended on the head commit
+    name: Reviewed at the head commit
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
       # Test the check first. A broken check that accepts every body would stay
       # green and look like a pass.
-      - run: .github/scripts/check-review-rounds-test.sh
-      - name: The last review round must name the head commit and find no real issues
-        # The body goes through the environment, never into the text of the
-        # command. A person outside this project can write it.
+      - run: .github/scripts/check-reviewed-test.sh
+      - name: The body names a clean review of the head commit
+        # The body is read now, not from the event, so a re-run after fixing
+        # the body sees the fix. It goes to the script on stdin, never into the
+        # text of a command: a person outside this project can write it.
         env:
-          BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: printf '%s' "$BODY" | .github/scripts/check-review-rounds.sh "$HEAD_SHA"
+        run: |
+          gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body \
+            | .github/scripts/check-reviewed.sh "$HEAD_SHA"
