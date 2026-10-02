@@ -1,0 +1,322 @@
+# compile-windows.sh at f2d96f0 on 2026-10-02T03:53:45Z
+rustc 1.98.1 (48a229cea 2026-09-01)
+host: x86_64-pc-windows-msvc
+
+292 errors in 22 files
+by code: E0425 177, E0433 50, E0599 41, E0308 13, E0422 5, E0428 1, E0432 1, E0531 1, E0061 1, E0317 1, E0609 1
+most named items: unix 50, SIGKILL 12, mode 12, killpg 10, sockaddr_un 8, flock 7, STDIN_FILENO 7, sigaction 6, fcntl 6, as_raw_fd 6, pollfd 5, POLLIN 5, poll 5, STDOUT_FILENO 5, pre_exec 5, LOCK_EX 4, total_memory 4, O_NONBLOCK 4, from_mode 4, uid 4, LOCK_NB 3, LOCK_UN 3, setpgid 3, tcsetattr 3, TCSANOW 3
+
+src/paths.rs: 71
+     96 E0433  cannot find `unix` in `os`
+     98 E0425  cannot find function `getuid` in crate `libc`
+    112 E0599  no method named `uid` found for struct `Metadata` in the current scope
+    116 E0599  no method named `uid` found for struct `Metadata` in the current scope
+    140 E0433  cannot find `unix` in `os`
+    145 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
+    226 E0433  cannot find `unix` in `os`
+    228 E0425  cannot find function `getuid` in crate `libc`
+    250 E0599  no method named `uid` found for struct `Metadata` in the current scope
+    435 E0433  cannot find `unix` in `os`
+    439 E0425  cannot find function `flock` in crate `libc`
+    439 E0425  cannot find value `LOCK_EX` in crate `libc`
+    439 E0425  cannot find value `LOCK_NB` in crate `libc`
+    439 E0599  no method named `as_raw_fd` found for reference `&File` in the current scope
+    543 E0433  cannot find `unix` in `os`
+    652 E0425  cannot find type `sockaddr_un` in crate `libc`
+    653 E0433  cannot find `unix` in `os`
+    655 E0599  no method named `as_bytes` found for reference `&std::ffi::OsStr` in the current scope
+    656 E0425  cannot find type `sockaddr_un` in crate `libc`
+    660 E0425  cannot find value `AF_UNIX` in crate `libc`
+    660 E0425  cannot find type `sa_family_t` in crate `libc`
+    701 E0422  cannot find struct, variant or union type `pollfd` in crate `libc`
+    703 E0425  cannot find value `POLLOUT` in crate `libc`
+    707 E0425  cannot find function `poll` in crate `libc`
+    726 E0425  cannot find type `socklen_t` in crate `libc`
+    728 E0308  arguments to this function are incorrect
+    730 E0425  cannot find value `SOL_SOCKET` in crate `libc`
+    731 E0425  cannot find value `SO_ERROR` in crate `libc`
+    756 E0425  cannot find type `sockaddr_un` in crate `libc`
+    758 E0425  cannot find value `AF_UNIX` in crate `libc`
+    758 E0425  cannot find value `SOCK_STREAM` in crate `libc`
+    764 E0425  cannot find function `fcntl` in crate `libc`
+    764 E0425  cannot find value `F_GETFL` in crate `libc`
+    765 E0425  cannot find function `fcntl` in crate `libc`
+    765 E0425  cannot find value `F_SETFL` in crate `libc`
+    765 E0425  cannot find value `O_NONBLOCK` in crate `libc`
+    768 E0308  mismatched types
+    773 E0425  cannot find type `sockaddr_un` in crate `libc`
+    774 E0425  cannot find type `sockaddr_un` in crate `libc`
+    774 E0425  cannot find type `socklen_t` in crate `libc`
+    777 E0308  mismatched types
+    784 E0308  mismatched types
+    790 E0308  mismatched types
+    802 E0433  cannot find `unix` in `os`
+    820 E0433  cannot find `unix` in `os`
+    849 E0425  cannot find function `fcntl` in crate `libc`
+    849 E0425  cannot find value `F_GETFL` in crate `libc`
+    850 E0425  cannot find function `fcntl` in crate `libc`
+    850 E0425  cannot find value `F_SETFL` in crate `libc`
+    850 E0425  cannot find value `O_NONBLOCK` in crate `libc`
+    854 E0433  cannot find `unix` in `os`
+    874 E0425  cannot find type `sockaddr_un` in crate `libc`
+    878 E0425  cannot find value `AF_UNIX` in crate `libc`
+    878 E0425  cannot find value `SOCK_STREAM` in crate `libc`
+    882 E0425  cannot find function `fcntl` in crate `libc`
+    882 E0425  cannot find value `F_GETFL` in crate `libc`
+    883 E0425  cannot find function `fcntl` in crate `libc`
+    883 E0425  cannot find value `F_SETFL` in crate `libc`
+    883 E0425  cannot find value `O_NONBLOCK` in crate `libc`
+    884 E0308  mismatched types
+    889 E0425  cannot find type `sockaddr_un` in crate `libc`
+    890 E0425  cannot find type `sockaddr_un` in crate `libc`
+    890 E0425  cannot find type `socklen_t` in crate `libc`
+    893 E0308  mismatched types
+    897 E0308  mismatched types
+    898 E0308  mismatched types
+    905 E0308  mismatched types
+    915 E0433  cannot find `unix` in `os`
+    917 E0599  no method named `as_bytes` found for reference `&std::ffi::OsStr` in the current scope
+    996 E0433  cannot find `unix` in `os`
+   1003 E0599  no associated function or constant named `from_mode` found for struct `Permissions` in the current scope
+src/supervisor.rs: 34
+     17 E0433  cannot find `unix` in `os`
+     30 E0433  cannot find `unix` in `os`
+     34 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
+     50 E0599  no method named `pre_exec` found for struct `std::process::Command` in the current scope
+     53 E0425  cannot find function `setsid` in crate `libc`
+    107 E0425  cannot find function `waitpid` in crate `libc`
+    308 E0425  cannot find function `killpg` in crate `libc`
+    318 E0425  cannot find function `killpg` in crate `libc`
+    318 E0425  cannot find value `SIGKILL` in crate `libc`
+    548 E0599  no method named `pre_exec` found for struct `std::process::Command` in the current scope
+    551 E0425  cannot find function `setpgid` in crate `libc`
+    680 E0425  cannot find function `killpg` in crate `libc`
+    684 E0425  cannot find function `killpg` in crate `libc`
+    684 E0425  cannot find value `SIGKILL` in crate `libc`
+    720 E0425  cannot find function `killpg` in crate `libc`
+    720 E0425  cannot find value `SIGKILL` in crate `libc`
+   1033 E0433  cannot find `unix` in `os`
+   1043 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
+   1106 E0425  cannot find function `setpriority` in crate `libc`
+   1106 E0425  cannot find value `PRIO_PROCESS` in crate `libc`
+   1279 E0425  cannot find type `siginfo_t` in crate `libc`
+   1283 E0425  cannot find function `waitid` in crate `libc`
+   1284 E0425  cannot find value `P_PID` in crate `libc`
+   1285 E0425  cannot find type `id_t` in crate `libc`
+   1287 E0425  cannot find value `WEXITED` in crate `libc`
+   1287 E0425  cannot find value `WNOWAIT` in crate `libc`
+   1337 E0425  cannot find value `SIGKILL` in crate `libc`
+   1344 E0531  cannot find unit struct, unit variant or constant `SIGKILL` in crate `libc`
+   1389 E0425  cannot find value `SIGKILL` in crate `libc`
+   1405 E0433  cannot find `unix` in `os`
+   1406 E0599  no method named `signal` found for reference `&ExitStatus` in the current scope
+   1411 E0425  cannot find type `rusage` in crate `libc`
+   1412 E0425  cannot find function `getrusage` in crate `libc`
+   1412 E0425  cannot find value `RUSAGE_CHILDREN` in crate `libc`
+src/keys.rs: 29
+     24 E0425  cannot find type `termios` in crate `libc`
+     51 E0425  cannot find value `STDOUT_FILENO` in crate `libc`
+     53 E0308  mismatched types
+     59 E0425  cannot find function `tcsetattr` in crate `libc`
+     59 E0425  cannot find value `STDIN_FILENO` in crate `libc`
+     59 E0425  cannot find value `TCSANOW` in crate `libc`
+     70 E0425  cannot find value `STDOUT_FILENO` in crate `libc`
+     72 E0308  mismatched types
+     76 E0425  cannot find function `tcsetattr` in crate `libc`
+     76 E0425  cannot find value `STDIN_FILENO` in crate `libc`
+     76 E0425  cannot find value `TCSANOW` in crate `libc`
+     91 E0425  cannot find type `termios` in crate `libc`
+     92 E0425  cannot find function `tcgetattr` in crate `libc`
+     92 E0425  cannot find value `STDIN_FILENO` in crate `libc`
+    105 E0425  cannot find value `SIGHUP` in crate `libc`
+    111 E0425  cannot find value `ICANON` in crate `libc`
+    111 E0425  cannot find value `ECHO` in crate `libc`
+    112 E0425  cannot find value `VMIN` in crate `libc`
+    113 E0425  cannot find value `VTIME` in crate `libc`
+    114 E0425  cannot find function `tcsetattr` in crate `libc`
+    114 E0425  cannot find value `STDIN_FILENO` in crate `libc`
+    114 E0425  cannot find value `TCSANOW` in crate `libc`
+    122 E0425  cannot find value `STDOUT_FILENO` in crate `libc`
+    124 E0308  mismatched types
+    207 E0425  cannot find value `STDIN_FILENO` in crate `libc`
+    226 E0422  cannot find struct, variant or union type `pollfd` in crate `libc`
+    227 E0425  cannot find value `STDIN_FILENO` in crate `libc`
+    228 E0425  cannot find value `POLLIN` in crate `libc`
+    231 E0425  cannot find function `poll` in crate `libc`
+src/client.rs: 21
+     12 E0433  cannot find `unix` in `os`
+    741 E0433  cannot find `unix` in `os`
+    748 E0425  cannot find value `MSG_NOSIGNAL` in crate `libc`
+    750 E0425  cannot find function `send` in crate `libc`
+    809 E0433  cannot find `unix` in `os`
+    811 E0422  cannot find struct, variant or union type `pollfd` in crate `libc`
+    813 E0425  cannot find value `POLLIN` in crate `libc`
+    818 E0425  cannot find function `poll` in crate `libc`
+   1197 E0433  cannot find `unix` in `os`
+   1269 E0433  cannot find `unix` in `os`
+   1292 E0599  no method named `pre_exec` found for struct `std::process::Command` in the current scope
+   1295 E0425  cannot find function `setsid` in crate `libc`
+   1328 E0433  cannot find `unix` in `os`
+   1346 E0425  cannot find function `flock` in crate `libc`
+   1346 E0425  cannot find value `LOCK_EX` in crate `libc`
+   1346 E0425  cannot find value `LOCK_NB` in crate `libc`
+   1346 E0599  no method named `as_raw_fd` found for struct `File` in the current scope
+   1385 E0433  cannot find `unix` in `os`
+   1387 E0425  cannot find function `flock` in crate `libc`
+   1387 E0425  cannot find value `LOCK_UN` in crate `libc`
+   1387 E0599  no method named `as_raw_fd` found for struct `File` in the current scope
+src/hook.rs: 18
+    219 E0433  cannot find `unix` in `os`
+    224 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
+    315 E0433  cannot find `unix` in `os`
+    320 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
+    359 E0433  cannot find `unix` in `os`
+    360 E0433  cannot find `unix` in `os`
+    369 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
+    421 E0599  no method named `pre_exec` found for struct `std::process::Command` in the current scope
+    425 E0425  cannot find function `setpgid` in crate `libc`
+    460 E0425  cannot find function `killpg` in crate `libc`
+    460 E0425  cannot find value `SIGKILL` in crate `libc`
+    547 E0432  unresolved import `std::os::fd`
+    549 E0061  this function takes 3 arguments but 1 argument was supplied
+    554 E0599  no associated function or constant named `from_raw_fd` found for struct `File` in the current scope
+    555 E0599  no associated function or constant named `from_raw_fd` found for struct `File` in the current scope
+    617 E0425  cannot find function `killpg` in crate `libc`
+    635 E0425  cannot find function `killpg` in crate `libc`
+    635 E0425  cannot find value `SIGKILL` in crate `libc`
+src/sys.rs: 18
+    226 E0425  cannot find function `kill` in crate `libc`
+    248 E0425  cannot find function `getpgid` in crate `libc`
+    261 E0425  cannot find function `kill` in crate `libc`
+    435 E0425  cannot find function `getppid` in crate `libc`
+    450 E0425  cannot find function `process_info` in this scope
+    475 E0433  cannot find `unix` in `os`
+    476 E0433  cannot find `unix` in `os`
+    514 E0425  cannot find value `pid` in this scope
+    514 E0425  cannot find value `pid` in this scope
+    519 E0317  `if` may be missing an `else` clause
+    780 E0425  cannot find function `localtime_r` in crate `libc`
+    789 E0609  no field `tm_gmtoff` on type `&tm`
+    848 E0425  cannot find function `localtime_r` in crate `libc`
+    861 E0425  cannot find value `STDIN_FILENO` in crate `libc`
+    869 E0425  cannot find type `winsize` in crate `libc`
+    870 E0425  cannot find function `ioctl` in crate `libc`
+    870 E0425  cannot find value `STDOUT_FILENO` in crate `libc`
+    870 E0425  cannot find value `TIOCGWINSZ` in crate `libc`
+src/update.rs: 18
+     45 E0433  cannot find `unix` in `os`
+    120 E0433  cannot find `unix` in `os`
+    128 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
+    147 E0425  cannot find function `flock` in crate `libc`
+    147 E0425  cannot find value `LOCK_EX` in crate `libc`
+    147 E0425  cannot find value `LOCK_NB` in crate `libc`
+    179 E0425  cannot find function `flock` in crate `libc`
+    179 E0425  cannot find value `LOCK_UN` in crate `libc`
+    273 E0433  cannot find `unix` in `os`
+    335 E0433  cannot find `unix` in `os`
+    336 E0599  no method named `pre_exec` found for struct `std::process::Command` in the current scope
+    337 E0425  cannot find function `setpgid` in crate `libc`
+    407 E0599  no method named `as_raw_fd` found for mutable reference `&mut ChildStdout` in the current scope
+    421 E0422  cannot find struct, variant or union type `pollfd` in crate `libc`
+    423 E0425  cannot find value `POLLIN` in crate `libc`
+    427 E0425  cannot find function `poll` in crate `libc`
+    547 E0425  cannot find function `kill` in crate `libc`
+    547 E0425  cannot find value `SIGKILL` in crate `libc`
+src/events.rs: 14
+    397 E0433  cannot find `unix` in `os`
+    594 E0433  cannot find `unix` in `os`
+    595 E0433  cannot find `unix` in `os`
+    598 E0422  cannot find struct, variant or union type `pollfd` in crate `libc`
+    600 E0425  cannot find value `POLLIN` in crate `libc`
+    605 E0425  cannot find function `poll` in crate `libc`
+    609 E0425  cannot find value `POLLHUP` in crate `libc`
+    609 E0425  cannot find value `POLLERR` in crate `libc`
+    609 E0425  cannot find value `POLLNVAL` in crate `libc`
+    612 E0425  cannot find value `POLLIN` in crate `libc`
+    620 E0425  cannot find function `recv` in crate `libc`
+    624 E0425  cannot find value `MSG_PEEK` in crate `libc`
+    624 E0425  cannot find value `MSG_DONTWAIT` in crate `libc`
+    635 E0433  cannot find `unix` in `os`
+src/peers.rs: 12
+     19 E0433  cannot find `unix` in `os`
+    103 E0599  no method named `mode` found for struct `Metadata` in the current scope
+    121 E0599  no method named `uid` found for struct `Metadata` in the current scope
+    130 E0433  cannot find `unix` in `os`
+    131 E0599  no associated function or constant named `from_mode` found for struct `Permissions` in the current scope
+    172 E0425  cannot find function `getuid` in crate `libc`
+    211 E0433  cannot find `unix` in `os`
+    212 E0599  no associated function or constant named `from_mode` found for struct `Permissions` in the current scope
+    364 E0433  cannot find `unix` in `os`
+    368 E0425  cannot find value `O_NOFOLLOW` in crate `libc`
+    368 E0425  cannot find value `O_NONBLOCK` in crate `libc`
+    368 E0599  no method named `custom_flags` found for mutable reference `&mut OpenOptions` in the current scope
+src/commands.rs: 11
+   1873 E0425  cannot find type `sigaction` in crate `libc`
+   1875 E0425  cannot find value `SA_RESETHAND` in crate `libc`
+   1876 E0425  cannot find function `sigemptyset` in crate `libc`
+   1877 E0425  cannot find function `sigaction` in crate `libc`
+   1878 E0425  cannot find function `sigaction` in crate `libc`
+   2746 E0433  cannot find `unix` in `os`
+   2781 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
+   5844 E0425  cannot find type `sigaction` in crate `libc`
+   5847 E0425  cannot find function `sigemptyset` in crate `libc`
+   5848 E0425  cannot find function `sigaction` in crate `libc`
+   5849 E0425  cannot find function `sigaction` in crate `libc`
+src/usage.rs: 9
+    357 E0433  cannot find `unix` in `os`
+    358 E0599  no method named `as_raw_fd` found for struct `File` in the current scope
+    436 E0433  cannot find `unix` in `os`
+    438 E0425  cannot find function `flock` in crate `libc`
+    438 E0425  cannot find value `LOCK_EX` in crate `libc`
+    459 E0433  cannot find `unix` in `os`
+    461 E0425  cannot find function `flock` in crate `libc`
+    461 E0425  cannot find value `LOCK_UN` in crate `libc`
+    461 E0599  no method named `as_raw_fd` found for reference `&File` in the current scope
+src/lifecycle.rs: 9
+     30 E0425  cannot find value `SIGKILL` in crate `libc`
+     32 E0425  cannot find value `SIGHUP` in crate `libc`
+     33 E0425  cannot find value `SIGQUIT` in crate `libc`
+     34 E0425  cannot find value `SIGUSR1` in crate `libc`
+     35 E0425  cannot find value `SIGUSR2` in crate `libc`
+    112 E0425  cannot find function `killpg` in crate `libc`
+    137 E0425  cannot find value `SIGKILL` in crate `libc`
+    163 E0425  cannot find function `killpg` in crate `libc`
+    163 E0425  cannot find value `SIGKILL` in crate `libc`
+src/config.rs: 7
+   1348 E0433  cannot find `unix` in `os`
+   1351 E0599  no method named `dev` found for struct `Metadata` in the current scope
+   1351 E0599  no method named `dev` found for reference `&Metadata` in the current scope
+   1352 E0599  no method named `ino` found for struct `Metadata` in the current scope
+   1352 E0599  no method named `ino` found for reference `&Metadata` in the current scope
+   1472 E0425  cannot find function `total_memory` in module `sys`
+   1592 E0425  cannot find function `total_memory` in module `sys`
+src/daemon.rs: 7
+     22 E0433  cannot find `unix` in `os`
+   1237 E0425  cannot find function `umask` in crate `libc`
+   1240 E0425  cannot find function `umask` in crate `libc`
+   1317 E0425  cannot find function `update_watch` in this scope
+   1383 E0433  cannot find `unix` in `os`
+   1384 E0599  no associated function or constant named `from_mode` found for struct `Permissions` in the current scope
+   2043 E0425  cannot find function `process_info` in module `sys`
+src/main.rs: 3
+     75 E0428  the name `main` is defined multiple times
+     83 E0425  cannot find value `SIGPIPE` in crate `libc`
+    741 E0425  cannot find function `total_memory` in module `sys`
+src/history.rs: 2
+     65 E0433  cannot find `unix` in `os`
+     71 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
+src/job.rs: 2
+    767 E0433  cannot find `unix` in `os`
+    788 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
+src/logcap.rs: 2
+    401 E0433  cannot find `unix` in `os`
+    409 E0599  no method named `mode` found for mutable reference `&mut OpenOptions` in the current scope
+src/top.rs: 2
+    570 E0425  cannot find function `available_memory` in module `sys`
+    571 E0425  cannot find function `total_memory` in module `sys`
+src/sched.rs: 1
+    367 E0425  cannot find function `available_memory` in module `sys`
+src/style.rs: 1
+     36 E0425  cannot find value `STDOUT_FILENO` in crate `libc`
+src/watchers.rs: 1
+    202 E0425  cannot find function `getpgid` in crate `libc`
