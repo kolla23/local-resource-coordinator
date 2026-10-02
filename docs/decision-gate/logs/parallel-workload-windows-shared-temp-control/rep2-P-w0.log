@@ -18,11 +18,11 @@
    Compiling memmap2 v0.9.11
    Compiling crossbeam-deque v0.8.7
    Compiling aho-corasick v1.1.4
-   Compiling grep-matcher v0.1.9 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\matcher)
+   Compiling grep-matcher v0.1.9 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\matcher)
    Compiling winapi-util v0.1.11
    Compiling encoding_rs_io v0.1.7
    Compiling anyhow v1.0.103
-   Compiling ripgrep v15.2.0 (C:\Users\kolla\AppData\Local\lrc-bench\wt1)
+   Compiling ripgrep v15.2.0 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1)
    Compiling termcolor v1.4.1
    Compiling same-file v1.0.6
    Compiling lexopt v0.3.2
@@ -30,20 +30,20 @@
    Compiling walkdir v2.5.0
    Compiling textwrap v0.16.2
    Compiling bstr v1.13.0
-   Compiling globset v0.4.19 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\globset)
-   Compiling grep-searcher v0.1.17 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\searcher)
-   Compiling grep-regex v0.1.14 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\regex)
-   Compiling grep-printer v0.3.1 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\printer)
-   Compiling grep-cli v0.1.12 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\cli)
-   Compiling ignore v0.4.29 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\ignore)
-   Compiling grep v0.4.1 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\grep)
+   Compiling globset v0.4.19 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\globset)
+   Compiling grep-searcher v0.1.17 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\searcher)
+   Compiling grep-regex v0.1.14 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\regex)
+   Compiling grep-printer v0.3.1 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\printer)
+   Compiling grep-cli v0.1.12 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\cli)
+   Compiling ignore v0.4.29 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\ignore)
+   Compiling grep v0.4.1 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\grep)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 59.46s
    Compiling proc-macro2 v1.0.106
    Compiling unicode-ident v1.0.24
    Compiling quote v1.0.46
    Compiling syn v2.0.119
    Compiling serde_derive v1.0.228
-   Compiling ripgrep v15.2.0 (C:\Users\kolla\AppData\Local\lrc-bench\wt1)
+   Compiling ripgrep v15.2.0 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1)
 warning: method `env` is never used
    --> tests\util.rs:278:12
     |

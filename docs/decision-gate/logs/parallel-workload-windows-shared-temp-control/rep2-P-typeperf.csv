@@ -1,4 +1,4 @@
-"(PDH-CSV 4.0) (Eastern Daylight Time)(240)","\\PRAKYATH\Memory\Pages Input/sec","\\PRAKYATH\Memory\Pages/sec","\\PRAKYATH\Paging File(_Total)\% Usage","\\PRAKYATH\Memory\Available MBytes"
+"(PDH-CSV 4.0) (Eastern Daylight Time)(240)","\\HOSTNAME\Memory\Pages Input/sec","\\HOSTNAME\Memory\Pages/sec","\\HOSTNAME\Paging File(_Total)\% Usage","\\HOSTNAME\Memory\Available MBytes"
 "09/30/2026 23:46:13.234"," "," ","1.0531783103942871094","5858"
 "09/30/2026 23:46:14.275","183.2345913139512561","183.2345913139512561","1.0531783103942871094","4970"
 "09/30/2026 23:46:15.348","1582.2690390694579037","1582.2690390694579037","1.0531783103942871094","2815"

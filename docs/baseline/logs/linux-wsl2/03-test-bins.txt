@@ -18,7 +18,7 @@ $ cargo test --bins
    Compiling ryu v1.0.23
    Compiling unsafe-libyaml v0.2.11
    Compiling toml_writer v1.1.2+spec-1.1.0
-   Compiling qex v0.33.0 (/home/prakyath/src/lrc)
+   Compiling qex v0.33.0 (/home/USERNAME/src/lrc)
    Compiling memchr v2.8.3
    Compiling anstream v1.0.0
    Compiling anyhow v1.0.104

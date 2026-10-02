@@ -1,7 +1,7 @@
 date_utc: 2026-09-30T22:54:38Z
 commit: 78b4e86c5ff8be0c7f4bc26bea809aa75fe230f0
 describe: v0.33.0
-uname: Linux Prakyath 5.15.167.4-microsoft-standard-WSL2 #1 SMP Tue Nov 5 00:21:55 UTC 2024 x86_64 x86_64 x86_64 GNU/Linux
+uname: Linux HOSTNAME 5.15.167.4-microsoft-standard-WSL2 #1 SMP Tue Nov 5 00:21:55 UTC 2024 x86_64 x86_64 x86_64 GNU/Linux
 PRETTY_NAME="Ubuntu 24.04.1 LTS"
 nproc: 12
                total        used        free      shared  buff/cache   available

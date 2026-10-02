@@ -26,7 +26,7 @@ Raw data is in [logs/parallel-workload-windows/](logs/parallel-workload-windows/
   - A safety guard would abort on a stall over 10 s or commit within 2 GiB of the limit. **It never triggered.**
 - **Machine** ([environment.txt](logs/parallel-workload-windows/environment.txt)):
   - i7-1255U (10 cores, 12 threads), 15.7 GiB RAM, commit limit 44.8 GiB.
-  - **The owner's normal apps were running**, as on a real day. Just before each run, the system already had **36.4–37.3 GiB committed and only 2.2–4.0 GiB of RAM available**: Chrome 5.4 GiB, a `vmmem` VM 4.1 GiB, Python 3.4 GiB, Claude 2.9 GiB, ChatGPT 2.6 GiB, VS Code 1.5 GiB (a snapshot taken before the runs).
+  - **The owner's normal apps were running**, as on a real day. Just before each run, the system already had **36.4–37.3 GiB committed and only 2.2–4.0 GiB of RAM available**. In a snapshot taken before the runs, the six largest background processes held 19.4 GiB of private memory together.
 
 ## Results
 
@@ -63,7 +63,7 @@ Paging from `typeperf`:
 
 ## A baseline failure unrelated to parallelism
 - `feature::f1414_no_require_git` failed in **every** run, both arms.
-- The test expects `.gitignore` to be ignored when there's no git repository. But `%TEMP%` (`C:\Users\kolla\AppData\Local\Temp`) is **inside the git repository at `C:\Users\kolla`**, so ripgrep finds a repository and respects it.
+- The test expects `.gitignore` to be ignored when there's no git repository. But `%TEMP%` (`C:\Users\USERNAME\AppData\Local\Temp`) is **inside the git repository at `C:\Users\USERNAME`**, so ripgrep finds a repository and respects it.
 - That's an environment artefact of this machine, and it's counted as 1 failure per worktree in the table.
 - *Update, 2026-10-01:* the owner renamed that repository's `.git`, and in the follow-up run below `f1414` passed in all 9 worktree runs.
 
@@ -105,7 +105,7 @@ The median makespan was 92.7 s, against 97.5 s for P in the first run. Raw logs 
   - One more difference: the per-job folders started empty, while the shared `%TEMP%\ripgrep-tests` kept 321 leftover entries from earlier runs (`run-gate.sh` only deletes `target/`). Concurrency still explains the failures best: 102 of them are "used by another process", 2 of the 9 worktrees were clean, and the first run's one-at-a-time arm used the same shared folder without these collisions (1 unrelated failure per worktree).
 - **Machine** ([environment.txt](logs/parallel-workload-windows-shared-temp-control/environment.txt)):
   - The page file was changed from automatic to a **fixed 32 GiB**, so the commit limit was **47.7 GiB** (48,837 MiB = 16,069 MiB RAM + 32,768 MiB page file) and no longer drifted between runs.
-  - Before the run I closed background apps (Chrome, Edge, OneDrive, Loom, Chime, Skype for Business, AweSun, the Claude desktop app; WSL shut down). VS Code stayed open. This list isn't recorded in the logs.
+  - Before the run I closed most background apps and shut down WSL; the code editor stayed open. This isn't recorded in the logs.
   - The runner's own idle reading at the start of each rep: **5.8–6.0 GiB available** and 14.7–15.2 GiB committed, against 4.0–5.1 GiB available and 26.3–26.7 GiB committed in the per-job run (the `machine:` line of each `*-summary.txt`). So this run had *more* headroom, which rules out memory pressure as the cause of the failures.
 
 | Run | Makespan | Peak memory per workload (kernel job commit) | System commit increase | Lowest available RAM | Worst timer delay | Failed tests per worktree |
@@ -117,7 +117,7 @@ The median makespan was 92.7 s, against 97.5 s for P in the first run. Raw logs 
 Raw logs are in [logs/parallel-workload-windows-shared-temp-control/](logs/parallel-workload-windows-shared-temp-control/).
 
 **What the failures are:**
-- Every failure that prints a path points under the shared `C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\…`. The 11 code-267 failures print no path; they come from starting `rg` in a test folder (`tests\util.rs:335`).
+- Every failure that prints a path points under the shared `C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\…`. The 11 code-267 failures print no path; they come from starting `rg` in a test folder (`tests\util.rs:335`).
 - By Windows error code: 102 × **32** (file in use by another process), 34 × **5** (access denied), 11 × **267** (directory name invalid), 3 × **145** (directory not empty), 3 × **3** and 1 × **2** (path or file not found). All of these are what you'd expect when three test runs create and delete the same directories at the same time.
 - The rest are `rg` itself exiting with status 2 (error, 56×; one of them, `r1159_exit_status`, prints it as "found: 2") or 1 (no match, 7×), and 5 × "printed outputs differ", all inside the same shared test folders.
 - The per-job TEMP logs have **0** error-32 lines, counting both the `os error 32` and the `Os { code: 32 … }` spellings.

@@ -1,15 +1,15 @@
 label: rep3-P
 mode: parallel
-command: set "PATH=C:\Users\kolla\.cargo\bin;%PATH%" && cargo build --locked && cargo test --locked
+command: set "PATH=C:\Users\USERNAME\.cargo\bin;%PATH%" && cargo build --locked && cargo test --locked
 workloads: 3
 machine: physical 16069 MiB, commit limit 35320 MiB | idle before start: commit 26927 MiB, available 5265 MiB
 makespan_s: 91.2
 aborted: no
-w0: dir C:/Users/kolla/AppData/Local/lrc-bench/wt1 | exit 0 | wall_s 91.2 | job_peak_commit_mib 1993 | processes_total 551 | still_running_after_root_exit 0
-w1: dir C:/Users/kolla/AppData/Local/lrc-bench/wt2 | exit 0 | wall_s 91.1 | job_peak_commit_mib 2091 | processes_total 551 | still_running_after_root_exit 0
-w2: dir C:/Users/kolla/AppData/Local/lrc-bench/wt3 | exit 0 | wall_s 90.3 | job_peak_commit_mib 1820 | processes_total 551 | still_running_after_root_exit 0
+w0: dir C:/Users/USERNAME/AppData/Local/lrc-bench/wt1 | exit 0 | wall_s 91.2 | job_peak_commit_mib 1993 | processes_total 551 | still_running_after_root_exit 0
+w1: dir C:/Users/USERNAME/AppData/Local/lrc-bench/wt2 | exit 0 | wall_s 91.1 | job_peak_commit_mib 2091 | processes_total 551 | still_running_after_root_exit 0
+w2: dir C:/Users/USERNAME/AppData/Local/lrc-bench/wt3 | exit 0 | wall_s 90.3 | job_peak_commit_mib 1820 | processes_total 551 | still_running_after_root_exit 0
 sum_of_job_peaks_mib: 5904
 system_max_commit_mib: 32763 (+5836 over idle)
 system_min_available_mib: 2024
 responsiveness_100ms_timer: samples 810 | worst_late_ms 98 | late_over_1s 0 | late_over_2s 0
-typeperf_csv: C:/Users/kolla/projects/local-resource-coordinator/docs/decision-gate/logs/parallel-workload-windows-temp\rep3-P-typeperf.csv
+typeperf_csv: C:/Users/USERNAME/projects/local-resource-coordinator/docs/decision-gate/logs/parallel-workload-windows-temp\rep3-P-typeperf.csv

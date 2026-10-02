@@ -74,7 +74,7 @@ $ cargo clippy --all-targets -- -D warnings
     Checking ryu v1.0.23
     Checking unsafe-libyaml v0.2.11
     Checking memchr v2.8.3
-   Compiling qex v0.33.0 (/home/prakyath/src/lrc)
+   Compiling qex v0.33.0 (/home/USERNAME/src/lrc)
     Checking toml_writer v1.1.2+spec-1.1.0
    Compiling syn v3.0.3
     Checking toml_datetime v1.1.1+spec-1.1.0
