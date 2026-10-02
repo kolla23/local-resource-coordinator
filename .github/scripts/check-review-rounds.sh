@@ -39,7 +39,9 @@ section="$(printf '%s\n' "$body" | awk '
     /^## / { inside = ($0 ~ /^## Review rounds[[:space:]]*$/); next }
     inside')"
 
-if ! printf '%s\n' "$body" | grep -q '^## Review rounds[[:space:]]*$'; then
+# A here-string, not a pipe: `grep -q` stops at the first match, and under
+# pipefail the writer's SIGPIPE on a large body would read as "no section".
+if ! grep -q '^## Review rounds[[:space:]]*$' <<<"$body"; then
     cat <<'EOF'
 the body of the pull request has no section `## Review rounds`.
 
@@ -87,8 +89,10 @@ if [ "${head_lc#"$best_sha"}" = "$head_lc" ]; then
     echo "head of the pull request is now ${head_lc:0:7}. A push came after the review."
     bad=1
 fi
+# The verdict must START with the words. "2 real issues; earlier rounds found
+# no real issues" holds them too, and it is not a clean round.
 verdict_lc="${best_verdict,,}"
-if [[ "$verdict_lc" != *"no real issues"* ]]; then
+if [[ "$verdict_lc" != "no real issues"* ]]; then
     echo "the last review round (round $best_n) did not end clean:"
     echo "    $best_verdict"
     bad=1
