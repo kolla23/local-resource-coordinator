@@ -34,7 +34,7 @@ Run all of these from the repository root. `src/` and `tests/` are unchanged sin
    - Output: [e2e-unix.txt](logs/unix-inventory/e2e-unix.txt).
 4. **Depth classification:** three read-only reviews, one per area, read each hit and compile error.
    - They recorded what the code does, the Windows mechanism that would replace it, a class and a rough line count, taken from the function spans.
-   - Windows behaviour nobody tested here is marked *not verified*.
+   - The Windows replacements named below come from Microsoft's documentation of each API, and none of them was tested here, apart from the one in "Tested on Windows". Where even the documentation leaves the behaviour open, the text says *not verified*.
    - I checked the key claims against the code (see "Spot checks").
 
 ## Where the breaks are (compile errors per file)
@@ -70,7 +70,7 @@ Run all of these from the repository root. `src/` and `tests/` are unchanged sin
   - `SIGPIPE` goes away, so `BrokenPipe` is treated as a normal exit, and the gates in `main.rs` are removed (≈65).
 - **File locks** (`flock`, for the spawn lock and the usage file) → `LockFileEx` (≈70).
 - **Detecting an event reader that left** → `PeekNamedPipe` (≈40).
-- **Owner-only file modes** on history, log and job files → rely on the profile's ACL (≈15).
+- **Owner-only file modes** on history, log and job files → rely on the profile's ACL (≈15). This is security-relevant, because job records can hold secrets: whether the inherited ACL keeps other users out is *not verified* and has to be checked in the port.
 - **The config reload guard's file identity** (`dev`/`ino`) → volume serial + file ID (≈12; issue #20).
 - **The peer pid used for attribution** (`SO_PEERCRED`) → `GetNamedPipeClientProcessId` (≈30).
 - **Small items:**

@@ -38,7 +38,7 @@
   - admission against a memory budget, not serial running
   - whole-tree memory
   - a per-job `TEMP`
-- qex already has the first: the scheduler admits work up to a memory budget, and `sched.rs` has no OS calls. The second comes from step 1. The third neither option has yet; it's an ADR either way, because SPEC limits automatic environment changes.
+- qex already has the first: the scheduler admits work up to a memory budget, and its logic is OS-independent. Only its inputs (memory, pressure, peer claims) need the backend. The second comes from step 1. The third neither option has yet; it's an ADR either way, because SPEC limits automatic environment changes.
 
 **Step 3: [Unix inventory](03-unix-inventory.md).**
 - About 10% of the production code (≈3,635 of 37,867 lines) is in code that changes for Windows:
