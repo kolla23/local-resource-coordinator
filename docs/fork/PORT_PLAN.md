@@ -39,13 +39,13 @@ Every step is its own PR under about 400 changed lines and runs the review loop.
 
 **Order.** Seams that depend on no ADR come first. The seams of the five design areas wait for their ADR, so that the interface does not decide the ADR in advance.
 
-| # | PR | Contents | Callers touched | Waits for |
+| # | PR | Contents | Expected callers (estimate; the PR's own grep decides) | Waits for |
 |---|---|---|---|---|
 | R1 | Memory, CPU and clocks | Move the `sys.rs` memory, CPU and clock bodies into `os/{linux,macos}.rs`. `sys.rs` keeps its signatures and forwards to them. Adds the move checker. | none | — |
 | R2 | Process identity | `pid_alive`, `job_pid_alive`, `own_pid_alive`, `process_start_token`, `same_process_start`, `process_info`, `process_exe`, `boot_id`, `pid_namespace`, `submitter_chain`, `group_usage` | none (still through `sys::`) | — |
-| R3 | File modes and locks | `ensure_dir(mode)`, owner-only writes, `flock` → `os::fs::{set_owner_only, lock_exclusive}`. Before moving code, R3 adds characterization tests, built by a method; this plan gives no list of files. (1) Grep the production code for every place that creates a file, folder or socket under the state root: `OpenOptions` with `create`, `fs::write`, `File::create`, `write_atomic`, `ensure_dir`, `create_dir*` and socket binds; the PR shows the grep and its full result. (2) Sort each hit into "owner-only today" (an explicit 0600/0700 mode) or "no mode today" (the umask decides). (3) Pin each hit as it is today; where an existing e2e or unit test already pins a hit, the PR names that test and adds none. These tests pass today, so they change no behaviour. Making the "no mode today" hits owner-only does change behaviour, so it is a separate fix PR after R3. | every caller of `ensure_dir`, owner-only modes or `flock`: client, commands, daemon, history, hook, job, logcap, paths, pause, supervisor, update, usage (peers waits for R10). Likely split into R3a (modes) and R3b (locks). | — |
-| R4 | Terminal and console | `isatty`, terminal size, raw keys (`keys.rs`), the `SIGPIPE` gates in `main.rs`, Ctrl-C while waiting | style, top, keys, main, client | — |
-| R5 | Detached start and reaping | Starting the supervisor and the coordinator (`setsid`), the `waitpid` reaper → `os::spawn_detached`, `os::wait_child` | supervisor, client, daemon | — |
+| R3 | File modes and locks | `ensure_dir(mode)`, owner-only writes, `flock` → `os::fs::{set_owner_only, lock_exclusive}`. Before moving code, R3 adds characterization tests, built by a method; this plan gives no list of files. (1) Grep the production code for every place that creates a file, folder or socket, wherever it is (the state root, the socket folder and its TMPDIR fallback, or elsewhere): `OpenOptions` with `create`, `fs::write`, `File::create`, `write_atomic`, `ensure_dir`, `create_dir*` and socket binds; the PR shows the grep and its full result, with the location of each hit. (2) Sort each hit into "owner-only today" (an explicit 0600/0700 mode) or "no mode today" (the umask decides). (3) Pin each hit as it is today; where an existing e2e or unit test already pins a hit, the PR names that test and adds none. These tests pass today, so they change no behaviour. Making the "no mode today" hits that hold job or coordinator data owner-only does change behaviour, so it is a separate fix PR after R3, which lists which hits it changes and why. | every caller of `ensure_dir`, owner-only modes or `flock`: client, commands, daemon, history, hook, job, logcap, paths, pause, supervisor, update, usage (peers waits for R10). Likely split into R3a (modes) and R3b (locks). | — |
+| R4 | Terminal and console | `isatty`, terminal size, raw keys (`keys.rs`), the `SIGPIPE` gates in `main.rs`, Ctrl-C while waiting | style, top, keys, main, client, commands | — |
+| R5 | Detached start and reaping | Starting the supervisor and the coordinator (`setsid`), the `waitpid` reaper → `os::spawn_detached`, `os::wait_child` | supervisor, client | — |
 | R6 | Sub-processes with a time limit | The stop hook and the update check's `curl`: `poll` and kill → `os::run_bounded` | hook, update | — |
 | R7 | IPC transport | `os::ipc::{Listener, Stream, connect, peer_pid}`; `UnixStream` no longer leaks into `Connected::Open`. Framing stays newline-based on Linux. | paths, daemon, client, events | ADR 1 |
 | R8 | Stopping and signalling | `killpg`, the graceful-then-forced stop → `os::stop_job(...)` | lifecycle, supervisor | ADRs 2, 3 |
@@ -55,7 +55,7 @@ Every step is its own PR under about 400 changed lines and runs the review loop.
 - **Size.** Moved code counts twice in a diff. R2 and R3 are near the limit and may split in two.
 - **Tripwire.** 04-recommendation names this refactor as the test of whether the layer can be drawn cleanly: recommend (c) instead if "the scheduler or daemon state needs pids or process groups in its core types rather than at the edges".
   - R2 moves code without touching callers, so it cannot answer this by itself. Its PR description therefore also lists every pid or process-group field and use in the core types of `sched` and `daemon`, with where each is used. That gives the owner an early answer.
-  - R5, R7 and R8 confirm it, because they change `daemon`, `lifecycle` and `supervisor`.
+  - R7 and R8 confirm it, because they change `daemon`, `lifecycle` and `supervisor`.
   - If either step meets the trigger, work stops and goes back to the owner.
 - **Not in these PRs:** the `compile_error!` and the 37 `#[cfg(unix)]` module gates in `main.rs` stay until the Windows backend exists.
 
@@ -140,4 +140,4 @@ The Windows backend is not done, and no Windows release is made, until this chec
 - **Manual check, recorded in `docs/baseline/`:**
   1. Log in as a second, standard (non-admin) local account.
   2. Try to read a job file, its log and the history with `type` and `Get-Content`, and try to connect to the pipe. Each attempt fails with "access denied".
-- **Linux counterpart:** R3's tests pin every file, folder and socket in the state root as it is today. Until the fix PR after R3 merges, the "no mode today" hits rely on their parent folder's mode, so Linux is not yet held to the same rule as Windows. Once it merges, it is.
+- **Linux counterpart:** R3's tests pin every file, folder and socket the code creates, as it is today. Until the fix PR after R3 merges, the "no mode today" hits rely on their parent folder's mode, so Linux is not yet held to the same rule as Windows. Once it merges, the objects it changes are.
