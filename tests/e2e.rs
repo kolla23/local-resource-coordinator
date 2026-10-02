@@ -16891,7 +16891,7 @@ fn the_ownership_of_a_job_survives_a_new_coordinator() {
 /// one answers. A question that the dying coordinator accepted gets no answer,
 /// and the command fails ("reading the answer of the coordinator"): 2 runs in 10
 /// locally, and once in CI. This test holds the coordinator with SIGSTOP, lets a
-/// question connect, and then kills it, so the question always meets it.
+/// question connect, and then kills it. It fails if the question missed it.
 #[test]
 fn a_question_that_meets_the_dying_coordinator_is_not_a_fault() {
     ownership_survives_a_new_coordinator("ownflight", true);
@@ -16928,18 +16928,25 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
     // one of the two messages below. That is "not yet" for this wait, which
     // exists to span the death; any other failure is a fault. Say each one, so
     // a tolerated failure is never silent.
+    //
+    // Only the KILLED coordinator can leave a question without an answer here.
+    // If it had already stopped when the question began, its socket was closed,
+    // so the question reached the new coordinator, and a failure is a fault.
     let ask = |args: &[&str]| -> Option<serde_json::Value> {
+        let old_was_alive = !Harness::stopped(pid);
         let out = h.qex(args);
         if out.status.success() {
             return Some(serde_json::from_slice(&out.stdout).unwrap());
         }
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(
-            err.contains("reading the answer of the coordinator")
-                || err.contains("the coordinator closed the connection without an answer"),
-            "`qex {}` failed with {:?}, and not because the coordinator died: {err}",
+            old_was_alive
+                && (err.contains("reading the answer of the coordinator")
+                    || err.contains("the coordinator closed the connection without an answer")),
+            "`qex {}` failed with {:?}, and not because the killed coordinator died              (it was {} when the question began): {err}",
             args.join(" "),
-            out.status.code()
+            out.status.code(),
+            if old_was_alive { "alive" } else { "already stopped" }
         );
         use std::io::Write as _;
         writeln!(
@@ -16961,12 +16968,19 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
         // Hold the coordinator, so a question connects and waits for an
         // answer that the coordinator never gives, then kill it.
         unsafe { libc::kill(pid, libc::SIGSTOP) };
+        // One second is far longer than a command takes to connect, and the
+        // assertion below catches the case where it did not: a question that
+        // missed the dying coordinator proves nothing, and must not pass.
         std::thread::scope(|scope| {
             let question = scope.spawn(poll);
-            std::thread::sleep(Duration::from_millis(300));
+            std::thread::sleep(Duration::from_secs(1));
             unsafe { libc::kill(pid, libc::SIGKILL) };
-            if let Err(panic) = question.join() {
-                std::panic::resume_unwind(panic);
+            match question.join() {
+                Err(panic) => std::panic::resume_unwind(panic),
+                Ok(answered) => assert!(
+                    !answered,
+                    "the question did not meet the dying coordinator, so this test proved nothing"
+                ),
             }
         });
     } else {
