@@ -8,7 +8,7 @@ windows-sys: version = "0.61.2"
 machine: i7-1255U 10C/12T, 15.7 GiB RAM
 
 $ cargo clean && cargo build --release --locked
-   Compiling jobobject-probe v0.1.0 (C:\Users\kolla\projects\local-resource-coordinator\experiments\jobobject-probe)
+   Compiling jobobject-probe v0.1.0 (C:\Users\USERNAME\projects\local-resource-coordinator\experiments\jobobject-probe)
     Finished `release` profile [optimized] target(s) in 7.37s
 
 =================== run 1: target/release/jobobject-probe.exe

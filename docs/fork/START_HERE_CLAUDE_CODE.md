@@ -14,7 +14,7 @@ Decisions already made:
 Git and publishing:
 - The final repository should keep upstream history: base it on a clone of qex at the pinned release, with these docs added. Keep the upstream remote fetch-only (disable pushing to it).
 - Pushing branches and opening PRs to MY PRIVATE GitHub repo is allowed. Nothing public, no merging without my OK.
-- Note: my user folder C:\Users\kolla may itself be a git repo; make sure this project has its own .git and never runs git commands against the parent.
+- Note: my user folder C:\Users\USERNAME may itself be a git repo; make sure this project has its own .git and never runs git commands against the parent.
 
 Step 1 (plan mode, no changes yet):
 1. Summarize the goal, V1 scope and deferred V2 scope in plain language.

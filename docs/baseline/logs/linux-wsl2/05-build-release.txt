@@ -30,7 +30,7 @@ $ cargo build --release --locked
    Compiling memchr v2.8.3
    Compiling unsafe-libyaml v0.2.11
    Compiling ryu v1.0.23
-   Compiling qex v0.33.0 (/home/prakyath/src/lrc)
+   Compiling qex v0.33.0 (/home/USERNAME/src/lrc)
    Compiling toml_writer v1.1.2+spec-1.1.0
    Compiling syn v3.0.3
    Compiling serde_spanned v1.1.1

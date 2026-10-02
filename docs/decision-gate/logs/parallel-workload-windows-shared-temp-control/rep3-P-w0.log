@@ -17,11 +17,11 @@
    Compiling encoding_rs v0.8.35
    Compiling memmap2 v0.9.11
    Compiling aho-corasick v1.1.4
-   Compiling grep-matcher v0.1.9 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\matcher)
+   Compiling grep-matcher v0.1.9 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\matcher)
    Compiling itoa v1.0.18
    Compiling winapi-util v0.1.11
    Compiling anyhow v1.0.103
-   Compiling ripgrep v15.2.0 (C:\Users\kolla\AppData\Local\lrc-bench\wt1)
+   Compiling ripgrep v15.2.0 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1)
    Compiling lexopt v0.3.2
    Compiling textwrap v0.16.2
    Compiling termcolor v1.4.1
@@ -30,20 +30,20 @@
    Compiling regex-automata v0.4.15
    Compiling walkdir v2.5.0
    Compiling bstr v1.13.0
-   Compiling globset v0.4.19 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\globset)
-   Compiling grep-searcher v0.1.17 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\searcher)
-   Compiling grep-regex v0.1.14 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\regex)
-   Compiling grep-cli v0.1.12 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\cli)
-   Compiling grep-printer v0.3.1 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\printer)
-   Compiling ignore v0.4.29 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\ignore)
-   Compiling grep v0.4.1 (C:\Users\kolla\AppData\Local\lrc-bench\wt1\crates\grep)
+   Compiling globset v0.4.19 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\globset)
+   Compiling grep-searcher v0.1.17 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\searcher)
+   Compiling grep-regex v0.1.14 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\regex)
+   Compiling grep-cli v0.1.12 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\cli)
+   Compiling grep-printer v0.3.1 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\printer)
+   Compiling ignore v0.4.29 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\ignore)
+   Compiling grep v0.4.1 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1\crates\grep)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 14s
    Compiling proc-macro2 v1.0.106
    Compiling unicode-ident v1.0.24
    Compiling quote v1.0.46
    Compiling syn v2.0.119
    Compiling serde_derive v1.0.228
-   Compiling ripgrep v15.2.0 (C:\Users\kolla\AppData\Local\lrc-bench\wt1)
+   Compiling ripgrep v15.2.0 (C:\Users\USERNAME\AppData\Local\lrc-bench\wt1)
 warning: method `env` is never used
    --> tests\util.rs:278:12
     |
@@ -514,11 +514,11 @@ thread 'binary::before_match1_explicit' (14080) panicked at tests\util.rs:414:13
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--no-mmap" "-n" "Heaven" "hay"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--no-mmap" "-n" "Heaven" "hay"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\before_match1_explicit\13
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\before_match1_explicit\13
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\before_match1_explicit\\13"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\before_match1_explicit\\13"]
 
 status: exit code: 2
 
@@ -539,11 +539,11 @@ thread 'feature::f1842_field_context_separator' (26532) panicked at tests\util.r
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-n" "-A1" "Doctor Watsons" "sherlock"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-n" "-A1" "Doctor Watsons" "sherlock"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\f1842_field_context_separator\51
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\f1842_field_context_separator\51
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\f1842_field_context_separator\\51"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\f1842_field_context_separator\\51"]
 
 status: exit code: 2
 
@@ -558,17 +558,17 @@ stderr: rg: sherlock: IO error for operation on sherlock: The system cannot find
 ---- feature::f1_utf16_explicit stdout ----
 
 thread 'feature::f1_utf16_explicit' (21644) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\f1_utf16_explicit\59: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\f1_utf16_explicit\59: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
 
 ---- feature::f740_passthru stdout ----
 
 thread 'feature::f740_passthru' (26100) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\f740_passthru\86: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\f740_passthru\86: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
 
 ---- feature::f917_trim_max_columns_matches stdout ----
 
 thread 'feature::f917_trim_max_columns_matches' (20132) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\f917_trim_max_columns_matches\95: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\f917_trim_max_columns_matches\95: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
 
 ---- json::quiet_stats stdout ----
 
@@ -578,7 +578,7 @@ called `Result::unwrap()` on an `Err` value: Os { code: 267, kind: NotADirectory
 ---- json::r1095_crlf_empty_match stdout ----
 
 thread 'json::r1095_crlf_empty_match' (19628) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r1095_crlf_empty_match\114: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r1095_crlf_empty_match\114: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
 
 ---- feature::stop_on_nonmatch stdout ----
 
@@ -588,11 +588,11 @@ thread 'feature::stop_on_nonmatch' (15524) panicked at tests\util.rs:414:13:
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--stop-on-nonmatch" "[235]"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--stop-on-nonmatch" "[235]"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\stop_on_nonmatch\109
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\stop_on_nonmatch\109
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\stop_on_nonmatch\\109"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\stop_on_nonmatch\\109"]
 
 status: exit code: 2
 
@@ -618,11 +618,11 @@ thread 'misc::before_context' (24756) panicked at tests\util.rs:414:13:
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-B" "1" "Sherlock" "sherlock"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-B" "1" "Sherlock" "sherlock"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\before_context\120
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\before_context\120
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\before_context\\120"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\before_context\\120"]
 
 status: exit code: 2
 
@@ -642,11 +642,11 @@ thread 'misc::binary_convert' (19224) panicked at tests\util.rs:414:13:
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--no-mmap" "foo" "file"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--no-mmap" "foo" "file"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\binary_convert\122
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\binary_convert\122
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\binary_convert\\122"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\binary_convert\\122"]
 
 status: exit code: 2
 
@@ -666,11 +666,11 @@ thread 'misc::count_matches_inverted' (13688) panicked at tests\util.rs:414:13:
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--count-matches" "--invert-match" "Sherlock"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--count-matches" "--invert-match" "Sherlock"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\count_matches_inverted\144
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\count_matches_inverted\144
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\count_matches_inverted\\144"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\count_matches_inverted\\144"]
 
 status: exit code: 2
 
@@ -691,11 +691,11 @@ thread 'misc::count_matches' (21656) panicked at tests\util.rs:414:13:
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--count-matches" "the"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--count-matches" "the"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\count_matches\143
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\count_matches\143
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\count_matches\\143"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\count_matches\\143"]
 
 status: exit code: 2
 
@@ -711,7 +711,7 @@ Running with --debug will show why files are being skipped.
 ---- misc::file_type_clear stdout ----
 
 thread 'misc::file_type_clear' (3684) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\file_type_clear\149: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\file_type_clear\149: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
 
 ---- misc::files_without_match stdout ----
 
@@ -726,11 +726,11 @@ thread 'misc::file_type_add_compose' (25184) panicked at tests\util.rs:414:13:
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--type-add" "wat:*.wat" "--type-add" "combo:include:wat,py" "-t" "combo" "Sherlock"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--type-add" "wat:*.wat" "--type-add" "combo:include:wat,py" "-t" "combo" "Sherlock"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\file_type_add_compose\148
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\file_type_add_compose\148
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\file_type_add_compose\\148"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\file_type_add_compose\\148"]
 
 status: exit code: 2
 
@@ -753,11 +753,11 @@ command failed but expected success!
 
 Did your search end up with no results?
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--files"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--files"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\files\154
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\files\154
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\files\\154"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\files\\154"]
 
 status: exit code: 1
 
@@ -776,11 +776,11 @@ thread 'misc::glob' (21064) panicked at tests\util.rs:414:13:
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-g" "*.rs" "Sherlock"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-g" "*.rs" "Sherlock"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\glob\157
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\glob\157
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\glob\\157"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\glob\\157"]
 
 status: exit code: 2
 
@@ -796,32 +796,32 @@ Running with --debug will show why files are being skipped.
 ---- misc::no_ignore stdout ----
 
 thread 'misc::no_ignore' (14256) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\no_ignore\185: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\no_ignore\185: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
 
 ---- misc::quiet stdout ----
 
 thread 'misc::quiet' (24236) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\quiet\190: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\quiet\190: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
 
 ---- misc::sort_accessed stdout ----
 
 thread 'misc::sort_accessed' (8424) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\sort_accessed\196: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\sort_accessed\196: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
 
 ---- misc::sort_files stdout ----
 
 thread 'misc::sort_files' (20068) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\sort_files\197: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\sort_files\197: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
 
 ---- misc::vimgrep stdout ----
 
 thread 'misc::vimgrep' (22960) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\vimgrep\204: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\vimgrep\204: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
 
 ---- multiline::vimgrep stdout ----
 
 thread 'multiline::vimgrep' (11256) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\vimgrep\219: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\vimgrep\219: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
 
 ---- misc::file_types_negate_all stdout ----
 
@@ -831,11 +831,11 @@ thread 'misc::file_types_negate_all' (680) panicked at tests\util.rs:414:13:
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-T" "all" "Sherlock"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "-T" "all" "Sherlock"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\file_types_negate_all\153
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\file_types_negate_all\153
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\file_types_negate_all\\153"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\file_types_negate_all\\153"]
 
 status: exit code: 2
 
@@ -851,17 +851,17 @@ Running with --debug will show why files are being skipped.
 ---- regression::r1173 stdout ----
 
 thread 'regression::r1173' (10744) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r1173\230: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r1173\230: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
 
 ---- regression::r1334_crazy_literals stdout ----
 
 thread 'regression::r1334_crazy_literals' (5116) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r1334_crazy_literals\242: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r1334_crazy_literals\242: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
 
 ---- regression::r1866 stdout ----
 
 thread 'regression::r1866' (26252) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r1866\260: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r1866\260: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
 
 ---- regression::r2094 stdout ----
 
@@ -871,11 +871,11 @@ thread 'regression::r2094' (20296) panicked at tests\util.rs:414:13:
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--no-line-number" "--no-filename" "--multiline" "--max-count=1" "--passthru" "--replace=B" "b" "haystack"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--no-line-number" "--no-filename" "--multiline" "--max-count=1" "--passthru" "--replace=B" "b" "haystack"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r2094\266
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r2094\266
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\r2094\\266"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\r2094\\266"]
 
 status: exit code: 2
 
@@ -890,7 +890,7 @@ stderr: rg: haystack: IO error for operation on haystack: The system cannot find
 ---- regression::r229 stdout ----
 
 thread 'regression::r229' (17964) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r229\272: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r229\272: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
 
 ---- regression::r206 stdout ----
 
@@ -900,11 +900,11 @@ thread 'regression::r206' (16992) panicked at tests\util.rs:414:13:
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "test" "-g" "*.txt"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "test" "-g" "*.txt"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r206\265
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r206\265
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\r206\\265"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\r206\\265"]
 
 status: exit code: 2
 
@@ -925,11 +925,11 @@ thread 'regression::r2095' (10404) panicked at tests\util.rs:414:13:
 ==========
 command failed but expected success!
 
-command: "C:\\Users\\kolla\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--line-number" "--multiline" "--only-matching" "--replace" "${value}" "^(?P<indent>\\s*)a=(?P<value>(?ms:[(].*?[)])|.*?)$" "test"
+command: "C:\\Users\\USERNAME\\AppData\\Local\\lrc-bench\\wt1\\target\\debug\\deps\\../rg.exe" "--path-separator" "/" "--line-number" "--multiline" "--only-matching" "--replace" "${value}" "^(?P<indent>\\s*)a=(?P<value>(?ms:[(].*?[)])|.*?)$" "test"
 
-cwd: C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r2095\267
+cwd: C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r2095\267
 
-dir list: ["C:\\Users\\kolla\\AppData\\Local\\Temp\\ripgrep-tests\\r2095\\267"]
+dir list: ["C:\\Users\\USERNAME\\AppData\\Local\\Temp\\ripgrep-tests\\r2095\\267"]
 
 status: exit code: 2
 
@@ -949,37 +949,37 @@ called `Result::unwrap()` on an `Err` value: Os { code: 267, kind: NotADirectory
 ---- regression::r391 stdout ----
 
 thread 'regression::r391' (25572) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r391\292: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r391\292: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
 
 ---- regression::r428_unrecognized_style stdout ----
 
 thread 'regression::r428_unrecognized_style' (25184) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r428_unrecognized_style\294: Os { code: 145, kind: DirectoryNotEmpty, message: "The directory is not empty." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r428_unrecognized_style\294: Os { code: 145, kind: DirectoryNotEmpty, message: "The directory is not empty." }
 
 ---- regression::r3179_global_gitignore_cwd stdout ----
 
 thread 'regression::r3179_global_gitignore_cwd' (7780) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r3179_global_gitignore_cwd\290: Os { code: 145, kind: DirectoryNotEmpty, message: "The directory is not empty." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r3179_global_gitignore_cwd\290: Os { code: 145, kind: DirectoryNotEmpty, message: "The directory is not empty." }
 
 ---- regression::r829_2731 stdout ----
 
 thread 'regression::r829_2731' (5328) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r829_2731\312: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r829_2731\312: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
 
 ---- regression::r829_2747 stdout ----
 
 thread 'regression::r829_2747' (1488) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r829_2747\313: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r829_2747\313: Os { code: 32, kind: Uncategorized, message: "The process cannot access the file because it is being used by another process." }
 
 ---- regression::r829_2933 stdout ----
 
 thread 'regression::r829_2933' (15788) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r829_2933\316: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r829_2933\316: Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
 
 ---- regression::r807 stdout ----
 
 thread 'regression::r807' (3208) panicked at tests\util.rs:441:21:
-C:\Users\kolla\AppData\Local\Temp\ripgrep-tests\r807\311: Os { code: 145, kind: DirectoryNotEmpty, message: "The directory is not empty." }
+C:\Users\USERNAME\AppData\Local\Temp\ripgrep-tests\r807\311: Os { code: 145, kind: DirectoryNotEmpty, message: "The directory is not empty." }
 
 
 failures:

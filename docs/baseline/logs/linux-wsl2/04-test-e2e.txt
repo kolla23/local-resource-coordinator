@@ -1,5 +1,5 @@
 $ cargo test --test e2e -- --test-threads=2
-   Compiling qex v0.33.0 (/home/prakyath/src/lrc)
+   Compiling qex v0.33.0 (/home/USERNAME/src/lrc)
     Finished `test` profile [unoptimized + debuginfo] target(s) in 13.00s
      Running tests/e2e.rs (target/debug/deps/e2e-df4cc036bb37cd82)
 
