@@ -49,4 +49,4 @@ Add one line each time the same mistake happens twice.
 - Keep this repo's `core.autocrlf=false`, so upstream files stay LF.
 - PR titles must match `type(scope): summary` (lower-case type, scope optional), be at most 72 characters and not end with a full stop (`.github/scripts/check-title.sh`); count before `gh pr create`.
 - A Rust string with a `\` line continuation, written through a Python edit script, came out as one long line with the spaces inside the string (twice). Edit those lines with the Edit tool, then check the added lines: `git diff -U0 | grep '^+[^+]' | awk 'length > 101'` (the fork header lines are expected to show up).
-- A `\0` or `\r` written through a Python edit script inside a shell heredoc came out as a raw control byte (three times). Write such text with the Write or Edit tool; CI rejects the raw bytes (`.github/scripts/check-control-chars.py`).
+- A `\0` written through a Python edit script inside a shell heredoc came out as a raw NUL byte (three times). Write escapes with the Write or Edit tool; CI rejects raw control bytes and bare CRs (`.github/scripts/check-control-chars.py`).

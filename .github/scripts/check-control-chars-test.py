@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests check-control-chars.py on throwaway git repositories.
 
-Each case commits files to a new repository and runs the real script there.
+Each case stages files in a new repository and runs the real script there.
 Usage: check-control-chars-test.py
 """
 import os
@@ -52,8 +52,17 @@ def main():
     expect("an ESC fails", 1, "0x1b", {**clean, "c.py": b"RED = '\x1b[31m'\n"})
     expect("several kinds are all named", 1, "0x00, 0x07, 0x7f",
            {**clean, "m.txt": b"a\x07b\x00c\x7f\n"})
-    expect("tab, CR and LF pass", 0, "no control characters",
+    expect("tab, LF and CRLF pass", 0, "no control characters",
            {**clean, "t.md": b"a\tb\r\nc\n"})
+    expect("a bare CR fails", 1, "x.py: control character(s) 0x0d, first on line 1",
+           {**clean, "x.py": b"x = 'a\rb'\n"})
+    expect("a CR at the end of the file fails", 1, "0x0d", {**clean, "e.txt": b"end\r"})
+    expect("a file with no extension named like a binary one is checked", 1,
+           "bin: control character(s) 0x00", {**clean, "bin": b"y\x00\n", "a": b"ok\n"})
+    expect("a binary extension under a dotted folder is still found", 0,
+           "no control characters", {**clean, "v1.2/i.png": b"\x00"})
+    expect("a text file under a folder named like a binary extension is checked", 1,
+           "so.d/t.txt", {**clean, "so.d/t.txt": b"\x00"})
     expect("a written escape (backslash zero) passes", 0, "no control characters",
            {**clean, "t.sh": b"printf '\\0'\n"})
     expect("a NUL in a binary file passes", 0, "no control characters",
