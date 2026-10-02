@@ -15,9 +15,10 @@ skipped.
 The content comes from git (`git ls-files -s`, `git cat-file --batch`), not
 from the working tree: what is checked is what is tracked, symlinks
 (mode 120000) and submodules (160000) are skipped and counted, and file names
-stay raw bytes, so a name that is not UTF-8 is still checked. Prints each bad
-file with the characters and the first line, and exits 1; exits 0 when all are
-clean.
+stay raw bytes, so a name that is not UTF-8 is still checked. Unstaged changes
+and untracked files are not checked; the output names them, so stage first
+(`git add`) when checking local work. Prints each bad file with the
+characters and the first line, and exits 1; exits 0 when all are clean.
 
 Usage: check-control-chars.py   (from anywhere inside the repository)
 """
@@ -79,11 +80,22 @@ def main():
             name = path.decode("utf-8", "backslashreplace")
             print(f"{name}: control character(s) {kinds}, first on line {line}")
             bad += 1
+    # Only the index was read. Say so when the working tree holds more, so a
+    # local run before `git add` can't look clean for edits it never saw.
+    unstaged = subprocess.run(["git", "diff", "--name-only", "-z"], cwd=top,
+                              capture_output=True, check=True).stdout.split(b"\0")
+    untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"],
+                               cwd=top, capture_output=True, check=True).stdout.split(b"\0")
+    unseen = [p.decode("utf-8", "backslashreplace") for p in filter(None, unstaged + untracked)]
+    if unseen:
+        print(f"warning: {len(unseen)} unstaged or untracked file(s) were not checked "
+              f"(stage them with `git add` and run again): {', '.join(unseen[:10])}"
+              + (" ..." if len(unseen) > 10 else ""))
     if bad:
         print(f"\n{bad} file(s) hold raw control characters. Write escapes such as \\0 "
               "with the Write tool, not through a heredoc, and remove the raw bytes.")
         return 1
-    print(f"{len(text)} text files checked; no control characters "
+    print(f"{len(text)} staged text files checked; no control characters "
           f"({skipped} symlinks and submodules skipped).")
     return 0
 

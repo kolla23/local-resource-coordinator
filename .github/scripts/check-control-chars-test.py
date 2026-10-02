@@ -17,7 +17,8 @@ CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check-control-
 
 def run(files, untracked=None, index=None):
     """`files` are written and staged; `index` entries (mode, path bytes, content
-    bytes) are added to the index only; `untracked` files are written only."""
+    bytes) are added to the index only; `untracked` files are written after
+    staging (a new name is untracked, a staged name becomes an unstaged change)."""
     repo = tempfile.mkdtemp()
     try:
         subprocess.run(["git", "init", "-q", repo], check=True)
@@ -47,17 +48,18 @@ def run(files, untracked=None, index=None):
 def main():
     failed = 0
 
-    def expect(name, want_rc, words, files, untracked=None, index=None):
+    def expect(name, want_rc, words, files, untracked=None, index=None, absent=None):
         nonlocal failed
         rc, out = run(files, untracked, index)
-        ok = rc == want_rc and words in out
+        ok = rc == want_rc and words in out and (absent is None or absent not in out)
         failed += not ok
         print(f"{'ok  ' if ok else 'FAIL'} {name}")
         if not ok:
             print(f"     rc {rc}, want {want_rc}; output: {out.strip()}")
 
     clean = {"src/a.rs": b"fn main() {}\n", "README.md": b"text\r\nmore\n"}
-    expect("clean text files pass", 0, "2 text files checked; no control characters", clean)
+    expect("clean text files pass", 0, "2 staged text files checked; no control characters",
+           clean)
     expect("a NUL in a text file fails, with its line", 1,
            "t.sh: control character(s) 0x00, first on line 2",
            {**clean, "t.sh": b"#!/bin/sh\nprintf '\x00'\n"})
@@ -79,13 +81,22 @@ def main():
            {**clean, "t.sh": b"printf '\\0'\n"})
     expect("a NUL in a binary file passes", 0, "no control characters",
            {**clean, "i.png": b"\x89PNG\r\n\x1a\n\x00\x00"})
-    expect("an untracked file is not checked", 0, "no control characters",
+    # Only the index is read; what it didn't see is named (review round 3 of PR #38).
+    expect("an untracked file is not checked, and the output says so", 0,
+           "1 unstaged or untracked file(s) were not checked (stage them with `git add` "
+           "and run again): scratch.txt",
            clean, untracked={"scratch.txt": b"\x00"})
+    expect("an unstaged change is not checked, and the output says so", 0,
+           "were not checked (stage them with `git add` and run again): src/a.rs",
+           clean, untracked={"src/a.rs": b"o\x00k\n"})
+    expect("a clean tree gives no warning", 0, "2 staged text files checked", clean,
+           absent="warning")
     expect("a binary extension is matched without case", 0, "no control characters",
            {**clean, "I.PNG": b"\x00"})
     # What git tracks is checked, not the working tree (review round 2 of PR #38).
     expect("symlinks are skipped and counted, never followed", 0,
-           "2 text files checked; no control characters (2 symlinks and submodules skipped)",
+           "2 staged text files checked; no control characters "
+           "(2 symlinks and submodules skipped)",
            clean, index=[(b"120000", b"tool", b"/usr/bin/true"),
                          (b"120000", b"zero", b"/dev/zero")])
     expect("a file name that is not UTF-8 is still checked", 1,
