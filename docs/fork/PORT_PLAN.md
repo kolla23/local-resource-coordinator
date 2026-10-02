@@ -8,14 +8,16 @@
 1. The test fixture `testjob` is a feature-gated binary (see "Portable test fixtures").
 2. Job records and the coordinator's pipe allow the owner, SYSTEM and Administrators, and deny everyone else.
 3. The per-job TEMP ADR is written alongside ADR 1, not last.
-4. SQLite is dropped from V1 ([DECISION_PERSISTENCE.md](DECISION_PERSISTENCE.md)). ADR 3 covers CLI compatibility for signals; no separate CLI-compatibility ADR.
+4. SQLite is dropped from V1 ([DECISION_PERSISTENCE.md](DECISION_PERSISTENCE.md)). ADR 3 covers CLI compatibility for signals.
 5. Work starts with two separate PRs: the fixture sample and R1.
 
 ## Order of work
 1. This plan (docs only).
 2. The fixture-sample PR and R1, as separate PRs. R1 also adds the move checker.
-3. ADR 1 and the per-job TEMP ADR, then ADRs 2–5 (see "ADRs").
-4. R2–R6, which wait for no ADR, in any order the reviews allow; R7–R10 after their ADRs.
+3. In parallel:
+   - R2–R6, which wait for no ADR, in any order the reviews allow.
+   - ADR 1 and the per-job TEMP ADR, then ADRs 2–5 (see "ADRs").
+4. R7–R10, each after its ADR.
 5. The Windows backend, starting with removing the `compile_error!` and the `#[cfg(unix)]` module gates in `main.rs`.
 
 Every step is its own PR under about 400 changed lines and runs the review loop.
@@ -41,7 +43,7 @@ Every step is its own PR under about 400 changed lines and runs the review loop.
 |---|---|---|---|---|
 | R1 | Memory, CPU and clocks | Move the `sys.rs` memory, CPU and clock bodies into `os/{linux,macos}.rs`. `sys.rs` keeps its signatures and forwards to them. Adds the move checker. | none | — |
 | R2 | Process identity | `pid_alive`, `job_pid_alive`, `own_pid_alive`, `process_start_token`, `same_process_start`, `process_info`, `process_exe`, `boot_id`, `pid_namespace`, `submitter_chain`, `group_usage` | none (still through `sys::`) | — |
-| R3 | File modes and locks | `ensure_dir(mode)`, owner-only writes, `flock` → `os::fs::{set_owner_only, lock_exclusive}`. If no test pins the 0700/0600 modes yet, add a characterization test first; it passes today, so it changes no behaviour. | paths, job, usage, history, logcap | — |
+| R3 | File modes and locks | `ensure_dir(mode)`, owner-only writes, `flock` → `os::fs::{set_owner_only, lock_exclusive}`. e2e already pins the job folder (0700), `spec.json` and the stdout/stderr logs (0600). R3 first adds characterization tests for the files not yet pinned (history, `usage.json`, `paused.json`, `daemon.log`); they pass today, so they change no behaviour. | paths, job, usage, history, logcap | — |
 | R4 | Terminal and console | `isatty`, terminal size, raw keys (`keys.rs`), the `SIGPIPE` gates in `main.rs`, Ctrl-C while waiting | style, top, keys, main, client | — |
 | R5 | Detached start and reaping | Starting the supervisor and the coordinator (`setsid`), the `waitpid` reaper → `os::spawn_detached`, `os::wait_child` | supervisor, client, daemon | — |
 | R6 | Sub-processes with a time limit | The stop hook and the update check's `curl`: `poll` and kill → `os::run_bounded` | hook, update | — |
@@ -51,7 +53,10 @@ Every step is its own PR under about 400 changed lines and runs the review loop.
 | R10 | Peers | The peer directory becomes a backend capability (`os::peers_supported()`), or what ADR 5 decides | peers, sched | ADR 5 |
 
 - **Size.** Moved code counts twice in a diff. R2 and R3 are near the limit and may split in two.
-- **Tripwire.** 04-recommendation names this refactor as the test of whether the layer can be drawn cleanly. R2 answers it: if `sched` or `daemon` state needs pid or process-group *semantics* in its core types (not just a pid stored in a record), work stops and goes back to the owner before R3.
+- **Tripwire.** 04-recommendation names this refactor as the test of whether the layer can be drawn cleanly: recommend (c) instead if "the scheduler or daemon state needs pids or process groups in its core types rather than at the edges".
+  - R2 moves code without touching callers, so it cannot answer this by itself. Its PR description therefore also lists every pid or process-group field and use in the core types of `sched` and `daemon`, with where each is used. That gives the owner an early answer.
+  - R5, R7 and R8 confirm it, because they change `daemon`, `lifecycle` and `supervisor`.
+  - If either step meets the trigger, work stops and goes back to the owner.
 - **Not in these PRs:** the `compile_error!` and the 37 `#[cfg(unix)]` module gates in `main.rs` stay until the Windows backend exists.
 
 ## ADRs
@@ -59,7 +64,7 @@ All ADRs go in `docs/fork/adr/`, one docs-only PR each, written while R1–R6 ar
 
 | Order | ADR | Why here |
 |---|---|---|
-| 1 | **IPC transport and launch protocol**: named pipes, who may start a coordinator, liveness without a socket file; SPEC's framing gap decided at the same time | The largest area (≈800 lines). AGENTS.md requires an ADR before any launch change. Unblocks R7. Sets the pipe ACL that the acceptance check below tests. |
+| 1 | **IPC transport and launch protocol**: named pipes, who may start a coordinator, liveness without a socket file; SPEC's framing gap decided at the same time | The largest area (≈800 lines). AGENTS.md requires an ADR before any launch change. Unblocks R7. Sets the pipe security that the acceptance check below tests: the ACL, local-only clients (SPEC.md:615), and protection against another user creating the pipe name first. |
 | 1 (alongside) | **Per-job TEMP** | Depends on no other ADR. Changes Linux behaviour too: it overrides the submitted environment, against SPEC.md:37 and :999, so it is a product decision. |
 | 2 | **Who may signal a job**: a named Job Object, or a request routed through the supervisor | The routed option needs a channel to the supervisor, which ADR 1 defines. |
 | 3 | **Exit classification, `--signal` and CLI compatibility for signals** | Depends on 2: how a job is stopped decides what its exit code means. Settles HUP, QUIT and USR1/2. |
@@ -71,38 +76,58 @@ This answers 04-recommendation's other tripwire: does the test port cost more th
 
 - **Fixture:** a small std-only Rust program, `testjob`, with subcommands `exit N`, `sleep SECS`, `print TEXT [--stderr]` and `hold-mem MiB SECS`.
   - It is a `[[bin]]` with `required-features = ["test-fixtures"]`, so `cargo install` never installs it.
-  - The e2e suite runs with `--features test-fixtures` and reaches it through `env!("CARGO_BIN_EXE_testjob")`. CI and the commands in AGENTS.md change to match.
-- **Sample of 10 tests.** In each category, the first tests in file order, skipping any with an open flaky-test issue:
+  - The e2e suite reaches it through `env!("CARGO_BIN_EXE_testjob")`. Without the feature, that line no longer compiles, so the fixture PR also gives `tests/e2e.rs` a `[[test]]` entry with the same `required-features`. It then updates every command that builds or runs the e2e suite, so none of them silently skips it:
+    - `ci.yml` (clippy `--all-targets`, the e2e job, the MSRV `check --all-targets`)
+    - `macos.yml` and `release.yml` (their e2e steps)
+    - `docs/baseline/run-baseline-linux.sh` and the commands in AGENTS.md
+- **Sample of 10 tests.** In each category, the first tests in file order, skipping any with an open flaky-test issue. The occurrence counts are multi-line-aware matches in `tests/e2e.rs` at the time of writing; they are not test counts:
 
-  | Category (uses in e2e) | Tests in sample |
+  | Category (occurrences) | Tests in sample |
   |---|---|
   | `true` / `false` (200) | 3 |
   | `sleep` (98) | 2 |
-  | `sh -c` (44) | 2 (one simple, one with pipes or redirects) |
+  | `sh -c` (90) and `bash` (12) | 2 (one simple, one with pipes or redirects) |
   | `echo` (27) | 1 |
   | `libc::kill` (57) | 1 (its Windows meaning waits for ADRs 2 and 3; the sample records that cost) |
   | `/tmp` (12) | 1 |
 
+- **Not sampled, but counted:** other `libc::` uses (163 in all, 57 of them `kill`), `std::os::unix` mode checks (`PermissionsExt`), and other Unix tools that tests start (`ps`, `mkfifo`, `bwrap`, `lsof`, `chmod`, `cp`, `touch`, `printf`). They form an "other Unix" category in the estimate.
+
 - **Measured per test:** changed lines, time spent, whether the semantics shifted (shell features with no portable equivalent), whether it passes on Linux in 3 of 3 runs, runtime before and after.
 - **On Windows:** `testjob` is built natively and its subcommands are run. The converted e2e tests cannot run on Windows until the coordinator builds, and the write-up says so.
-- **Output:** `docs/decision-gate/05-test-fixture-sample.md`. It multiplies the cost per category by the category counts and compares the total with the product estimate (≈3,635 lines). If the test port comes out larger, that goes to the owner as the "re-check option (c)" trigger.
+- **Output:** `docs/decision-gate/05-test-fixture-sample.md`.
+  - It counts **tests** per category (a test whose body names the pattern, as `experiments/unix-inventory/e2e-unix.py` does), not occurrences, and multiplies by the sampled cost per test.
+  - The "other Unix" category has no sample, so it is costed at the highest sampled per-test cost and labelled as an estimate.
+  - Helpers aren't followed, so the total is a lower bound, and the write-up says so.
+  - It compares the total with the product estimate (≈3,635 lines). If the test port comes out larger, that goes to the owner as the "re-check option (c)" trigger.
 
 ## Acceptance check for the port: other Windows users cannot read job records
 The Windows backend is not done, and no Windows release is made, until this check passes. It is not a "verify later" note.
 
 - **Covers:**
   - the state root, every job record and log or output capture, history, usage and the pause file
-  - the per-job TEMP folders, if the per-job TEMP ADR puts them under the state root
-  - the coordinator's named pipe: another user's connection is refused
+  - the per-job TEMP folders, wherever the per-job TEMP ADR puts them
+  - the named Job Object, if ADR 2 chooses one
+  - the coordinator's named pipe
 - **Rule:**
-  - Every such object gets an explicit, protected DACL with inheritance turned off. The inherited profile ACL is *not verified* and is not relied on.
-  - Allowed: the owner SID, SYSTEM and the Administrators group. Everyone else is denied (owner decision 2).
+  - "The user" means the SID of the user who runs the coordinator, read from its process token. It is not read from the descriptor being checked.
+  - Every such object gets an explicit, protected, non-NULL DACL with inheritance turned off. The inherited profile ACL is *not verified* and is not relied on.
+  - The DACL holds allow ACEs only for the user, SYSTEM and the Administrators group. Everyone else is denied because no ACE allows them; there is no deny ACE for Everyone, since that would also deny the user (owner decision 2).
+  - The descriptor's owner is the user, even when the coordinator runs elevated (an elevated process would otherwise make Administrators the owner).
   - Atomic replace: a rename keeps the *source* file's DACL, so the temporary file is created with the restricted DACL, not fixed after the rename.
+  - The pipe also:
+    - accepts local clients only (SPEC.md:615)
+    - is created with `FILE_FLAG_FIRST_PIPE_INSTANCE`, so the coordinator never joins a pipe that someone else created
+    - is used by clients only after they check that the server process runs as the same user. Otherwise another user could create the name first and receive submitted environments.
 - **Automated Windows e2e test:**
   1. Submit a job whose record holds a known secret value in its environment.
-  2. Walk the state root and read each object's DACL with `GetNamedSecurityInfoW`.
-  3. Fail if any ACE grants access to a SID other than the owner, SYSTEM or Administrators, or if inheritance is on.
+  2. Walk the state root, and the per-job TEMP folders if they are elsewhere. Read each object's owner and DACL with `GetNamedSecurityInfoW`; read the pipe's and the Job Object's with `GetSecurityInfo`.
+  3. Fail if:
+     - a DACL is NULL or inheritance is on
+     - any ACE grants access to a SID other than the user, SYSTEM or Administrators
+     - an owner is not the user
+  4. Create the pipe name first from a separate process, then start a coordinator: it must refuse to serve, and a client must refuse to send to that process.
 - **Manual check, recorded in `docs/baseline/`:**
   1. Log in as a second, standard (non-admin) local account.
   2. Try to read a job file, its log and the history with `type` and `Get-Content`, and try to connect to the pipe. Each attempt fails with "access denied".
-- **Linux counterpart, added in R3:** a test that pins 0700 on folders and 0600 on files, so both backends are held to the same rule.
+- **Linux counterpart:** the existing e2e mode tests plus the characterization tests R3 adds (see R3) pin 0700 on folders and 0600 on files, so both backends are held to the same rule.
