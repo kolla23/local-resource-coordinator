@@ -13,11 +13,30 @@ set -uo pipefail
 check="$(cd "$(dirname "$0")" && pwd)/check-review-rounds.sh"
 head=e5e4a3a1fa556b367cbd6f4b7733bb892ea9e341
 fail=0
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 
-# expect <name> <exit code> <body>
+# report <round> <commit> [verdict] [model]: a reviewer's report, as posted.
+report() {
+    printf '## Review round %s @ %s\nReviewer model: %s\nVerdict: %s\n\n### Findings\nnone\n' \
+        "$1" "$2" "${4-claude-opus-5-5}" "${3-no real issues}"
+}
+
+# By default the PR has clean reports for rounds 1 to 3 on the head commit, so
+# the tests of the body below see only the rules of the body.
+default_comments() {
+    for n in 1 2 3; do
+        report "$n" "$head"
+        printf '\0'
+    done
+}
+
+# expect <name> <exit code> <body> [command that writes the comments, each
+# ended by NUL; default above]. A command, not a string: "$(...)" drops NULs.
 expect() {
     local got
-    printf '%s' "$3" | "$check" "$head" >/dev/null 2>&1
+    eval "${4-default_comments}" >"$tmp/comments"
+    printf '%s' "$3" | "$check" "$head" "$tmp/comments" >/dev/null 2>&1
     got=$?
     if [ "$got" = "$2" ]; then
         echo "ok   $1"
@@ -111,5 +130,29 @@ expect "a CRLF body still passes" 0 "$(printf '## Review rounds\r\n\r\nRound 1 @
 
 printf '%s' "x" | "$check" >/dev/null 2>&1
 if [ "$?" = 2 ]; then echo "ok   a missing head commit is a usage error"; else echo "FAIL a missing head commit is a usage error"; fail=1; fi
+
+printf '%s' "x" | "$check" "$head" "$tmp/no-such-file" >/dev/null 2>&1
+if [ "$?" = 2 ]; then echo "ok   a missing comments file is a usage error"; else echo "FAIL a missing comments file is a usage error"; fail=1; fi
+
+# The report must be a comment: a typed line alone is no evidence of a review.
+clean="## Review rounds
+Round 2 @ e5e4a3a: no real issues
+"
+unrelated() { printf 'Looks good to me\0Round 2 @ e5e4a3a: no real issues\0'; }
+among_others() { printf 'first\0'; report 2 "$head"; printf '\0last'; }
+not_first() { printf 'Pasted below:\n'; report 2 "$head"; }
+crlf() { report 2 "$head" | sed 's/$/\r/'; }
+
+expect "a typed line with no comment fails" 1 "$clean" ":"
+expect "a typed line with only unrelated comments fails" 1 "$clean" unrelated
+expect "a matching report passes" 0 "$clean" 'report 2 "$head"'
+expect "a matching report among other comments passes" 0 "$clean" among_others
+expect "a report with a short id of the head commit passes" 0 "$clean" "report 2 e5e4a3a"
+expect "a report of another round fails" 1 "$clean" 'report 1 "$head"'
+expect "a report on another commit fails" 1 "$clean" "report 2 651295f"
+expect "a report that found issues fails" 1 "$clean" 'report 2 "$head" "1 real issue"'
+expect "a report with no model fails" 1 "$clean" 'report 2 "$head" "no real issues" ""'
+expect "a report whose heading is not its first line fails" 1 "$clean" not_first
+expect "a CRLF report passes" 0 "$clean" crlf
 
 exit "$fail"

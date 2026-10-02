@@ -13,13 +13,20 @@ name: Pull request review
 # `edited` fires when a round is added to the body, and that must re-run the
 # check with no new commit. This is a workflow of its own for the same reason as
 # `pr-title.yml`: `edited` in `ci.yml` would build and test everything again.
+#
+# The last round must also match a comment holding the reviewer's report. Post
+# the comment first, then add the round line to the body: the edit re-runs the
+# check, and the comment is already there.
 on:
   pull_request:
     types: [opened, reopened, synchronize, edited]
 
-# The job only reads the event and the checkout, so the token can only read.
+# The job only reads the event, the checkout and the PR's comments, so the
+# token can only read.
 permissions:
   contents: read
+  issues: read
+  pull-requests: read
 
 concurrency:
   group: pr-review-${{ github.event.pull_request.number }}
@@ -35,10 +42,20 @@ jobs:
       # Test the check first. A broken check that accepts every body would stay
       # green and look like a pass.
       - run: .github/scripts/check-review-rounds-test.sh
-      - name: The last review round must name the head commit and find no real issues
+      # Only the owner, members and collaborators can post a report that
+      # counts; anyone may comment on a public repository.
+      - name: Fetch the review reports posted as comments
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" > comments.json
+          jq -j '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER"
+                 or .author_association == "COLLABORATOR") | .body, "\u0000"' comments.json > comments.bin
+      - name: The last review round must name the head commit, find no real issues and have its report
         # The body goes through the environment, never into the text of the
         # command. A person outside this project can write it.
         env:
           BODY: ${{ github.event.pull_request.body }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: printf '%s' "$BODY" | .github/scripts/check-review-rounds.sh "$HEAD_SHA"
+        run: printf '%s' "$BODY" | .github/scripts/check-review-rounds.sh "$HEAD_SHA" comments.bin

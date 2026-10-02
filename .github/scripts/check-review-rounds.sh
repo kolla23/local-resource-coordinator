@@ -17,16 +17,29 @@
 # gives a new head commit, so the check turns red until a new round names it.
 # Bold and backticks are allowed around the line and the id.
 #
-# Usage: check-review-rounds.sh <head commit> < body
+# A typed line is not evidence that a review ran, so that last round must also
+# match a PR comment holding the reviewer's report, which starts like this:
 #
-# The body comes on standard input, never inside the text of a command: a
-# person outside this project can write it.
+#     ## Review round 2 @ e5e4a3a1fa556b367cbd6f4b7733bb892ea9e341
+#     Reviewer model: <model name>
+#     Verdict: no real issues
+#
+# with the same round number, an id of the head commit, a named model and a
+# clean verdict. The workflow passes only comments written by the repository's
+# owner, members and collaborators.
+#
+# Usage: check-review-rounds.sh <head commit> <comments file> < body
+#
+# The comments file holds the comment bodies, each ended by a NUL byte. The
+# body comes on standard input, never inside the text of a command: a person
+# outside this project can write it.
 
 set -euo pipefail
 
 head="${1-}"
-if [ -z "$head" ]; then
-    echo "give the head commit of the pull request" >&2
+comments="${2-}"
+if [ -z "$head" ] || [ -z "$comments" ] || [ ! -f "$comments" ]; then
+    echo "usage: check-review-rounds.sh <head commit> <comments file> < body" >&2
     exit 2
 fi
 
@@ -99,8 +112,38 @@ if [[ "$verdict_lc" != "no real issues"* ]]; then
 fi
 
 if [ "$bad" -eq 0 ]; then
-    echo "round $best_n read the head commit ${head_lc:0:7} and found no real issues."
-    exit 0
+    # The report of that round must be a PR comment. Its first non-empty line
+    # names the round and the head commit; it names a model and a clean verdict.
+    found=0
+    heading='^#*[[:space:]]*Review round[[:space:]]+([0-9]+)[[:space:]]*@[[:space:]]*`?([0-9a-fA-F]{7,40})`?[[:space:]]*$'
+    while IFS= read -r -d '' c || [ -n "$c" ]; do
+        c="${c//$'\r'/}"
+        first="$(printf '%s\n' "$c" | awk 'NF { print; exit }')"
+        if [[ "$first" =~ $heading ]] \
+            && [ "$((10#${BASH_REMATCH[1]}))" -eq "$best_n" ] \
+            && [ "${head_lc#"${BASH_REMATCH[2],,}"}" != "$head_lc" ] \
+            && grep -qiE '^Reviewer model:[[:space:]]*[^[:space:]]' <<<"$c" \
+            && grep -qiE '^Verdict:[[:space:]]*no real issues' <<<"$c"; then
+            found=1
+        fi
+        c=""
+    done <"$comments"
+    if [ "$found" -eq 1 ]; then
+        echo "round $best_n read the head commit ${head_lc:0:7} and found no real issues;"
+        echo "its report is a comment on the pull request."
+        exit 0
+    fi
+    cat <<EOF
+round $best_n is recorded in the body, but no comment on the pull request holds
+its report. Post the reviewer's full report as a comment that starts with:
+
+    ## Review round $best_n @ ${head_lc}
+    Reviewer model: <model name>
+    Verdict: no real issues
+
+then edit the body (or re-run this check).
+EOF
+    exit 1
 fi
 
 cat <<'EOF'
