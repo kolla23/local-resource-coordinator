@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module keeps a short record of every job that qex accepted.
 //!
 //! The record of a job is the interface for an agent. When that record is gone,
@@ -247,7 +248,8 @@ mod tests {
     use crate::testutil::{env_lock, EnvVar};
 
     fn temp_state(tag: &str) -> (std::path::PathBuf, EnvVar) {
-        let dir = std::env::temp_dir().join(format!("qex-hist-{tag}-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("qex-hist-{tag}-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let guard = EnvVar::set("XDG_STATE_HOME", dir.to_str().unwrap());

@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module reads a file of input lines, and makes one job for each line.
 //!
 //! `qex submit --each-line inputs.txt -- ./process {}` is the shape. Every job
@@ -546,7 +547,7 @@ mod tests {
     /// fault arrives as an out-of-memory kill with no message.
     #[test]
     fn an_input_above_the_size_limit_is_refused() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::testutil::temp_dir().join(format!(
             "qex-fanout-{}-{}",
             std::process::id(),
             MAX_INPUT_BYTES
@@ -572,7 +573,8 @@ mod tests {
     /// file that qex cannot read, and no job.
     #[test]
     fn a_directory_in_the_place_of_the_input_is_refused() {
-        let dir = std::env::temp_dir().join(format!("qex-fanout-dir-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("qex-fanout-dir-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let err = read(&dir).unwrap_err().to_string();
         std::fs::remove_dir_all(&dir).ok();

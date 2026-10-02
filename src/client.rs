@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module connects the CLI to the coordinator.
 //!
 //! If no coordinator operates, the CLI starts one. Many CLI processes can do
@@ -1610,7 +1611,7 @@ mod tests {
     /// gives no verdict there. The two tests that need no directory still hold
     /// the rule.
     fn writable_dir(name: &str) -> Option<std::path::PathBuf> {
-        let dir = std::env::temp_dir().join(format!("qx-{name}-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("qx-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).ok()?;
         match std::fs::write(dir.join("control"), b"qex") {
             Ok(()) => {

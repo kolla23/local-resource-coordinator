@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module runs the command that qex starts when a job stops.
 //!
 //! The hook is a property of the machine and of the person at it, and not a
@@ -755,7 +756,8 @@ mod tests {
     /// The name holds letters, numbers and hyphens only. A test that puts this
     /// path in a shell line with a bracket in it tests the shell and not qex.
     fn temp(name: &str) -> Temp {
-        let dir = std::env::temp_dir().join(format!("qex-hook-{}-{name}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("qex-hook-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         Temp(dir)
     }

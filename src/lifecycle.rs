@@ -1,4 +1,4 @@
-// Modified by the local-resource-coordinator fork, 2026-10-01: tests pass the clocks Coordinator::new now takes (issue #17).
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests pass the clocks Coordinator::new now takes (issue #17); tests use testutil::temp_dir (issue #5).
 //! This module stops jobs and deletes job records.
 //!
 //! qex signals the process group of a job, and not the first process only. A
@@ -815,7 +815,7 @@ mod tests {
         std::path::PathBuf,
     ) {
         let lock = crate::testutil::env_lock();
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::testutil::temp_dir().join(format!(
             "qex-lifecycle-test-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4()

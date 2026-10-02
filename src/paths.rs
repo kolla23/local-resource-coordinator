@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: the socket directory keeps temp_dir; tests use testutil::temp_dir (issue #5).
 //! This module gives the location of each file that qex uses.
 //!
 //! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
@@ -95,6 +96,9 @@ fn short_socket_dir(preferred: &std::path::Path) -> Result<PathBuf> {
     use std::os::unix::fs::MetadataExt;
 
     let uid = unsafe { libc::getuid() };
+    // The socket directory follows `TMPDIR` on purpose (clippy.toml forbids
+    // the call in tests only).
+    #[allow(clippy::disallowed_methods)]
     let dir = std::env::temp_dir().join(format!("qex-{uid}-{}", path_hash(preferred)));
 
     match std::fs::symlink_metadata(&dir) {
@@ -206,6 +210,7 @@ pub fn reap_stale_socket_dirs() {
             own.push(dir.to_path_buf());
         }
     }
+    #[allow(clippy::disallowed_methods)] // the same directory as `short_socket_dir`
     sweep_socket_dirs(&std::env::temp_dir(), &own, SWEEP_LIMIT);
 }
 
@@ -1011,7 +1016,7 @@ mod tests {
     /// whole budget again.
     #[test]
     fn a_socket_that_qex_cannot_look_at_does_not_say_that_nobody_listens() {
-        let dir = std::env::temp_dir().join(format!("qex-lookat-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("qex-lookat-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let shut = dir.join("shut");
         std::fs::create_dir_all(&shut).unwrap();

@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -1453,7 +1454,8 @@ mod tests {
 
     #[test]
     fn a_legacy_requeue_clears_the_supervisor_on_disk() {
-        let dir = std::env::temp_dir().join(format!("qex-legacy-requeue-{}", uuid::Uuid::new_v4()));
+        let dir = crate::testutil::temp_dir()
+            .join(format!("qex-legacy-requeue-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut status = JobStatus::new(&spec());
         status.state = JobState::Queued;
@@ -1684,7 +1686,7 @@ mod tests {
     /// the record. No command read that file.
     #[test]
     fn the_last_words_of_the_supervisor_reach_the_record() {
-        let dir = std::env::temp_dir().join(format!("qex-tail-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("qex-tail-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
 
         // No file, and an empty file, both give nothing. A note that says
@@ -1936,7 +1938,7 @@ mod tests {
 
     /// Makes an empty job directory for a test of the classification.
     fn job_dir(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::testutil::temp_dir().join(format!(
             "qex-sv-{tag}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()

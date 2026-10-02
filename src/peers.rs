@@ -1,4 +1,4 @@
-// Modified by the local-resource-coordinator fork, 2026-10-01: tests that read the peer directory hold the env lock (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests that read the peer directory hold the env lock (issue #5); tests use testutil::temp_dir (issue #5).
 //! This module shares the resource claims between the users of one machine.
 //!
 //! Each coordinator writes its claims to a file in a shared directory. Each
@@ -404,7 +404,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     fn tmpdir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("qex-peers-{tag}-{}", std::process::id()));
+        let d = crate::testutil::temp_dir().join(format!("qex-peers-{tag}-{}", std::process::id()));
         std::fs::remove_dir_all(&d).ok();
         std::fs::create_dir_all(&d).unwrap();
         d

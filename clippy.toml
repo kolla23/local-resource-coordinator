@@ -1,0 +1,6 @@
+# Fork file (local-resource-coordinator, 2026-10-01). Issue #5: two tests set
+# `TMPDIR` for the whole test process, so a test that reads `temp_dir()` can
+# get a directory that another test deletes. Tests use `testutil::temp_dir()`.
+disallowed-methods = [
+    { path = "std::env::temp_dir", reason = "tests: use crate::testutil::temp_dir(); another test can move TMPDIR (issue #5)" },
+]

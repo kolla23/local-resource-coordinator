@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module holds the `qex top` command.
 //!
 //! The command shows the queue and refreshes it. For each job it shows the
@@ -1730,7 +1731,7 @@ mod tests {
         tag: &str,
         text: Option<&str>,
     ) -> (std::path::PathBuf, crate::testutil::EnvVar) {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::testutil::temp_dir().join(format!(
             "qex-top-cfg-{tag}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -2543,7 +2544,7 @@ mod tests {
 
     #[test]
     fn last_file_lines_reads_a_window_and_survives_bad_utf8() {
-        let dir = std::env::temp_dir().join(format!("qex-top-tail-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("qex-top-tail-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("out.log");
         let mut data = vec![0xffu8; 80 * 1024];
