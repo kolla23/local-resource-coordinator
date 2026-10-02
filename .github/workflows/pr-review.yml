@@ -43,7 +43,9 @@ jobs:
       # green and look like a pass.
       - run: .github/scripts/check-review-rounds-test.sh
       # Only the owner, members and collaborators can post a report that
-      # counts; anyone may comment on a public repository.
+      # counts; anyone may comment on a public repository. This job runs the
+      # PR's own copy of this file and the script, so a PR that changes
+      # `.github/` can turn the check green: the owner reads such diffs.
       - name: Fetch the review reports posted as comments
         env:
           GH_TOKEN: ${{ github.token }}

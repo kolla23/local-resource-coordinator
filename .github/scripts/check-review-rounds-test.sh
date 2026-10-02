@@ -156,7 +156,7 @@ expect "a typed line with no comment fails" 1 "$clean" ":"
 expect "a typed line with only unrelated comments fails" 1 "$clean" unrelated
 expect "a matching report passes" 0 "$clean" 'report 2 "$head"'
 expect "a matching report among other comments passes" 0 "$clean" among_others
-expect "a report with a short id of the head commit passes" 0 "$clean" "report 2 e5e4a3a"
+expect "a report with only a short id of the head commit fails" 1 "$clean" "report 2 e5e4a3a"
 expect "a report of another round fails" 1 "$clean" 'report 1 "$head"'
 expect "a report on another commit fails" 1 "$clean" "report 2 651295f"
 expect "a report that found issues fails" 1 "$clean" 'report 2 "$head" "1 real issue"'

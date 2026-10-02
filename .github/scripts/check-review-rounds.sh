@@ -24,9 +24,14 @@
 #     Reviewer model: <model name>
 #     Verdict: no real issues
 #
-# with the same round number, an id of the head commit, a named model and a
-# clean verdict. The workflow passes only comments written by the repository's
+# with the same round number, the full 40-character id of the head commit (a
+# short id can be forged for a later commit), a named model and a clean
+# verdict. The workflow passes only comments written by the repository's
 # owner, members and collaborators.
+#
+# Limit: on `pull_request` the job runs the PR's own copy of this script and
+# its workflow, so a PR that changes `.github/` can make this check green
+# without a report. The owner reads such diffs before merging.
 #
 # Usage: check-review-rounds.sh <head commit> <comments file> < body
 #
@@ -118,7 +123,7 @@ if [ "$bad" -eq 0 ]; then
     # further down still shows its own verdict. Lines may be indented: the
     # prompt shows the report as an indented block.
     found=0
-    heading='^[[:space:]]*#*[[:space:]]*Review round[[:space:]]+([0-9]+)[[:space:]]*@[[:space:]]*`?([0-9a-fA-F]{7,40})`?[[:space:]]*$'
+    heading='^[[:space:]]*#*[[:space:]]*Review round[[:space:]]+([0-9]+)[[:space:]]*@[[:space:]]*`?([0-9a-fA-F]{40})`?[[:space:]]*$'
     model='^[[:space:]]*Reviewer model:[[:space:]]*[^[:space:]]'
     verdict='^[[:space:]]*Verdict:[[:space:]]*no real issues'
     while IFS= read -r -d '' c || [ -n "$c" ]; do
