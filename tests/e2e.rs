@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: pin the CPU budget and default memory claim of with_default_config; match the long config-fault text, not the bare word "coordinator"; wait for the peer reason after the small jobs end (issue #5); the e2e tests may read temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-02: the back-and-forth reload test excuses, and says, a measured writer stall (issue #17).
 // Modified by the local-resource-coordinator fork, 2026-10-02: a zombie counts as a stopped coordinator (issue #30).
+// Modified by the local-resource-coordinator fork, 2026-10-02: the ownership test asks again when a question meets the dying coordinator.
 // Modified by the local-resource-coordinator fork, 2026-10-01: a coordinator with no [update] check writes no update record (issue #4).
 //! End-to-end tests for qex.
 //!
@@ -16881,7 +16882,25 @@ fn a_kill_of_submit_with_a_wait_leaves_the_job_in_the_queue() {
 /// coordinator abnormally, and the job of that command waits in the queue.
 #[test]
 fn the_ownership_of_a_job_survives_a_new_coordinator() {
-    let h = Harness::new("ownagain", "[budget]\ncpu = \"1\"\n");
+    ownership_survives_a_new_coordinator("ownagain", false);
+}
+
+/// A question that meets the coordinator as it dies is not a fault of the test.
+///
+/// The test above kills the coordinator and then asks `qex status` until a new
+/// one answers. A question that the dying coordinator accepted gets no answer,
+/// and the command fails ("reading the answer of the coordinator"): 2 runs in 10
+/// locally, and once in CI. This test holds the coordinator with SIGSTOP, lets a
+/// question connect, and then kills it, so the question always meets it.
+#[test]
+fn a_question_that_meets_the_dying_coordinator_is_not_a_fault() {
+    ownership_survives_a_new_coordinator("ownflight", true);
+}
+
+/// The body of the two tests above. With `in_flight`, a question is connected
+/// to the coordinator at the moment it is killed.
+fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
+    let h = Harness::new(name, "[budget]\ncpu = \"1\"\n");
 
     // The budget holds the queue. Each job gives a small memory claim, so the
     // memory of the machine never decides what this test measures.
@@ -16900,7 +16919,59 @@ fn the_ownership_of_a_job_survives_a_new_coordinator() {
     let info: serde_json::Value =
         serde_json::from_str(&h.ok(&["info", "--no-start", "--json"])).unwrap();
     let pid = info["pid"].as_i64().unwrap() as i32;
-    unsafe { libc::kill(pid, libc::SIGKILL) };
+
+    // The question that the wait below asks: the job still waits, and a
+    // coordinator other than the killed one answers.
+    //
+    // A QUESTION CAN MEET THE COORDINATOR AS IT DIES. The coordinator accepted
+    // it and then got SIGKILL, so it never answers, and the command fails with
+    // one of the two messages below. That is "not yet" for this wait, which
+    // exists to span the death; any other failure is a fault. Say each one, so
+    // a tolerated failure is never silent.
+    let ask = |args: &[&str]| -> Option<serde_json::Value> {
+        let out = h.qex(args);
+        if out.status.success() {
+            return Some(serde_json::from_slice(&out.stdout).unwrap());
+        }
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.contains("reading the answer of the coordinator")
+                || err.contains("the coordinator closed the connection without an answer"),
+            "`qex {}` failed with {:?}, and not because the coordinator died: {err}",
+            args.join(" "),
+            out.status.code()
+        );
+        use std::io::Write as _;
+        writeln!(
+            std::io::stderr(),
+            "{name}: `qex {}` met the coordinator as it died ({}); asking again",
+            args.join(" "),
+            err.trim()
+        )
+        .ok();
+        None
+    };
+    let poll = || {
+        ask(&["status", &id, "--json"]).is_some_and(|s| s["state"] == "queued")
+            && ask(&["info", "--json"])
+                .is_some_and(|fresh| fresh["pid"].as_i64().unwrap() as i32 != pid)
+    };
+
+    if in_flight {
+        // Hold the coordinator, so a question connects and waits for an
+        // answer that the coordinator never gives, then kill it.
+        unsafe { libc::kill(pid, libc::SIGSTOP) };
+        std::thread::scope(|scope| {
+            let question = scope.spawn(poll);
+            std::thread::sleep(Duration::from_millis(300));
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+            if let Err(panic) = question.join() {
+                std::panic::resume_unwind(panic);
+            }
+        });
+    } else {
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
 
     // `qex run` meets the loss, finds the new coordinator, and asks it again.
     //
@@ -16908,13 +16979,7 @@ fn the_ownership_of_a_job_survives_a_new_coordinator() {
     // ends before it binds loses the ownership in silence, so the number
     // belongs in the failure.
     let killed_at = Instant::now();
-    h.until("a new coordinator answers", Duration::from_secs(40), || {
-        h.state_of(&id) == "queued" && {
-            let fresh: serde_json::Value =
-                serde_json::from_str(&h.ok(&["info", "--json"])).unwrap();
-            fresh["pid"].as_i64().unwrap() as i32 != pid
-        }
-    });
+    h.until("a new coordinator answers", Duration::from_secs(40), poll);
 
     let new_coordinator_took = killed_at.elapsed();
 
