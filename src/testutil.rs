@@ -1,7 +1,17 @@
-// Modified by the local-resource-coordinator fork, 2026-10-01: add peers_env (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-01: add peers_env and temp_dir (issue #5).
 //! Test-only helpers.
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
+
+/// Gives the temporary directory for a test: always `/tmp`.
+///
+/// Two tests set `TMPDIR` for the whole process, and each one deletes its
+/// directory when it ends. A test that read `std::env::temp_dir()` at that
+/// moment would put its files in that directory and lose them. `clippy.toml`
+/// forbids `std::env::temp_dir`, so a new test cannot bring the fault back.
+pub fn temp_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from("/tmp")
+}
 
 /// Gives a lock for the tests that change the process environment.
 ///

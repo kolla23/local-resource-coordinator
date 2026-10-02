@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module holds the limit on the output of one stream of one job.
 //!
 //! A job wrote 386MB of standard output in a review, and nothing stopped it.
@@ -649,7 +650,7 @@ mod tests {
 
     impl Dir {
         fn new(name: &str) -> Self {
-            let path = std::env::temp_dir().join(format!(
+            let path = crate::testutil::temp_dir().join(format!(
                 "qex-logcap-{}-{}-{name}",
                 std::process::id(),
                 std::time::SystemTime::now()

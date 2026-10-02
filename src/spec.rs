@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module holds the job specification.
 //!
 //! A specification records the request from a user or an agent. This module
@@ -1558,7 +1559,7 @@ mod tests {
     }
 
     fn tmpdir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("qex-spec-{tag}-{}", std::process::id()));
+        let d = crate::testutil::temp_dir().join(format!("qex-spec-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }

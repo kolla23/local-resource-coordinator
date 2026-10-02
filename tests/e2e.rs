@@ -1,4 +1,4 @@
-// Modified by the local-resource-coordinator fork, 2026-10-01: pin the CPU budget and default memory claim of with_default_config; match the long config-fault text, not the bare word "coordinator"; wait for the peer reason after the small jobs end (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-01: pin the CPU budget and default memory claim of with_default_config; match the long config-fault text, not the bare word "coordinator"; wait for the peer reason after the small jobs end (issue #5); the e2e tests may read temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a coordinator with no [update] check writes no update record (issue #4).
 //! End-to-end tests for qex.
 //!
@@ -20,6 +20,10 @@
 //! Each test starts real processes and waits for them. With more threads, the
 //! machine becomes busy, a job starts late, and a test reports a failure that
 //! the program does not have.
+
+// The e2e process never changes its own environment, so `temp_dir()` is safe
+// here, and it follows `TMPDIR` as a user would (clippy.toml, issue #5).
+#![allow(clippy::disallowed_methods)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};

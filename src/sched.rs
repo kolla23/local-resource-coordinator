@@ -1,4 +1,4 @@
-// Modified by the local-resource-coordinator fork, 2026-10-01: the peer test holds the env lock (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-01: the peer test holds the env lock (issue #5); tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-01: test State gains the config-look fields; the config read takes its clocks before the lock (issue #17).
 //! This module decides when each job starts.
 //!
@@ -3251,7 +3251,7 @@ mod tests {
         peer_mem: u64,
     ) -> (Config, std::path::PathBuf, std::process::Child) {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::testutil::temp_dir().join(format!(
             "qex-sched-peer-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4()

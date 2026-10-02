@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module reports a kill for memory. It applies no limit.
 //!
 //! qex does not limit a job. A claim decides what STARTS and when, and a job
@@ -263,7 +264,7 @@ mod tests {
     /// claims more than this version can prove must not be believed.
     #[test]
     fn the_out_of_memory_record_is_read_back_whatever_an_earlier_qex_wrote() {
-        let dir = std::env::temp_dir().join(format!("qex-oom-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("qex-oom-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -295,7 +296,7 @@ mod tests {
     /// that no command touched.
     #[test]
     fn the_mark_of_a_kill_by_a_command_can_be_cleared() {
-        let dir = std::env::temp_dir().join(format!("qex-userkill-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("qex-userkill-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -314,7 +315,8 @@ mod tests {
     /// that the test made. NO test of this group needs a cgroup, a limit, or
     /// memory pressure of any kind.
     fn a_cgroup_with_events(name: &str, events: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("qex-events-{}-{name}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("qex-events-{}-{name}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("memory.events"), events.as_bytes()).unwrap();
@@ -353,7 +355,8 @@ mod tests {
     /// A file that is not there gives no answer.
     #[test]
     fn a_cgroup_with_no_events_file_gives_no_answer() {
-        let dir = std::env::temp_dir().join(format!("qex-events-{}-none", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("qex-events-{}-none", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         assert!(!classify_oom(&dir, OomCounts::default()));
@@ -413,7 +416,7 @@ mod tests {
     /// that function read the cgroup as well. This test requires the FILE.
     #[test]
     fn the_answer_of_an_attempt_reaches_the_record() {
-        let job = std::env::temp_dir().join(format!("qex-record-{}", std::process::id()));
+        let job = crate::testutil::temp_dir().join(format!("qex-record-{}", std::process::id()));
         std::fs::remove_dir_all(&job).ok();
         std::fs::create_dir_all(&job).unwrap();
         let cgroup = a_cgroup_with_events("record", "oom 0\noom_kill 0\n");

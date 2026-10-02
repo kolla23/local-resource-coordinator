@@ -1,4 +1,4 @@
-// Modified by the local-resource-coordinator fork, 2026-10-01: tests of the line and record turn the check on, since the default is now never (issue #4).
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests of the line and record turn the check on, since the default is now never (issue #4); tests use testutil::temp_dir (issue #5).
 //! Looks for a newer release of qex, and says so one time.
 //!
 //! # Who asks
@@ -913,7 +913,7 @@ mod tests {
     }
 
     fn a_directory(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("qx-upd-{name}-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("qx-upd-{name}-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir

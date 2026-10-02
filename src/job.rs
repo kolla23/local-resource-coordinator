@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module holds the job state that qex writes to the disk.
 //!
 //! The file `status.json` is the primary record of a job result. The supervisor
@@ -1012,7 +1013,7 @@ mod tests {
 
     #[test]
     fn atomic_write_applies_the_requested_mode() {
-        let dir = std::env::temp_dir().join(format!("qex-atomic-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("qex-atomic-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("secret.json");
         write_atomic(&path, b"{}", 0o600).unwrap();

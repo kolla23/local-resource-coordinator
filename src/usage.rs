@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module remembers what a job really used, and gives the claim for the
 //! next job of the same kind.
 //!
@@ -874,7 +875,8 @@ mod tests {
     fn a_write_over_a_damaged_file_quarantines_it_and_keeps_what_it_can() {
         use crate::testutil::{env_lock, EnvVar};
         let _guard = env_lock();
-        let dir = std::env::temp_dir().join(format!("qex-usage-corrupt-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("qex-usage-corrupt-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let _env = EnvVar::set("XDG_STATE_HOME", dir.to_str().unwrap());
@@ -943,7 +945,8 @@ mod tests {
             return;
         }
         let _guard = env_lock();
-        let dir = std::env::temp_dir().join(format!("qex-usage-noread-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("qex-usage-noread-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let _env = EnvVar::set("XDG_STATE_HOME", dir.to_str().unwrap());
@@ -1214,7 +1217,7 @@ mod tests {
     fn a_job_that_did_not_complete_teaches_the_learner_nothing() {
         use crate::testutil::{env_lock, EnvVar};
         let _guard = env_lock();
-        let dir = std::env::temp_dir().join(format!("qex-usage-oom-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("qex-usage-oom-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let _env = EnvVar::set("XDG_STATE_HOME", dir.to_str().unwrap());
