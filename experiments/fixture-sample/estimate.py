@@ -68,16 +68,16 @@ CATS = {
 }
 
 # Disjoint groups of the "other Unix" tests, for the write-up: each test goes
-# to the first group it matches, so the counts add up to the category.
+# to the first group whose pattern it matches, so the counts add up to the
+# category. A label names the pattern matched, not what the test does with it.
 GROUPS = [
-    ("a Unix socket (UnixListener or UnixStream)", re.compile(r"Unix(?:Listener|Stream)")),
-    ("/proc", re.compile(r"/proc")),
-    ("another Unix tool", re.compile(TOOLS)),
-    ("a libc item other than kill and the SIG* constants", re.compile(LIBC_OTHER)),
-    ("another std::os::unix extension (permissions, inode, file type, raw fd, exit "
-     "status, symlink)", re.compile(r"std::os::unix")),
-    ("a \"/bin/\" path, a .sh script or \"cat\"", re.compile(r"\"/bin/|\.sh\"|\"cat\"")),
-    ("only a signal name", re.compile(r"libc::SIG\w+|" + SIGNAL)),
+    ("matches UnixListener or UnixStream", re.compile(r"Unix(?:Listener|Stream)")),
+    ("matches /proc", re.compile(r"/proc")),
+    ("matches a Unix tool", re.compile(TOOLS)),
+    ("matches a libc item other than kill and the SIG* constants", re.compile(LIBC_OTHER)),
+    ("matches another std::os::unix item", re.compile(r"std::os::unix")),
+    ("matches a \"/bin/\" path, a .sh script or \"cat\"", re.compile(r"\"/bin/|\.sh\"|\"cat\"")),
+    ("matches only a signal name", re.compile(r"libc::SIG\w+|" + SIGNAL)),
 ]
 
 # The product port, in lines of code that change for Windows

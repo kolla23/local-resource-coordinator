@@ -24,13 +24,13 @@ where each sampled test is filed (chosen for -> filed under, lines):
 'other Unix': 67 tests, 737 of 1582 lines (47%); 2 of them sampled, for other categories: 2 lines, 8 lines
 break-even: the test port reaches 3635 lines if the 67 'other Unix' tests average 42 changed lines each
 'other Unix' tests by their first matching group (disjoint):
-  a Unix socket (UnixListener or UnixStream): 7
-  /proc: 4
-  another Unix tool: 5
-  a libc item other than kill and the SIG* constants: 10
-  another std::os::unix extension (permissions, inode, file type, raw fd, exit status, symlink): 7
-  a "/bin/" path, a .sh script or "cat": 1
-  only a signal name: 33
+  matches UnixListener or UnixStream: 7
+  matches /proc: 4
+  matches a Unix tool: 5
+  matches a libc item other than kill and the SIG* constants: 10
+  matches another std::os::unix item: 7
+  matches a "/bin/" path, a .sh script or "cat": 1
+  matches only a signal name: 33
   sum: 67
 every Unix test at the highest sampled cost: 2981
 tests that name a signal (libc::kill or a SIG name): 38
