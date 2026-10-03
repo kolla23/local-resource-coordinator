@@ -45,7 +45,7 @@ An independently maintained fork of qex (Apache-2.0). It is a local coordinator 
 
 ## Gotchas
 Add one line each time the same mistake happens twice.
-- On Windows, Git Bash's `/usr/bin/link.exe` can shadow the MSVC linker. From Git Bash, pass Linux paths to `wsl.exe` with `MSYS_NO_PATHCONV=1`.
+- On Windows, Git Bash's `/usr/bin/link.exe` can shadow the MSVC linker. From Git Bash, pass Linux paths to `wsl.exe` with `MSYS_NO_PATHCONV=1`, and git `rev:path` arguments too (`MSYS_NO_PATHCONV=1 git cat-file -e base/qex-v0.33.0:<path>`): Git Bash rewrote one into `base\...;...`, the lookup failed, and an upstream file was taken for a fork file (twice).
 - Keep this repo's `core.autocrlf=false`, so upstream files stay LF.
 - PR titles must match `type(scope): summary` (lower-case type, scope optional), be at most 72 characters and not end with a full stop (`.github/scripts/check-title.sh`); count before `gh pr create`.
 - A Rust string with a `\` line continuation, written through a Python edit script, came out as one long line with the spaces inside the string (twice). Edit those lines with the Edit tool, then check the added lines: `git diff -U0 | grep '^+[^+]' | awk 'length > 101'` (the fork header lines are expected to show up).
