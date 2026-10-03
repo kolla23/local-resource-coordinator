@@ -3,7 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-02: a zombie counts as a stopped coordinator (issue #30).
 // Modified by the local-resource-coordinator fork, 2026-10-02: the ownership test asks again when a question meets the dying coordinator.
 // Modified by the local-resource-coordinator fork, 2026-10-01: a coordinator with no [update] check writes no update record (issue #4).
-// Modified by the local-resource-coordinator fork, 2026-10-02: the suite needs the test-fixtures feature; a sample of ten tests runs the portable `testjob` in place of Unix programs.
+// Modified by the local-resource-coordinator fork, 2026-10-02: the suite needs the test-fixtures feature; nine of the ten sampled tests run the portable `testjob` in place of Unix programs (the /tmp one is unchanged).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -22,7 +22,8 @@
 //! ```
 //!
 //! The feature builds `testjob`, the portable job that some tests run. Without
-//! it, cargo skips this suite.
+//! it, `--test e2e` stops with an error and a plain `cargo test` skips this
+//! suite.
 //!
 //! Each test starts real processes and waits for them. With more threads, the
 //! machine becomes busy, a job starts late, and a test reports a failure that
@@ -39,8 +40,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// The portable job: `exit N`, `sleep SECS`, `print TEXT [--stderr]` and
-/// `hold-mem MIB SECS`, run in order (tests/fixtures/testjob.rs). A test that
-/// uses it in place of `true`, `sleep`, `echo` or `sh -c` runs on Windows too.
+/// `hold-mem MIB SECS`, run in order (tests/fixtures/testjob.rs). A job that
+/// uses it in place of `true`, `sleep`, `echo` or `sh -c` needs no Unix program.
 const TESTJOB: &str = env!("CARGO_BIN_EXE_testjob");
 
 /// One isolated qex installation.
