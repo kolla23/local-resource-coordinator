@@ -1,0 +1,7 @@
+# before: c6d9344 docs(gate): step 5, what porting the e2e tests costs (#41) on Linux 5.15.167.4-microsoft-standard-WSL2, features: --features test-fixtures
+before	an_old_record_from_before_the_boot_is_dead	run 1	pass	0.5 s
+before	an_old_record_from_before_the_boot_is_dead	run 2	pass	0.5 s
+before	an_old_record_from_before_the_boot_is_dead	run 3	pass	0.5 s
+before	a_job_that_starts_again_never_shows_the_attempt_that_failed	run 1	pass	8.3 s
+before	a_job_that_starts_again_never_shows_the_attempt_that_failed	run 2	pass	8.3 s
+before	a_job_that_starts_again_never_shows_the_attempt_that_failed	run 3	pass	10.1 s

@@ -7,7 +7,8 @@ a lone `}` at column 0, as in estimate.py) holds it in the new file; a removed
 line belongs to the test that holds it in the old file. Lines outside every
 sampled test (the header, the TESTJOB constant) are shown as shared.
 
-Usage: cost-per-test.py <old commit> <new commit>   (from the repo root)
+Usage: cost-per-test.py <old commit> <new commit> [test...]   (from the repo
+       root). Without test names it counts #41's ten sampled tests.
 """
 import re
 import subprocess
@@ -53,6 +54,8 @@ def show(rev):
 
 def main():
     old, new = sys.argv[1], sys.argv[2]
+    if sys.argv[3:]:
+        SAMPLE[:] = sys.argv[3:]
     old_spans, new_spans = spans(show(old)), spans(show(new))
     diff = subprocess.run(["git", "diff", "-U0", old, new, "--", "tests/e2e.rs"],
                           capture_output=True, text=True, check=True, encoding="utf-8").stdout
