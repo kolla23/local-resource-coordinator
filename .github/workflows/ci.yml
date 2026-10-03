@@ -2,6 +2,8 @@
 # to macos.yml (weekly and on demand) to save private-repo Actions minutes.
 # Modified by the local-resource-coordinator fork, 2026-10-02: the Style job
 # rejects raw control characters in text files.
+# Modified by the local-resource-coordinator fork, 2026-10-02: clippy, the
+# end-to-end tests and the MSRV check build with --features test-fixtures.
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -40,7 +42,9 @@ jobs:
       - name: The layout of the code
         run: cargo fmt --all --check
       - name: The advice of clippy
-        run: cargo clippy --all-targets -- -D warnings
+        # The feature builds `testjob` and the e2e suite, which need it; without
+        # it, clippy would skip them.
+        run: cargo clippy --features test-fixtures --all-targets -- -D warnings
 
   test:
     name: Test on ${{ matrix.os }}
@@ -70,7 +74,7 @@ jobs:
       # decision from the load of the machine. Two of these tests together on a
       # shared machine change that load, so they run two at a time at the most.
       - name: The end-to-end tests
-        run: cargo test --test e2e -- --test-threads=2
+        run: cargo test --features test-fixtures --test e2e -- --test-threads=2
 
   # The rules that give the version number of every release.
   #
@@ -122,7 +126,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: msrv-${{ steps.msrv.outputs.version }}
-      - run: cargo +${{ steps.msrv.outputs.version }} check --all-targets --locked
+      - run: cargo +${{ steps.msrv.outputs.version }} check --features test-fixtures --all-targets --locked
 
   # The form of the title of a pull request is in `pr-title.yml`, and not here.
   #

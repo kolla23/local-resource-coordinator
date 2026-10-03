@@ -1,4 +1,5 @@
 # How to make a change to qex
+<!-- Modified by the local-resource-coordinator fork, 2026-10-02: clippy and the e2e tests need --features test-fixtures. -->
 
 ## Work on a branch, and merge with a pull request
 
@@ -214,9 +215,9 @@ obey, and it names the option. See `src/capabilities.rs`.
 
 ```sh
 cargo fmt --all
-cargo clippy --all-targets -- -D warnings
+cargo clippy --features test-fixtures --all-targets -- -D warnings
 cargo test --bins
-cargo test --test e2e -- --test-threads=2
+cargo test --features test-fixtures --test e2e -- --test-threads=2
 ```
 
 CI runs each of these on Linux and on macOS, and it also builds for the four

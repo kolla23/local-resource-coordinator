@@ -33,7 +33,7 @@ jobs:
       - name: The unit tests
         run: cargo test --bins
       - name: The end-to-end tests
-        run: cargo test --test e2e -- --test-threads=2
+        run: cargo test --features test-fixtures --test e2e -- --test-threads=2
 
   cross:
     name: Build for ${{ matrix.target }}
