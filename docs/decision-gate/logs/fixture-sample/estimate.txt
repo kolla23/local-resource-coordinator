@@ -1,0 +1,13 @@
+category	tests	lines per test	estimate
+other Unix	129	11.0	1419
+libc::kill	1	8.0	8
+true/false	89	5.0	445
+echo	13	4.0	52
+sh -c / bash	40	3.0	120
+sleep	9	2.0	18
+/tmp	1	0.0	0
+total	282		2062
+upper case (every Unix test at the highest cost): 3102
+tests: 329; Unix tests: 282; Unix tests in no category: 0
+tests that name a signal (libc::kill or a SIG name): 48
+harness and helper lines with a Unix pattern (comments excluded): 61
