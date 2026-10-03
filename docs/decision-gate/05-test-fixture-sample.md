@@ -9,7 +9,7 @@
 - **Verdict: this is a partial measurement, and the whole estimate is likely low.** Each category is priced from its simplest tests, because PORT_PLAN's "first in file order" rule picks the easy ones first. Known gaps:
   - the 67 "other Unix" tests, none sampled for its Unix part;
   - many of the 46 `sh -c` tests use shell features `testjob` can't do (environment variables, loops and `seq`, `dd`, non-UTF-8 output, `/dev/zero`, background processes), but the category is priced from two one-line scripts;
-  - fixture growth: the 102-line `testjob` plus the steps the remaining conversions need are not counted;
+  - fixture growth: `testjob` (102 lines at db1abd0) plus the steps the remaining conversions need are not counted;
   - the 38 signal tests, waiting on ADRs 2 and 3.
 
   **The trigger decision waits for the follow-up PR**, which converts the hardest example of each gap category rather than the first.
@@ -101,6 +101,6 @@ Time spent per test was not measured: an agent's editing time says nothing about
 - How the 38 signal tests port: that waits for ADRs 2 and 3.
 - The cost of the 67 "other Unix" tests: none was sampled for its Unix part.
 - The cost of the `sh -c` tests whose scripts use shell features `testjob` can't do (many of the 46): the category is priced from two one-line scripts.
-- Fixture growth: the 102-line `testjob` and the steps the remaining conversions need.
+- Fixture growth: `testjob` (102 lines at db1abd0) and the steps the remaining conversions need.
 - The cost of the 60 harness lines.
 - Only one machine was measured, with 3 runs per test (10 for the one whose mean moved).
