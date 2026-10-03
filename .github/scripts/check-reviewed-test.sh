@@ -42,6 +42,8 @@ Reviewed at $old: no real issues"
 expect "a later line for the head commit replaces an earlier one" 0 "Reviewed at $old: no real issues
 Reviewed at $head: no real issues"
 expect "bold, backticks and a list dash pass" 0 "- **Reviewed at \`$head\`: No real issues.**"
+expect "a line wrapped in backticks, as AGENTS.md shows it, passes" 0 "\`Reviewed at $head: no real issues\`"
+expect "a line in bold and backticks passes" 0 "**\`Reviewed at $head: no real issues\`**"
 expect "an upper-case commit id passes" 0 "Reviewed at ${head^^}: no real issues"
 expect "a CRLF body passes" 0 "$(printf 'Text\r\nReviewed at %s: no real issues\r\n' "$head")"
 expect "a line inside other text does not count" 1 "We were Reviewed at $head: no real issues"

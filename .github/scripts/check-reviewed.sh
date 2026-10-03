@@ -33,9 +33,11 @@ body="$(tr -d '\r')"
 
 sha=""
 verdict=""
-pattern='^[-[:space:]]*Reviewed at[[:space:]]+`?([0-9a-fA-F]{40})`?[[:space:]]*:[[:space:]]*(.*)$'
+pattern='^[-[:space:]]*Reviewed at[[:space:]]+([0-9a-fA-F]{40})[[:space:]]*:[[:space:]]*(.*)$'
 while IFS= read -r line; do
+    # Bold and code marks are only formatting: drop them all.
     line="${line//\*/}"
+    line="${line//\`/}"
     if [[ "$line" =~ $pattern ]]; then
         sha="${BASH_REMATCH[1],,}"
         verdict="${BASH_REMATCH[2]}"
