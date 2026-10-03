@@ -3,18 +3,23 @@
 
 Fixture sample, docs/decision-gate/05-test-fixture-sample.md.
 
-1. Each test (a body from its `#[test]` to the next, as in
-   experiments/unix-inventory/e2e-unix.py) is matched against the categories.
-2. A test that matches several categories is counted ONCE, under the most
-   expensive one, so overlapping categories don't add up twice.
-3. Each category's cost per test is the mean of the changed lines measured on
-   its sampled tests, read from the cost-per-test.py output. The "other Unix"
-   category has no sample, so it takes the highest cost measured on one test.
-4. Lines with a Unix pattern OUTSIDE the tests (the harness and helpers) are
-   counted separately: the sample does not price them.
+1. A test is the test function itself: from its `#[test]` to its first line
+   that is a lone `}` at column 0. What follows it, up to the next `#[test]`
+   (helper functions, structs), is harness code and is counted separately.
+   (experiments/unix-inventory/e2e-unix.py took everything up to the next
+   `#[test]`, so it counted helpers as part of the test above them.)
+2. A test that names a Unix pattern is filed under ONE category, its most
+   expensive matching one, so overlapping categories don't add up twice.
+3. Each category's cost per test is the mean changed lines of the sampled tests
+   chosen for it (PORT_PLAN's table), read from the cost-per-test.py output.
+   "other Unix" was chosen for no sampled test, so it takes the highest cost
+   measured on one test. The script prints where each sampled test lands under
+   rule 2, because that can differ from the category it was chosen for.
+4. The harness lines with a Unix pattern are counted, not priced.
 
 Helpers are not followed, so a test that uses Unix only through a helper is
-not counted: the total is a lower bound.
+not counted; and "other Unix" is not capped at the highest sampled cost. So the
+total is neither an upper nor a lower bound.
 
 Usage: estimate.py <commit> <cost-per-test.tsv>   (from the repo root; the
        commit is the one before the sample was converted)
@@ -55,9 +60,6 @@ CATS = {
         r"|" + SIGNAL +
         r"|Command::new\(\"(?:ps|mkfifo|bwrap|lsof|chmod|cp|touch|printf)\"\)"),
 }
-# The product port, in lines of code that change for Windows
-# (docs/decision-gate/03-unix-inventory.md, "Short answer").
-PRODUCT = 3635
 
 # What the "other Unix" tests hold, for the write-up. A test can use several.
 KINDS = {
@@ -71,6 +73,24 @@ KINDS = {
 
 UNIX = re.compile(r'"sh"|"bash"|"/bin/|"sleep"|"true"|"false"|"cat"|"echo"|libc::'
                   r'|std::os::unix|' + SIGNAL + r'|/proc|/tmp|\.sh"')
+
+# The product port, in lines of code that change for Windows
+# (docs/decision-gate/03-unix-inventory.md, "Short answer").
+PRODUCT = 3635
+
+
+def split(text):
+    """({test name: body}, harness lines): each test from its `#[test]` to its
+    closing brace, and every line outside a test."""
+    parts = re.split(r"\n#\[test\]\n", text)
+    tests, harness = {}, parts[0].split("\n")
+    for part in parts[1:]:
+        lines = part.split("\n")
+        end = next((i for i, line in enumerate(lines) if line == "}"), len(lines) - 1)
+        body = "\n".join(lines[:end + 1])
+        tests[re.search(r"fn\s+(\w+)", body).group(1)] = body
+        harness += lines[end + 1:]
+    return tests, harness
 
 
 def costs(path):
@@ -87,70 +107,58 @@ def costs(path):
         values = [per_test[t] for t, c in SAMPLE.items() if c == cat]
         cost[cat] = sum(values) / len(values)
     cost["other Unix"] = float(max(per_test[t] for t in SAMPLE))
-    return cost
+    return cost, per_test
 
 
 def main():
     commit, cost_file = sys.argv[1], sys.argv[2]
-    cost = costs(cost_file)
+    cost, per_test = costs(cost_file)
     text = subprocess.run(["git", "show", f"{commit}:tests/e2e.rs"], capture_output=True,
                           text=True, check=True, encoding="utf-8").stdout
-    parts = re.split(r"\n#\[test\]\n", text)
-    tests = parts[1:]
+    tests, harness = split(text)
     # Most expensive first; ties keep a fixed order, so the output is stable.
     order = sorted(cost, key=lambda c: (-cost[c], c))
-    counted = {c: 0 for c in cost}
-    unmatched = 0
-    for body in tests:
+
+    def category(body):
         if not UNIX.search(body):
-            continue
-        hit = [c for c in order if CATS[c].search(body)]
-        if hit:
-            counted[hit[0]] += 1
-        else:
-            unmatched += 1
+            return None
+        return next((c for c in order if CATS[c].search(body)), "(none)")
+
+    filed = {name: category(body) for name, body in tests.items()}
+    counted = {c: sum(1 for f in filed.values() if f == c) for c in order}
     total = 0.0
     print("category\ttests\tlines per test\testimate")
     for c in order:
         lines = counted[c] * cost[c]
         total += lines
         print(f"{c}\t{counted[c]}\t{cost[c]:.1f}\t{lines:.0f}")
-    print(f"total\t{sum(counted.values())}\t\t{total:.0f}")
-    print(f"every Unix test at the highest sampled cost: "
-          f"{sum(counted.values()) * cost['other Unix']:.0f} (not an upper bound: "
-          f"'other Unix' has no sample)")
+    unix = sum(counted.values())
+    print(f"total\t{unix}\t\t{total:.0f}")
+    print(f"tests: {len(tests)}; Unix tests: {unix}; "
+          f"Unix tests in no category: {sum(1 for f in filed.values() if f == '(none)')}")
 
-    # The share that rests on the unsampled category, what it holds, and the
-    # cost per test at which the test port would reach the product port.
+    print("\nwhere each sampled test is filed (chosen for -> filed under, lines):")
+    for name, chosen in SAMPLE.items():
+        print(f"  {name}: {chosen} -> {filed[name] or 'no Unix pattern'}, {per_test[name]}")
+
     other = counted["other Unix"] * cost["other Unix"]
-    print(f"'other Unix' share of the total: {other:.0f} of {total:.0f} "
-          f"({100 * other / total:.0f}%), with no sample")
-    if counted["other Unix"]:
-        rest = total - other
-        print(f"break-even: the test port reaches {PRODUCT} lines if the "
-              f"{counted['other Unix']} 'other Unix' tests average "
-              f"{(PRODUCT - rest) / counted['other Unix']:.0f} changed lines each")
+    measured = [n for n in SAMPLE if filed[n] == "other Unix"]
+    print(f"\n'other Unix': {counted['other Unix']} tests, {other:.0f} of {total:.0f} lines "
+          f"({100 * other / total:.0f}%); {len(measured)} of them sampled, for other "
+          f"categories: {', '.join(f'{per_test[n]} lines' for n in measured) or 'none'}")
+    print(f"break-even: the test port reaches {PRODUCT} lines if the "
+          f"{counted['other Unix']} 'other Unix' tests average "
+          f"{(PRODUCT - (total - other)) / counted['other Unix']:.0f} changed lines each")
     for label, rx in KINDS.items():
-        n = sum(1 for b in tests if UNIX.search(b) and CATS["other Unix"].search(b)
-                and not any(CATS[c].search(b) for c in order if cost[c] > cost["other Unix"])
-                and rx.search(b))
+        n = sum(1 for name, body in tests.items()
+                if filed[name] == "other Unix" and rx.search(body))
         print(f"  'other Unix' tests that use {label}: {n}")
-    print(f"tests: {len(tests)}; Unix tests: {sum(counted.values()) + unmatched}; "
-          f"Unix tests in no category: {unmatched}")
-    signals = sum(1 for b in tests if re.search(r"libc::kill|" + SIGNAL, b))
+    print(f"every Unix test at the highest sampled cost: {unix * cost['other Unix']:.0f}")
+    signals = sum(1 for body in tests.values() if re.search(r"libc::kill|" + SIGNAL, body))
     print(f"tests that name a signal (libc::kill or a SIG name): {signals}")
-
-    # Harness and helpers: every line outside a test body that has a Unix pattern.
-    outside = parts[0].split("\n")
-    for body in tests:
-        # A test body ends at its first line that is a lone `}` at column 0;
-        # what follows, up to the next `#[test]`, is helpers and other items.
-        lines = body.split("\n")
-        end = next((i for i, line in enumerate(lines) if line == "}"), len(lines) - 1)
-        outside += lines[end + 1:]
-    harness = [line for line in outside
-               if UNIX.search(line) and not line.lstrip().startswith("//")]
-    print(f"harness and helper lines with a Unix pattern (comments excluded): {len(harness)}")
+    lines = [line for line in harness
+             if UNIX.search(line) and not line.lstrip().startswith("//")]
+    print(f"harness and helper lines with a Unix pattern (comments excluded): {len(lines)}")
 
 
 if __name__ == "__main__":
