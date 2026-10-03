@@ -6,16 +6,20 @@ Fixture sample, docs/decision-gate/05-test-fixture-sample.md.
 1. A test is the test function itself: from its `#[test]` to its first line
    that is a lone `}` at column 0. What follows it, up to the next `#[test]`
    (helper functions, structs), is harness code and is counted separately.
-   (experiments/unix-inventory/e2e-unix.py took everything up to the next
-   `#[test]`, so it counted helpers as part of the test above them.)
-2. A test that names a Unix pattern is filed under ONE category, its most
-   expensive matching one, so overlapping categories don't add up twice.
+   Full-line `//` comments are dropped from both before matching, so a Unix
+   word in a comment doesn't count. (experiments/unix-inventory/e2e-unix.py
+   took everything up to the next `#[test]` and kept comments.)
+2. A test is a Unix test when it matches any category's pattern, and it is
+   filed under ONE category, its most expensive matching one, so overlapping
+   categories don't add up twice.
 3. Each category's cost per test is the mean changed lines of the sampled tests
    chosen for it (PORT_PLAN's table), read from the cost-per-test.py output.
    "other Unix" was chosen for no sampled test, so it takes the highest cost
    measured on one test. The script prints where each sampled test lands under
    rule 2, because that can differ from the category it was chosen for.
-4. The harness lines with a Unix pattern are counted, not priced.
+4. The "other Unix" tests are broken down into disjoint groups (each test in
+   the first group it matches), so the groups add up to the category.
+5. The harness lines with a Unix pattern are counted, not priced.
 
 Helpers are not followed, so a test that uses Unix only through a helper is
 not counted; and "other Unix" is not capped at the highest sampled cost. So the
@@ -44,9 +48,12 @@ SAMPLE = {
 
 # Not `"kill"`: in tests/e2e.rs that is qex's own `kill` subcommand
 # (`h.ok(&["kill", &id])`), never a Unix program; no test runs
-# `Command::new("kill")`. And not `SIGNAL`, which is a word in comments and
-# in a completion string, not a signal.
+# `Command::new("kill")`. And not `SIGNAL`, which is a word, not a signal.
 SIGNAL = r"SIG(?!NAL\b)[A-Z]+\b"
+# Unix tools a test starts itself or submits as a job (after `"--"`).
+TOOL_NAMES = r"(?:ps|mkfifo|bwrap|lsof|chmod|cp|touch|printf)"
+TOOLS = r"Command::new\(\"" + TOOL_NAMES + r"\"\)|\"--\",\s*\"" + TOOL_NAMES + r"\""
+LIBC_OTHER = r"libc::(?!kill\b|SIG)\w+"
 
 CATS = {
     "libc::kill": re.compile(r"libc::kill\b"),
@@ -56,48 +63,44 @@ CATS = {
     "sleep": re.compile(r'"sleep"'),
     "/tmp": re.compile(r"/tmp"),
     "other Unix": re.compile(
-        r"libc::(?!kill\b)\w+|std::os::unix|/proc|\"/bin/|\.sh\"|\"cat\""
-        r"|" + SIGNAL +
-        r"|Command::new\(\"(?:ps|mkfifo|bwrap|lsof|chmod|cp|touch|printf)\"\)"),
+        LIBC_OTHER + r"|libc::SIG\w+|std::os::unix|/proc|\"/bin/|\.sh\"|\"cat\"|"
+        + SIGNAL + "|" + TOOLS),
 }
 
-# What the "other Unix" tests hold, for the write-up. A test can use several.
-# `libc::SIG*` constants are signal names (arguments to `libc::kill`), so the
-# libc item excludes them.
-TOOLS = r"Command::new\(\"(?:ps|mkfifo|bwrap|lsof|chmod|cp|touch|printf)\"\)"
-KINDS = {
-    "a Unix socket (UnixListener or UnixStream)": re.compile(r"Unix(?:Listener|Stream)"),
-    "std::os::unix": re.compile(r"std::os::unix"),
-    "/proc": re.compile(r"/proc"),
-    "another Unix tool": re.compile(TOOLS),
-    "a libc item other than kill and the SIG* constants": re.compile(
-        r"libc::(?!kill\b|SIG)\w+"),
-    "a signal name": re.compile(SIGNAL),
-}
-# The "other Unix" patterns other than signal names: a test that matches none
-# of these is in the category only because it names a signal.
-NOT_SIGNAL = re.compile(r"libc::(?!kill\b|SIG)\w+|std::os::unix|/proc|\"/bin/|\.sh\"|\"cat\"|"
-                        + TOOLS)
-
-UNIX = re.compile(r'"sh"|"bash"|"/bin/|"sleep"|"true"|"false"|"cat"|"echo"|libc::'
-                  r'|std::os::unix|' + SIGNAL + r'|/proc|/tmp|\.sh"')
+# Disjoint groups of the "other Unix" tests, for the write-up: each test goes
+# to the first group it matches, so the counts add up to the category.
+GROUPS = [
+    ("a Unix socket (UnixListener or UnixStream)", re.compile(r"Unix(?:Listener|Stream)")),
+    ("/proc", re.compile(r"/proc")),
+    ("another Unix tool", re.compile(TOOLS)),
+    ("a libc item other than kill and the SIG* constants", re.compile(LIBC_OTHER)),
+    ("another std::os::unix extension (permissions, inode, file type, raw fd, exit "
+     "status, symlink)", re.compile(r"std::os::unix")),
+    ("a \"/bin/\" path, a .sh script or \"cat\"", re.compile(r"\"/bin/|\.sh\"|\"cat\"")),
+    ("only a signal name", re.compile(r"libc::SIG\w+|" + SIGNAL)),
+]
 
 # The product port, in lines of code that change for Windows
 # (docs/decision-gate/03-unix-inventory.md, "Short answer").
 PRODUCT = 3635
 
 
+def code(lines):
+    """The lines without full-line `//` comments."""
+    return [line for line in lines if not line.lstrip().startswith("//")]
+
+
 def split(text):
     """({test name: body}, harness lines): each test from its `#[test]` to its
-    closing brace, and every line outside a test."""
+    closing brace, and every line outside a test, comments dropped."""
     parts = re.split(r"\n#\[test\]\n", text)
-    tests, harness = {}, parts[0].split("\n")
+    tests, harness = {}, code(parts[0].split("\n"))
     for part in parts[1:]:
         lines = part.split("\n")
         end = next((i for i, line in enumerate(lines) if line == "}"), len(lines) - 1)
-        body = "\n".join(lines[:end + 1])
+        body = "\n".join(code(lines[:end + 1]))
         tests[re.search(r"fn\s+(\w+)", body).group(1)] = body
-        harness += lines[end + 1:]
+        harness += code(lines[end + 1:])
     return tests, harness
 
 
@@ -128,9 +131,7 @@ def main():
     order = sorted(cost, key=lambda c: (-cost[c], c))
 
     def category(body):
-        if not UNIX.search(body):
-            return None
-        return next((c for c in order if CATS[c].search(body)), "(none)")
+        return next((c for c in order if CATS[c].search(body)), None)
 
     filed = {name: category(body) for name, body in tests.items()}
     counted = {c: sum(1 for f in filed.values() if f == c) for c in order}
@@ -142,8 +143,7 @@ def main():
         print(f"{c}\t{counted[c]}\t{cost[c]:.1f}\t{lines:.0f}")
     unix = sum(counted.values())
     print(f"total\t{unix}\t\t{total:.0f}")
-    print(f"tests: {len(tests)}; Unix tests: {unix}; "
-          f"Unix tests in no category: {sum(1 for f in filed.values() if f == '(none)')}")
+    print(f"tests: {len(tests)}; Unix tests: {unix}")
 
     print("\nwhere each sampled test is filed (chosen for -> filed under, lines):")
     for name, chosen in SAMPLE.items():
@@ -157,18 +157,20 @@ def main():
     print(f"break-even: the test port reaches {PRODUCT} lines if the "
           f"{counted['other Unix']} 'other Unix' tests average "
           f"{(PRODUCT - (total - other)) / counted['other Unix']:.0f} changed lines each")
-    for label, rx in KINDS.items():
-        n = sum(1 for name, body in tests.items()
-                if filed[name] == "other Unix" and rx.search(body))
-        print(f"  'other Unix' tests that use {label}: {n}")
-    only = sum(1 for name, body in tests.items()
-               if filed[name] == "other Unix" and not NOT_SIGNAL.search(body))
-    print(f"  'other Unix' tests there only because they name a signal: {only}")
+    print("'other Unix' tests by their first matching group (disjoint):")
+    grouped = {label: 0 for label, _ in GROUPS}
+    for name, body in tests.items():
+        if filed[name] == "other Unix":
+            label = next((lab for lab, rx in GROUPS if rx.search(body)), "(none)")
+            grouped[label] = grouped.get(label, 0) + 1
+    for label, n in grouped.items():
+        print(f"  {label}: {n}")
+    print(f"  sum: {sum(grouped.values())}")
     print(f"every Unix test at the highest sampled cost: {unix * cost['other Unix']:.0f}")
     signals = sum(1 for body in tests.values() if re.search(r"libc::kill|" + SIGNAL, body))
     print(f"tests that name a signal (libc::kill or a SIG name): {signals}")
     lines = [line for line in harness
-             if UNIX.search(line) and not line.lstrip().startswith("//")]
+             if any(rx.search(line) for rx in CATS.values())]
     print(f"harness and helper lines with a Unix pattern (comments excluded): {len(lines)}")
 
 

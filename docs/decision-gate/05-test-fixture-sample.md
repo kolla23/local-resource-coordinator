@@ -4,8 +4,8 @@
 
 **Short answer.**
 - Of ten sampled tests, nine now run a portable job, `testjob`, in place of Unix programs; the tenth needed no change. Each changed **0 to 11 lines** (mean 3.7). All ten pass 3 of 3 runs on Linux before and after, with no runtime change beyond noise.
-- Scaled to the whole suite, the test port comes to **about 1,570 changed lines**, against **≈3,635** for the product port. The harness adds **56 lines** with a Unix pattern, which are counted but not priced.
-- **That does not settle the trigger.** Nearly half of the estimate (726 lines, 46%) is 66 tests in an "other Unix" category. Half of them (33) are there only because they name a signal: cheap in lines, with their real cost deferred to ADRs 2 and 3. The other half holds the hardest tests to port: 7 use a Unix socket as a stand-in coordinator, 5 read `/proc`, 4 start another Unix tool, 11 call other libc functions (`flock`, `getuid`, `killpg`, …). **None was sampled for its Unix part**: two sampled tests fall in it, but only their `sleep` and `true` were converted, and their signal work was left for ADRs 2 and 3. Its 11 lines per test are borrowed from a sampled test whose 11 lines were mostly rustfmt layout. The test port reaches the product port if those 66 tests average **42 changed lines** each. With half of them signal-only, that needs the other half to average far more, which a fake coordinator rebuilt on named pipes might cost and a `getuid` swap would not. **Verdict: not met on this estimate, but not shown either way until a few "other Unix" tests are converted and measured.**
+- Scaled to the whole suite, the test port comes to **about 1,580 changed lines**, against **≈3,635** for the product port. The harness adds **60 lines** with a Unix pattern, which are counted but not priced.
+- **That does not settle the trigger.** Nearly half of the estimate (737 lines, 47%) is 67 tests in an "other Unix" category. Half of them (33) are there only because they name a signal: cheap in lines, with their real cost deferred to ADRs 2 and 3. The other 34 hold the hardest tests to port (each counted once, under the first that applies): 7 use a Unix socket as a stand-in coordinator, 4 read `/proc`, 5 run another Unix tool, 10 call other libc functions (`flock`, `getuid`, `killpg`, …), 7 use other `std::os::unix` extensions (permissions, inodes, file types, raw file descriptors), and 1 a `/bin/` path. **None was sampled for its Unix part**: two sampled tests fall in it, but only their `sleep` and `true` were converted, and their signal work was left for ADRs 2 and 3. Its 11 lines per test are borrowed from a sampled test whose 11 lines were mostly rustfmt layout. The test port reaches the product port if those 67 tests average **42 changed lines** each. With half of them signal-only, that needs the other half to average far more, which a fake coordinator rebuilt on named pipes might cost and a `getuid` swap would not. **Verdict: not met on this estimate, but not shown either way until a few "other Unix" tests are converted and measured.**
 - What lines don't capture: **38 tests** send or check a Unix signal. Their Windows meaning waits for ADRs 2 and 3, so their real cost is not known yet.
 
 ## Method
@@ -50,28 +50,28 @@ Time spent per test was not measured: an agent's editing time says nothing about
 
 ## The estimate
 `estimate.py` counts tests, not occurrences:
-- **Which tests:** a test counts when the test function itself (from its `#[test]` to its closing brace) names a Unix pattern. The helpers between tests are harness code, counted separately below. (Step 3's `e2e-unix.py` took everything up to the next `#[test]`, so it counted a helper as part of the test above it.)
+- **Which tests:** a test counts when the test function itself (from its `#[test]` to its closing brace) names a Unix pattern of any category; full-line comments don't count. The helpers between tests are harness code, counted separately below. (Step 3's `e2e-unix.py` took everything up to the next `#[test]` and kept comments, so it counted a helper as part of the test above it.)
 - **No double counting:** a test that matches several categories counts once, under its most expensive one.
-- **Cost per category:** the mean changed lines of the sampled tests chosen for that category (the table in "Method"). No sampled test was chosen for "other Unix" (other `libc::` calls, `SIG*` names, `std::os::unix`, `/proc`, `"/bin/` paths, `.sh` scripts, `"cat"` and the tools `ps`, `mkfifo`, `bwrap`, `lsof`, `chmod`, `cp`, `touch`, `printf`), so it takes the highest cost measured on one test, 11.
+- **Cost per category:** the mean changed lines of the sampled tests chosen for that category (the table in "Method"). No sampled test was chosen for "other Unix" (other `libc::` calls, `SIG*` names, `std::os::unix`, `/proc`, `"/bin/` paths, `.sh` scripts, `"cat"` and the tools `ps`, `mkfifo`, `bwrap`, `lsof`, `chmod`, `cp`, `touch`, `printf`, whether a test starts them or submits them as a job), so it takes the highest cost measured on one test, 11.
 - **Where the sampled tests are filed:** filing by most expensive match puts tests 4 and 9 under "other Unix", because both name `SIGINT`; their 2 and 8 lines leave the signal part unported, so they don't measure that category. The `libc::kill` category is then priced from test 9 although test 9 is filed elsewhere. `estimate.txt` lists where each sampled test lands.
 
 | Category | Tests | Lines per test | Estimate |
 |---|---|---|---|
-| other Unix | 66 | 11.0 | 726 |
-| `true` / `false` | 115 | 5.0 | 575 |
+| other Unix | 67 | 11.0 | 737 |
+| `true` / `false` | 116 | 5.0 | 580 |
 | `sh -c` / `bash` | 47 | 3.0 | 141 |
 | `echo` | 16 | 4.0 | 64 |
 | `sleep` | 22 | 2.0 | 44 |
 | `libc::kill` | 2 | 8.0 | 16 |
-| `/tmp` | 2 | 0.0 | 0 |
-| **total** | **270** | | **1,566** |
+| `/tmp` | 1 | 0.0 | 0 |
+| **total** | **271** | | **1,582** |
 
-- **What "other Unix" holds,** in its 66 tests (a test can count in several): 36 name a signal, and 33 of those are in the category for that alone; 20 use `std::os::unix` (7 of them a Unix socket as a stand-in coordinator, the rest `PermissionsExt` or `ExitStatusExt`); 11 use a libc item other than `kill` and the `SIG*` constants; 5 read `/proc`; 4 start another Unix tool.
-- **Not a bound either way:** pricing all 270 tests at 11 lines gives 2,970, but that is no upper bound, because the unsampled category isn't capped at the highest sampled cost. Helpers aren't followed, so a test that uses Unix only through a helper doesn't count, and that pulls the other way.
-- **Break-even:** with the other categories as estimated (840 lines), the test port reaches the product port's 3,635 lines if the 66 "other Unix" tests average 42 changed lines each.
+- **What "other Unix" holds,** in its 67 tests, each in the first group it matches (`estimate.txt` prints the groups and their sum): a Unix socket 7, `/proc` 4, another Unix tool 5, a libc item other than `kill` and the `SIG*` constants 10, another `std::os::unix` extension 7, a `"/bin/"` path, `.sh` script or `"cat"` 1, and only a signal name 33.
+- **Not a bound either way:** pricing all 271 tests at 11 lines gives 2,981, but that is no upper bound, because the unsampled category isn't capped at the highest sampled cost. Helpers aren't followed, so a test that uses Unix only through a helper doesn't count, and that pulls the other way.
+- **Break-even:** with the other categories as estimated (845 lines), the test port reaches the product port's 3,635 lines if the 67 "other Unix" tests average 42 changed lines each.
 - **Why `libc::kill` has 2 tests:** "other Unix" is the most expensive category, and nearly every test that calls `libc::kill` also names a signal (`SIGINT`, `SIGTERM`), so it counts there.
-- **What's not a Unix pattern:** `"kill"` in these tests is qex's own `kill` subcommand (`h.ok(&["kill", &id])`), and `SIGNAL` appears only as a word; neither counts. Step 3's `e2e-unix.py` counted `"kill"` and helper code, so its "281 tests using Unix" (at c693c90, the commit its log names; squashed into 7e4f9c6 on `main`; 326 tests) is too high; 270 here (at d73c760, 329 tests).
-- **Harness:** the harness and helpers outside the tests have 56 lines with a Unix pattern (comments excluded). They are not priced, because the sample didn't touch them: `Harness::stopped` alone uses `libc::kill` and `/proc`.
+- **What's not a Unix pattern:** `"kill"` in these tests is qex's own `kill` subcommand (`h.ok(&["kill", &id])`), and `SIGNAL` appears only as a word; neither counts. Step 3's `e2e-unix.py` counted `"kill"` and helper code, so its "281 tests using Unix" (at c693c90, the commit its log names; squashed into 7e4f9c6 on `main`; 326 tests) is too high; 271 here (at d73c760, 329 tests).
+- **Harness:** the harness and helpers outside the tests have 60 lines with a Unix pattern (comments excluded). They are not priced, because the sample didn't touch them: `Harness::stopped` alone uses `libc::kill` and `/proc`.
 - **What lines don't capture:** 38 tests name a signal (`libc::kill` or a `SIG*` name). Changing their lines is cheap; deciding what they test on Windows is the work that ADR 2 (who may signal a job) and ADR 3 (exit classification and `--signal`) must do first. This sample doesn't price that.
 
 ## Changes to the plan
@@ -92,6 +92,6 @@ Time spent per test was not measured: an agent's editing time says nothing about
 ## Not evaluated
 - macOS.
 - How the 38 signal tests port: that waits for ADRs 2 and 3.
-- The cost of the 66 "other Unix" tests: none was sampled for its Unix part.
-- The cost of the 56 harness lines.
+- The cost of the 67 "other Unix" tests: none was sampled for its Unix part.
+- The cost of the 60 harness lines.
 - Only one machine was measured, with 3 runs per test (10 for the one whose mean moved).
