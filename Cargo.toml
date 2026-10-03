@@ -1,4 +1,5 @@
-# Modified by the local-resource-coordinator fork, 2026-10-02: the portable test job `testjob` and the `test-fixtures` feature that the e2e suite needs.
+# Modified by the local-resource-coordinator fork, 2026-10-02: the portable
+# test job `testjob` and the `test-fixtures` feature that the e2e suite needs.
 [package]
 name = "qex"
 # NOT the version of a release. `main` holds this number for ever, and no pull
