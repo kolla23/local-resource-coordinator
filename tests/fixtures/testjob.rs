@@ -12,7 +12,7 @@
 //!     print TEXT          write TEXT and a new line to stdout
 //!     print TEXT --stderr write it to stderr instead
 //!     hold-mem MIB SECS   hold MIB mebibytes of touched memory for SECS seconds
-//!     spin N              count to N in a busy loop
+//!     spin SECS           use the CPU in a busy loop for SECS seconds
 //!     count FILE          add 1 to the number in FILE (0 if there is no FILE)
 //!     if-count-below N    run the steps up to the next `end` only when the
 //!                         last `count` gave less than N; skip them otherwise
@@ -37,7 +37,7 @@ fn main() -> ExitCode {
             eprintln!("testjob: {message}");
             eprintln!(
                 "usage: testjob [exit N | sleep SECS | print TEXT [--stderr] \
-                 | hold-mem MIB SECS | spin N | count FILE \
+                 | hold-mem MIB SECS | spin SECS | count FILE \
                  | if-count-below N ... end]..."
             );
             ExitCode::from(2)
@@ -90,13 +90,13 @@ fn run(args: &[String]) -> Result<u8, String> {
                 std::hint::black_box(&block);
             }
             "spin" => {
-                let n = take(&mut rest, "spin")?;
-                let n: u64 = n
-                    .parse()
-                    .map_err(|_| format!("spin needs a count, not {n:?}"))?;
+                // A time, not a count of steps: a test that checks the CPU
+                // time of a job needs the same CPU time on every machine.
+                let secs = seconds(take(&mut rest, "spin")?)?;
+                let start = std::time::Instant::now();
                 let mut i = 0u64;
-                while std::hint::black_box(i) < n {
-                    i += 1;
+                while start.elapsed() < secs {
+                    i = std::hint::black_box(i.wrapping_add(1));
                 }
             }
             "count" => {
