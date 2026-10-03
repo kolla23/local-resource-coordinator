@@ -1,3 +1,5 @@
+# Modified by the local-resource-coordinator fork, 2026-10-02: the end-to-end
+# tests run with --features test-fixtures.
 name: Release
 
 # ONE workflow makes the release, from the tag.
@@ -244,7 +246,7 @@ jobs:
       - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --bins
-      - run: cargo test --test e2e -- --test-threads=2
+      - run: cargo test --features test-fixtures --test e2e -- --test-threads=2
 
   build:
     name: Build ${{ matrix.name }}

@@ -1,4 +1,5 @@
 # qex — Queued EXecutor
+<!-- Modified by the local-resource-coordinator fork, 2026-10-02: the test command needs --features test-fixtures. -->
 
 [![CI on main](https://img.shields.io/github/actions/workflow/status/stephenc/qex/ci.yml?branch=main&label=CI)](https://github.com/stephenc/qex/actions/workflows/ci.yml?query=branch%3Amain)
 [![Latest release](https://img.shields.io/github/v/release/stephenc/qex?label=release)](https://github.com/stephenc/qex/releases/latest)
@@ -452,7 +453,7 @@ Never paste the output of `--show-env` into a public page.
 ## Development
 
 ```sh
-cargo test -- --test-threads=2
+cargo test --features test-fixtures -- --test-threads=2
 cargo build --release
 ```
 

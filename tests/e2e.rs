@@ -3,6 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-02: a zombie counts as a stopped coordinator (issue #30).
 // Modified by the local-resource-coordinator fork, 2026-10-02: the ownership test asks again when a question meets the dying coordinator.
 // Modified by the local-resource-coordinator fork, 2026-10-01: a coordinator with no [update] check writes no update record (issue #4).
+// Modified by the local-resource-coordinator fork, 2026-10-02: the suite needs the test-fixtures feature; nine of the ten sampled tests run the portable `testjob` in place of Unix programs (the /tmp one is unchanged).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -17,8 +18,12 @@
 //! Run these tests with two threads:
 //!
 //! ```sh
-//! cargo test -- --test-threads=2
+//! cargo test --features test-fixtures -- --test-threads=2
 //! ```
+//!
+//! The feature builds `testjob`, the portable job that some tests run. Without
+//! it, `--test e2e` stops with an error and a plain `cargo test` skips this
+//! suite.
 //!
 //! Each test starts real processes and waits for them. With more threads, the
 //! machine becomes busy, a job starts late, and a test reports a failure that
@@ -33,6 +38,11 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// The portable job: `exit N`, `sleep SECS`, `print TEXT [--stderr]` and
+/// `hold-mem MIB SECS`, run in order (tests/fixtures/testjob.rs). A job that
+/// uses it in place of `true`, `sleep`, `echo` or `sh -c` needs no Unix program.
+const TESTJOB: &str = env!("CARGO_BIN_EXE_testjob");
 
 /// One isolated qex installation.
 struct Harness {
@@ -963,7 +973,7 @@ impl Drop for Harness {
 #[test]
 fn a_job_that_succeeds_gives_the_exit_code_zero() {
     let h = Harness::with_default_config("ok");
-    let id = h.submit(&["submit", "--", "true"]);
+    let id = h.submit(&["submit", "--", TESTJOB, "exit", "0"]);
     let out = h.qex(&["wait", &id]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(h.state_of(&id), "completed");
@@ -972,7 +982,7 @@ fn a_job_that_succeeds_gives_the_exit_code_zero() {
 #[test]
 fn a_job_that_fails_gives_the_exit_code_one() {
     let h = Harness::with_default_config("fail");
-    let id = h.submit(&["submit", "--", "false"]);
+    let id = h.submit(&["submit", "--", TESTJOB, "exit", "1"]);
     let out = h.qex(&["wait", &id]);
     assert_eq!(out.status.code(), Some(1));
 
@@ -985,7 +995,7 @@ fn a_job_that_fails_gives_the_exit_code_one() {
 #[test]
 fn a_wait_gives_the_exit_code_of_the_job() {
     let h = Harness::with_default_config("pass");
-    let id = h.submit(&["submit", "--", "sh", "-c", "exit 42"]);
+    let id = h.submit(&["submit", "--", TESTJOB, "exit", "42"]);
     assert_eq!(h.qex(&["wait", &id]).status.code(), Some(42));
 }
 
@@ -1057,7 +1067,7 @@ fn a_signal_that_stopped_the_job_gives_its_own_code() {
 #[test]
 fn a_signal_to_the_wait_gives_the_code_of_a_broken_wait() {
     let h = Harness::with_default_config("waitsig");
-    let id = h.submit(&["submit", "--", "sleep", "30"]);
+    let id = h.submit(&["submit", "--", TESTJOB, "sleep", "30"]);
     h.until("the job starts", Duration::from_secs(45), || {
         h.has_started(&id)
     });
@@ -1095,7 +1105,7 @@ fn a_signal_to_the_wait_gives_the_code_of_a_broken_wait() {
 #[test]
 fn follow_obeys_the_time_limit_of_the_reader() {
     let h = Harness::with_default_config("followlimit");
-    let id = h.submit(&["submit", "--", "sleep", "30"]);
+    let id = h.submit(&["submit", "--", TESTJOB, "sleep", "30"]);
     h.until("the job starts", Duration::from_secs(45), || {
         h.has_started(&id)
     });
@@ -1229,7 +1239,16 @@ fn a_usage_error_of_a_command_that_speaks_for_a_job_uses_the_band() {
     for args in [
         vec!["status"],
         vec!["wait"],
-        vec!["submit", "--wait", "--cpu", "not-a-number", "--", "true"],
+        vec![
+            "submit",
+            "--wait",
+            "--cpu",
+            "not-a-number",
+            "--",
+            TESTJOB,
+            "exit",
+            "0",
+        ],
         vec!["pipeline", "--no-such-option"],
         vec!["rerun", "--no-such-option"],
     ] {
@@ -1400,17 +1419,19 @@ fn a_wait_for_many_jobs_says_why_the_later_job_waits() {
     );
 
     // The first job of the wait. It RUNS, so a shared reporter stops here.
-    let first = h.submit(&["submit", "--cpu", "2", "--mem", "100MB", "--", "sleep", "6"]);
+    let first = h.submit(&[
+        "submit", "--cpu", "2", "--mem", "100MB", "--", TESTJOB, "sleep", "6",
+    ]);
     h.until("the first job starts", Duration::from_secs(45), || {
         h.has_started(&first)
     });
     // The job that holds the second job back. It outlives the first job.
     let holder = h.submit(&[
-        "submit", "--name", "holder", "--cpu", "2", "--mem", "100MB", "--", "sleep", "25",
+        "submit", "--name", "holder", "--cpu", "2", "--mem", "100MB", "--", TESTJOB, "sleep", "25",
     ]);
     // The second job of the wait. It cannot start until the holder stops.
     let second = h.submit(&[
-        "submit", "--cpu", "1", "--mem", "100MB", "--needs", &holder, "--", "true",
+        "submit", "--cpu", "1", "--mem", "100MB", "--needs", &holder, "--", TESTJOB, "exit", "0",
     ]);
 
     let child = h.spawn(&["wait", &first, &second, "--timeout", "30s"]);
@@ -1936,7 +1957,9 @@ fn a_fresh_install_asks_nothing_and_says_nothing() {
 #[test]
 fn status_with_wait_ends_with_the_record_of_the_job() {
     let h = Harness::with_default_config("statusrec");
-    let id = h.submit(&["submit", "--", "sh", "-c", "echo bad >&2; exit 9"]);
+    let id = h.submit(&[
+        "submit", "--", TESTJOB, "print", "bad", "--stderr", "exit", "9",
+    ]);
     let out = h.qex(&["status", &id, "--wait"]);
     assert_eq!(out.status.code(), Some(9));
     let said = String::from_utf8_lossy(&out.stdout).to_string();
@@ -2810,14 +2833,14 @@ fn a_job_that_is_too_large_runs_when_the_queue_is_empty() {
     // job to be `running`, and a machine with other work can look after the job
     // has stopped. The condition is then false for ever.
     let small = h.submit(&[
-        "submit", "--cpu", "2", "--mem", "128MB", "--", "sleep", "300",
+        "submit", "--cpu", "2", "--mem", "128MB", "--", TESTJOB, "sleep", "300",
     ]);
     h.until("the small job starts", Duration::from_secs(45), || {
         h.state_of(&small) == "running"
     });
 
     let out = h.qex(&[
-        "submit", "--cpu", "64", "--mem", "64GB", "--", "echo", "big",
+        "submit", "--cpu", "64", "--mem", "64GB", "--", TESTJOB, "print", "big",
     ]);
     assert!(out.status.success());
     let big = String::from_utf8_lossy(&out.stdout).trim().to_string();

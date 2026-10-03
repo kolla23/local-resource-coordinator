@@ -1,3 +1,4 @@
+# Modified by the local-resource-coordinator fork, 2026-10-02: the portable test job `testjob` and the `test-fixtures` feature that the e2e suite needs.
 [package]
 name = "qex"
 # NOT the version of a release. `main` holds this number for ever, and no pull
@@ -32,6 +33,23 @@ uuid = { version = "1", features = ["v4", "serde"] }
 libc = "0.2"
 anyhow = "1"
 clap_complete = "4.6.9"
+
+# `testjob` is a job for the end-to-end tests that runs on every platform (see
+# tests/fixtures/testjob.rs). It is built only with this feature, so
+# `cargo install` never installs it. The e2e suite needs it, so the suite needs
+# the feature too: run it with `--features test-fixtures`.
+[features]
+test-fixtures = []
+
+[[bin]]
+name = "testjob"
+path = "tests/fixtures/testjob.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "e2e"
+path = "tests/e2e.rs"
+required-features = ["test-fixtures"]
 
 [profile.release]
 opt-level = "z"
