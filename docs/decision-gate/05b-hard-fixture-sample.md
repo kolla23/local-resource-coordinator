@@ -3,7 +3,7 @@
 [05-test-fixture-sample.md](05-test-fixture-sample.md) priced each category from its simplest tests and said the follow-up converts "the hardest example of each gap category". That is only partly true: this PR converts one hard test in each of two gaps, a Unix tool and an `sh -c` script with shell features. Neither is the hardest of its gap, and every gap in 05 stays open apart from these two tests, so the trigger is still not settled. The last section lists every group and what happened to it.
 
 ## What was converted
-Before is `main` at c6d9344, after is 8e34772. Raw output is in [logs/fixture-hard-sample](logs/fixture-hard-sample/).
+Before is `main` at c6d9344, after is 8e34772. 8e34772 is a commit of #42, not on `main` after the squash merge (it stays reachable through `refs/pull/42/head`); its code matches #42's squash commit apart from comments (`git diff 8e34772 <squash commit> -- tests/` shows comment-only changes). Raw output is in [logs/fixture-hard-sample](logs/fixture-hard-sample/).
 
 | Gap | Test | What changed | Lines | Linux runs before / after | Mean s before / after |
 |---|---|---|---|---|---|
