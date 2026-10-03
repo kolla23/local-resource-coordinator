@@ -14,6 +14,9 @@ runs="${2:-10}"
 features=()
 grep -q '^test-fixtures *=' Cargo.toml && features=(--features test-fixtures)
 cargo build -q "${features[@]}" --tests --bins || exit 1
+# `--exact` with a name that matches no test runs nothing and exits 0.
+cargo test -q "${features[@]}" --test e2e -- --list --exact "$test" 2>/dev/null \
+    | grep -qxF "$test: test" || { echo "no e2e test named $test" >&2; exit 2; }
 
 line="$(git log --oneline -1 | cut -c1-7):"
 for _ in $(seq "$runs"); do
