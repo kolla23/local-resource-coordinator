@@ -4,6 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-02: the ownership test asks again when a question meets the dying coordinator.
 // Modified by the local-resource-coordinator fork, 2026-10-01: a coordinator with no [update] check writes no update record (issue #4).
 // Modified by the local-resource-coordinator fork, 2026-10-02: the suite needs the test-fixtures feature; nine of the ten sampled tests run the portable `testjob` in place of Unix programs (the /tmp one is unchanged).
+// Modified by the local-resource-coordinator fork, 2026-10-03: two more tests run `testjob`: the record dated before the boot (std `set_modified` in place of `touch`) and the job that starts again (`count`/`if-count-below`/`spin` in place of `sh -c`).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -4007,7 +4008,7 @@ fn a_new_process_with_the_supervisor_pid_is_not_the_supervisor() {
 #[test]
 fn an_old_record_from_before_the_boot_is_dead() {
     let h = Harness::with_default_config("recoveroldboot");
-    let id = h.submit(&["submit", "--name", "old", "--", "sleep", "300"]);
+    let id = h.submit(&["submit", "--name", "old", "--", TESTJOB, "sleep", "300"]);
 
     h.until("the job operates", Duration::from_secs(45), || {
         h.state_of(&id) == "running" && h.status_json(&id)["supervisor_pid"].as_i64().is_some()
@@ -4038,12 +4039,12 @@ fn an_old_record_from_before_the_boot_is_dead() {
     fields.remove("supervisor_start_token");
     fields.remove("pid_start_token");
     std::fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
-    let touched = std::process::Command::new("touch")
-        .args(["-t", "202001010000"])
-        .arg(&path)
-        .status()
+    // 2020-01-01 00:00 UTC.
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .and_then(|f| f.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_577_836_800)))
         .expect("dating the record before the boot");
-    assert!(touched.success(), "touch refused the date");
 
     // The next coordinator must call the job dead and send no signal.
     h.until("the job is failed", Duration::from_secs(45), || {
@@ -7090,14 +7091,25 @@ fn a_job_that_starts_again_never_shows_the_attempt_that_failed() {
     // The first attempt fails, and the second one takes long enough for the
     // test to read the record many times.
     let counter = h.root.join("attempts");
-    let script = format!(
-        "n=$(cat {c} 2>/dev/null || echo 0); n=$((n+1)); echo $n > {c}; \
-         if [ $n -lt 2 ]; then \
-             i=0; while [ $i -lt 1000000 ]; do i=$((i+1)); done; exit 3; \
-         fi; sleep 5",
-        c = counter.display()
-    );
-    let id = h.submit(&["submit", "--retries", "4", "--", "sh", "-c", &script]);
+    let counter = counter.to_str().unwrap();
+    let id = h.submit(&[
+        "submit",
+        "--retries",
+        "4",
+        "--",
+        TESTJOB,
+        "count",
+        counter,
+        "if-count-below",
+        "2",
+        "spin",
+        "1000000",
+        "exit",
+        "3",
+        "end",
+        "sleep",
+        "5",
+    ]);
 
     // Read the record FILE, and not `qex status`.
     //
