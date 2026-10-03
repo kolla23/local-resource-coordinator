@@ -2,8 +2,8 @@
 """Changed lines per sampled test, from the git diff of tests/e2e.rs.
 
 Fixture sample, docs/decision-gate/05-test-fixture-sample.md. A changed line
-belongs to the test whose body (from its `#[test]` to the next one, as in
-experiments/unix-inventory/e2e-unix.py) holds it in the new file; a removed
+belongs to the test whose body (from its `#[test]` to its first line that is
+a lone `}` at column 0, as in estimate.py) holds it in the new file; a removed
 line belongs to the test that holds it in the old file. Lines outside every
 sampled test (the header, the TESTJOB constant) are shown as shared.
 
@@ -32,8 +32,8 @@ def spans(text):
     out = {}
     lines = text.split("\n")
     starts = [i for i, line in enumerate(lines) if line == "#[test]"]
-    for k, s in enumerate(starts):
-        end = starts[k + 1] - 1 if k + 1 < len(starts) else len(lines)
+    for s in starts:
+        end = next((i for i in range(s, len(lines)) if lines[i] == "}"), len(lines) - 1) + 1
         m = re.search(r"fn\s+(\w+)", "\n".join(lines[s:s + 5]))
         out[m.group(1)] = (s + 1, end)
     return out

@@ -47,8 +47,8 @@ SAMPLE = {
 }
 
 # Not `"kill"`: in tests/e2e.rs that is qex's own `kill` subcommand
-# (`h.ok(&["kill", &id])`), never a Unix program; no test runs
-# `Command::new("kill")`. And not `SIGNAL`, which is a word, not a signal.
+# (`h.ok(&["kill", &id])`) or text qex prints, never a Unix program; no test
+# runs `Command::new("kill")`. And not `SIGNAL`, which is a word, not a signal.
 SIGNAL = r"SIG(?!NAL\b)[A-Z]+\b"
 # Unix tools a test starts itself or submits as a job (after `"--"`).
 TOOL_NAMES = r"(?:ps|mkfifo|bwrap|lsof|chmod|cp|touch|printf)"
@@ -59,9 +59,10 @@ CATS = {
     "libc::kill": re.compile(r"libc::kill\b"),
     "true/false": re.compile(r'"true"|"false"'),
     "echo": re.compile(r'"echo"'),
-    # `"bash"` only as `bash -c`: a bare `"bash"` is also a shell name for
-    # `qex completions` (`["bash", "zsh", "fish"]`), not a shell that runs.
-    "sh -c / bash": re.compile(r'"sh"|"bash",\s*"-c"'),
+    # `"bash"` only as `bash -c`, in a list (`"bash", "-c"`) or a builder
+    # (`Command::new("bash").arg("-c")`): a bare `"bash"` is also a shell name
+    # for `qex completions` (`["bash", "zsh", "fish"]`), not a shell that runs.
+    "sh -c / bash": re.compile(r'"sh"|"bash"\)?\s*(?:,|\.arg\()\s*"-c"'),
     "sleep": re.compile(r'"sleep"'),
     "/tmp": re.compile(r"/tmp"),
     "other Unix": re.compile(
