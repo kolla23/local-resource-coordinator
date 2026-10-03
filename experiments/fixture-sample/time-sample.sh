@@ -3,8 +3,9 @@
 # Runs each test of the fixture sample alone, three times, and prints its
 # result and wall time (fixture sample, docs/decision-gate/05-test-fixture-sample.md).
 #
-# Usage: time-sample.sh <label>   (on Linux, from the root of a checkout of the
-#        commit to measure; the script may live outside that checkout)
+# Usage: time-sample.sh <label> [test...]   (on Linux, from the root of a
+#        checkout of the commit to measure; the script may live outside that
+#        checkout). Without test names it runs #41's ten sampled tests.
 #
 # Run it once on the commit before the tests were converted and once on the
 # commit after, on the same machine. A commit without the `test-fixtures`
@@ -25,6 +26,8 @@ tests=(
     a_wait_for_many_jobs_says_why_the_later_job_waits
     the_harness_stops_a_coordinator_on_a_long_socket_path
 )
+shift
+[ $# -gt 0 ] && tests=("$@")
 
 features=()
 grep -q '^test-fixtures *=' Cargo.toml && features=(--features test-fixtures)

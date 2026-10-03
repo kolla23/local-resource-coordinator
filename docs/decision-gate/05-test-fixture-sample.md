@@ -13,6 +13,8 @@
   - the 38 signal tests, waiting on ADRs 2 and 3.
 
   **The trigger decision waits for the follow-up PR**, which converts the hardest example of each gap category rather than the first.
+
+  The follow-up, [05b-hard-fixture-sample.md](05b-hard-fixture-sample.md), converts one hard test in each of two gaps; the gaps above stay open.
 - What lines don't capture: **38 tests** name a Unix signal (`libc::kill` or a `SIG*` name). Their Windows meaning waits for ADRs 2 and 3, so their real cost is not known yet.
 
 ## Method
