@@ -52,7 +52,7 @@ Every step is its own PR, planned at about 400 changed lines (not counting logs 
 | R9 | Memory metric input | Peak-memory measurement behind `os::`. The field stays `max_rss` until ADR 4 changes it. | supervisor, usage | ADR 4 |
 | R10 | Peers | The peer directory becomes a backend capability (`os::peers_supported()`), or what ADR 5 decides | peers, sched | ADR 5 |
 
-- **Size.** Moved code counts twice in a diff. R2 and R3 are planned near 400 lines; if either grows past about 800, it stops for the owner's decision to continue or split.
+- **Size.** Moved code counts twice in a diff. R2 and R3 are planned near 400 lines (not counting logs or generated files); if either grows past about 800, it stops for the owner's decision to continue or split.
 - **Tripwire.** 04-recommendation names this refactor as the test of whether the layer can be drawn cleanly: recommend (c) instead if "the scheduler or daemon state needs pids or process groups in its core types rather than at the edges".
   - R2 moves code without touching callers, so it cannot answer this by itself. Its PR description therefore also lists every pid or process-group field and use in the core types of `sched` and `daemon`, with where each is used. That gives the owner an early answer.
   - R7 and R8 confirm it, because they change `daemon`, `lifecycle` and `supervisor`.
