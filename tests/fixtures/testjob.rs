@@ -29,7 +29,10 @@ fn main() -> ExitCode {
         Ok(code) => ExitCode::from(code),
         Err(message) => {
             eprintln!("testjob: {message}");
-            eprintln!("usage: testjob [exit N | sleep SECS | print TEXT [--stderr] | hold-mem MIB SECS]...");
+            eprintln!(
+                "usage: testjob [exit N | sleep SECS | print TEXT [--stderr] \
+                 | hold-mem MIB SECS]..."
+            );
             ExitCode::from(2)
         }
     }

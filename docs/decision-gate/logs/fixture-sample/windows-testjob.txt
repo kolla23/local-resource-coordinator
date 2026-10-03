@@ -1,0 +1,30 @@
+# testjob on native Windows: Microsoft Windows [Version 10.0.26200.9457], rustc 1.98.1 (48a229cea 2026-09-01), commit db1abd0 test: portable testjob fixture, used by nine sampled e2e tests (#40)
+$ testjob exit 0
+exit code: 0
+$ testjob exit 1
+exit code: 1
+$ testjob exit 42
+exit code: 42
+$ testjob print hello
+hello
+exit code: 0
+$ testjob print bad --stderr exit 9
+bad
+exit code: 9
+$ testjob sleep 1.5
+exit code: 0
+sleep 1.5 took 1.57 s
+$ testjob hold-mem 64 1
+exit code: 0
+$ testjob nope
+testjob: unknown step "nope"
+usage: testjob [exit N | sleep SECS | print TEXT [--stderr] | hold-mem MIB SECS]...
+exit code: 2
+$ testjob exit 300
+testjob: exit needs a code from 0 to 255, not "300"
+usage: testjob [exit N | sleep SECS | print TEXT [--stderr] | hold-mem MIB SECS]...
+exit code: 2
+$ testjob print out print err --stderr  (stdout only, stderr dropped)
+out
+$ same, stderr only
+err

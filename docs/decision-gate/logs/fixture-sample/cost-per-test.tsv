@@ -1,0 +1,12 @@
+a_job_that_succeeds_gives_the_exit_code_zero	+1	-1	2
+a_job_that_fails_gives_the_exit_code_one	+1	-1	2
+a_usage_error_of_a_command_that_speaks_for_a_job_uses_the_band	+10	-1	11
+a_signal_to_the_wait_gives_the_code_of_a_broken_wait	+1	-1	2
+follow_obeys_the_time_limit_of_the_reader	+1	-1	2
+a_wait_gives_the_exit_code_of_the_job	+1	-1	2
+status_with_wait_ends_with_the_record_of_the_job	+3	-1	4
+a_job_that_is_too_large_runs_when_the_queue_is_empty	+2	-2	4
+a_wait_for_many_jobs_says_why_the_later_job_waits	+5	-3	8
+the_harness_stops_a_coordinator_on_a_long_socket_path	+0	-0	0
+(shared)	+11	-1	12
+(other test)	+0	-0	0
