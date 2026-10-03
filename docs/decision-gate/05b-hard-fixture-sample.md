@@ -1,20 +1,21 @@
 # Decision gate, step 5b: two hard tests converted
 
-[05-test-fixture-sample.md](05-test-fixture-sample.md) priced each category from its simplest tests and said the follow-up converts "the hardest example of each gap category". That is only partly true: this PR converts the hardest example of two gaps. The other gaps wait for ADRs or are Linux-only, so the trigger is still not settled.
+[05-test-fixture-sample.md](05-test-fixture-sample.md) priced each category from its simplest tests and said the follow-up converts "the hardest example of each gap category". That is only partly true: this PR converts the hardest example of two gaps. The other gaps are listed under "Gaps still open", so the trigger is still not settled.
 
 ## What was converted
-Before is `main` at c6d9344, after is 035abb6. Raw output is in [logs/fixture-hard-sample](logs/fixture-hard-sample/).
+Before is `main` at c6d9344, after is 8e34772. Raw output is in [logs/fixture-hard-sample](logs/fixture-hard-sample/).
 
 | Gap | Test | What changed | Lines | Linux runs before / after | Mean s before / after |
 |---|---|---|---|---|---|
-| Unix tool | `an_old_record_from_before_the_boot_is_dead` | `sleep 300` → `testjob sleep 300`; `touch -t 202001010000` → `File::set_modified` (2020-01-01 00:00 UTC) | 12 | 3/3 / 3/3 | 0.5 / 0.6 |
-| `sh -c` with shell features | `a_job_that_starts_again_never_shows_the_attempt_that_failed` | the retry script (counter file, `if`, busy loop, `exit 3`, `sleep 5`) → `testjob count … if-count-below 2 spin 1000000 exit 3 end sleep 5` | 27 | 3/3 / 3/3 | 8.9 / 7.2 |
+| Unix tool | `an_old_record_from_before_the_boot_is_dead` | `sleep 300` → `testjob sleep 300`; `touch -t 202001010000` → `File::set_modified` (2020-01-01 00:00 UTC) | 12 | 3/3 / 3/3 | 0.5 / 0.4 |
+| `sh -c` with shell features | `a_job_that_starts_again_never_shows_the_attempt_that_failed` | the retry script (counter file, `if`, busy loop, `exit 3`, `sleep 5`) → `testjob count … if-count-below 2 spin 1.5 exit 3 end sleep 5` | 29 | 3/3 / 3/3 | 8.9 / 8.2 |
 
-- **Lines:** `experiments/fixture-sample/cost-per-test.py c6d9344 035abb6 <the two tests>` ([cost-per-test.tsv](logs/fixture-hard-sample/cost-per-test.tsv)). rustfmt put each argument of the retry test's `submit` on its own line.
+- **Lines:** `experiments/fixture-sample/cost-per-test.py c6d9344 8e34772 <the two tests>` ([cost-per-test.tsv](logs/fixture-hard-sample/cost-per-test.tsv)). rustfmt put each argument of the retry test's `submit` on its own line.
 - **Runs:** `experiments/fixture-sample/time-sample.sh <label> <the two tests>` on WSL2 Ubuntu (kernel 5.15.167.4), then `summarize-times.py` ([times.tsv](logs/fixture-hard-sample/times.tsv)).
-- **Fixture growth:** `testjob` gained three steps, `spin N`, `count FILE` and `if-count-below N … end`, all standard library only: +48/−2 lines (`git diff --numstat c6d9344 035abb6 -- tests/fixtures/testjob.rs`, [testjob-growth.tsv](logs/fixture-hard-sample/testjob-growth.tsv)).
+- **Fixture growth:** `testjob` gained three steps, `spin SECS`, `count FILE` and `if-count-below N … end`, all standard library only: +48/−2 lines (`git diff --numstat c6d9344 8e34772 -- tests/fixtures/testjob.rs`, [testjob-growth.tsv](logs/fixture-hard-sample/testjob-growth.tsv)).
+- **CPU kept:** the test's last check is that the record's `cpu_secs` is under 0.5 s, so the first attempt must use more. `spin` runs for a time, not a count: on Linux the shell loop used 1.30 s of user CPU and `testjob spin 1.5` 1.54 s ([spin-cpu.txt](logs/fixture-hard-sample/spin-cpu.txt)).
 - **Signals stay:** the touch test still stops the coordinator with `libc::kill(SIGKILL)` and checks processes with `kill(pid, 0)`. As for 05's tests 4 and 9, its Windows meaning waits for ADRs 2 and 3, so its 12 lines don't price that part.
-- **On Windows:** `testjob` built natively at 035abb6 runs the new steps as on Linux ([windows-testjob.txt](logs/fixture-hard-sample/windows-testjob.txt)). The converted tests need the coordinator, which doesn't build on Windows yet: not evaluated.
+- **On Windows:** `testjob` built natively at 8e34772 runs the new steps as on Linux ([windows-testjob.txt](logs/fixture-hard-sample/windows-testjob.txt)). The converted tests need the coordinator, which doesn't build on Windows yet: not evaluated.
 
 ## Gaps still open
 Counts are the "other Unix" groups in 05's [estimate.txt](logs/fixture-sample/estimate.txt).

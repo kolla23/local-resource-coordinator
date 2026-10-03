@@ -1,7 +1,7 @@
-# after: 035abb6 test(fixtures): convert the touch test and the retry test to testjob on Linux 5.15.167.4-microsoft-standard-WSL2, features: --features test-fixtures
-after	an_old_record_from_before_the_boot_is_dead	run 1	pass	0.6 s
-after	an_old_record_from_before_the_boot_is_dead	run 2	pass	0.7 s
-after	an_old_record_from_before_the_boot_is_dead	run 3	pass	0.6 s
-after	a_job_that_starts_again_never_shows_the_attempt_that_failed	run 1	pass	6.6 s
-after	a_job_that_starts_again_never_shows_the_attempt_that_failed	run 2	pass	6.6 s
-after	a_job_that_starts_again_never_shows_the_attempt_that_failed	run 3	pass	8.5 s
+# after: 8e34772 test(fixtures): spin for a time, so the retry test keeps its CPU guard (review round 1) on Linux 5.15.167.4-microsoft-standard-WSL2, features: --features test-fixtures
+after	an_old_record_from_before_the_boot_is_dead	run 1	pass	0.4 s
+after	an_old_record_from_before_the_boot_is_dead	run 2	pass	0.4 s
+after	an_old_record_from_before_the_boot_is_dead	run 3	pass	0.5 s
+after	a_job_that_starts_again_never_shows_the_attempt_that_failed	run 1	pass	7.8 s
+after	a_job_that_starts_again_never_shows_the_attempt_that_failed	run 2	pass	7.8 s
+after	a_job_that_starts_again_never_shows_the_attempt_that_failed	run 3	pass	8.9 s
