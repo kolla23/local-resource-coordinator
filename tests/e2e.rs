@@ -7090,8 +7090,8 @@ fn a_job_that_starts_again_never_shows_the_attempt_that_failed() {
 
     // The first attempt fails, and the second one takes long enough for the
     // test to read the record many times.
-    // The first attempt uses 1.5 s of CPU, three times the limit of the
-    // `cpu_secs` check at the end, which must count the last attempt only.
+    // The first attempt busy-loops 1.5 s, up to three times the limit of the
+    // `cpu_secs` check at the end (less CPU on a crowded machine).
     let counter = h.root.join("attempts");
     let counter = counter.to_str().unwrap();
     let id = h.submit(&[

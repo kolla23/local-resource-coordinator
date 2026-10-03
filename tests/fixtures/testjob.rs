@@ -12,7 +12,7 @@
 //!     print TEXT          write TEXT and a new line to stdout
 //!     print TEXT --stderr write it to stderr instead
 //!     hold-mem MIB SECS   hold MIB mebibytes of touched memory for SECS seconds
-//!     spin SECS           use the CPU in a busy loop for SECS seconds
+//!     spin SECS           busy-loop for SECS seconds (up to SECS of CPU time)
 //!     count FILE          add 1 to the number in FILE (0 if there is no FILE)
 //!     if-count-below N    run the steps up to the next `end` only when the
 //!                         last `count` gave less than N; skip them otherwise
@@ -90,8 +90,8 @@ fn run(args: &[String]) -> Result<u8, String> {
                 std::hint::black_box(&block);
             }
             "spin" => {
-                // A time, not a count of steps: a test that checks the CPU
-                // time of a job needs the same CPU time on every machine.
+                // A time, not a count of steps, which costs far less CPU here
+                // than in a shell. It uses up to SECS of CPU; less on a busy core.
                 let secs = seconds(take(&mut rest, "spin")?)?;
                 let start = std::time::Instant::now();
                 let mut i = 0u64;
