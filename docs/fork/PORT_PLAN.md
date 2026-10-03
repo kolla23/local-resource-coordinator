@@ -20,7 +20,7 @@
 4. R7–R10, each after its ADR.
 5. The Windows backend, starting with removing the `compile_error!` and the `#[cfg(unix)]` module gates in `main.rs`.
 
-Every step is its own PR under about 400 changed lines and runs the review loop.
+Every step is its own PR, planned at about 400 changed lines (not counting logs or generated files), and runs the review loop. A step finishes in its PR; one that grows past about 800 lines (same count) stops for the owner's decision to continue or split.
 
 ## The backend layer: small PRs that change no behaviour on Linux
 
