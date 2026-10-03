@@ -59,7 +59,9 @@ CATS = {
     "libc::kill": re.compile(r"libc::kill\b"),
     "true/false": re.compile(r'"true"|"false"'),
     "echo": re.compile(r'"echo"'),
-    "sh -c / bash": re.compile(r'"sh"|"bash"'),
+    # `"bash"` only as `bash -c`: a bare `"bash"` is also a shell name for
+    # `qex completions` (`["bash", "zsh", "fish"]`), not a shell that runs.
+    "sh -c / bash": re.compile(r'"sh"|"bash",\s*"-c"'),
     "sleep": re.compile(r'"sleep"'),
     "/tmp": re.compile(r"/tmp"),
     "other Unix": re.compile(

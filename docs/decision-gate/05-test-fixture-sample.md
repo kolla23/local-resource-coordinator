@@ -4,11 +4,11 @@
 
 **Short answer.**
 - Of ten sampled tests, nine now run a portable job, `testjob`, in place of Unix programs; the tenth needed no change. Each changed **0 to 11 lines** (mean 3.7). All ten pass 3 of 3 runs on Linux before and after, with no runtime change beyond noise.
-- Scaled to the whole suite, the test port comes to **about 1,580 changed lines**, against **≈3,635** for the product port. The harness adds **60 lines** with a Unix pattern, which are counted but not priced.
+- Scaled to the whole suite, the test port comes to **about 1,580 changed lines** (1,579), against **≈3,635** for the product port. The harness adds **60 lines** with a Unix pattern, which are counted but not priced.
 - **That does not settle the trigger.** Nearly half of the estimate (737 lines, 47%) is 67 tests in an "other Unix" category. Half of them (33) are there only because they name a signal: cheap in lines, with their real cost deferred to ADRs 2 and 3. The other 34 are where the hard porting is. By the first pattern each matches (a pattern, not a reading of what the test does): 7 `UnixListener` or `UnixStream`, mostly fake coordinators; 4 `/proc`; 5 a Unix tool such as `bwrap` or `mkfifo`; 10 another libc item (`flock`, `getuid`, `killpg`, …); 7 another `std::os::unix` item; 1 a `/bin/` path. **None was sampled for its Unix part**: two sampled tests fall in it, but only their `sleep` and `true` were converted, and their signal work was left for ADRs 2 and 3. Its 11 lines per test are borrowed from a sampled test whose 11 lines were mostly rustfmt layout. The test port reaches the product port if those 67 tests average **42 changed lines** each. With half of them signal-only, that needs the other half to average far more, which a fake coordinator rebuilt on named pipes might cost and a `getuid` swap would not. Only converting a few of them will tell.
 - **Verdict: this is a partial measurement, and the whole estimate is likely low.** Each category is priced from its simplest tests, because PORT_PLAN's "first in file order" rule picks the easy ones first. Known gaps:
   - the 67 "other Unix" tests, none sampled for its Unix part;
-  - 29 of the 47 `sh -c` tests use shell features `testjob` can't do (environment variables, loops and `seq`, `dd`, non-UTF-8 output, `/dev/zero`, background processes), but the category is priced from two one-line scripts;
+  - many of the 46 `sh -c` tests use shell features `testjob` can't do (environment variables, loops and `seq`, `dd`, non-UTF-8 output, `/dev/zero`, background processes), but the category is priced from two one-line scripts;
   - fixture growth: the 102-line `testjob` plus the steps the remaining conversions need are not counted;
   - the 38 signal tests, waiting on ADRs 2 and 3.
 
@@ -66,18 +66,18 @@ Time spent per test was not measured: an agent's editing time says nothing about
 |---|---|---|---|
 | other Unix | 67 | 11.0 | 737 |
 | `true` / `false` | 116 | 5.0 | 580 |
-| `sh -c` / `bash` | 47 | 3.0 | 141 |
+| `sh -c` / `bash` | 46 | 3.0 | 138 |
 | `echo` | 16 | 4.0 | 64 |
 | `sleep` | 22 | 2.0 | 44 |
 | `libc::kill` | 2 | 8.0 | 16 |
 | `/tmp` | 1 | 0.0 | 0 |
-| **total** | **271** | | **1,582** |
+| **total** | **270** | | **1,579** |
 
 - **What "other Unix" holds,** in its 67 tests, each in the first group whose pattern it matches (`estimate.txt` prints the groups and their sum): `UnixListener`/`UnixStream` 7, `/proc` 4, a Unix tool 5, a libc item other than `kill` and the `SIG*` constants 10, another `std::os::unix` item 7, a `"/bin/"` path, `.sh` script or `"cat"` 1, and only a signal name 33. The groups name patterns, not uses: one `/proc` test matches through `bwrap`'s `--proc /proc` argument, and one socket test is a client of the real coordinator rather than a fake one.
-- **Not a bound either way:** pricing all 271 tests at 11 lines gives 2,981, but that is no upper bound, because the unsampled category isn't capped at the highest sampled cost. Helpers aren't followed, so a test that uses Unix only through a helper doesn't count, and that pulls the other way.
-- **Break-even:** with the other categories as estimated (845 lines), the test port reaches the product port's 3,635 lines if the 67 "other Unix" tests average 42 changed lines each.
+- **Not a bound either way:** pricing all 270 tests at 11 lines gives 2,970, but that is no upper bound, because the unsampled category isn't capped at the highest sampled cost. Helpers aren't followed, so a test that uses Unix only through a helper doesn't count, and that pulls the other way.
+- **Break-even:** with the other categories as estimated (842 lines), the test port reaches the product port's 3,635 lines if the 67 "other Unix" tests average 42 changed lines each.
 - **Why `libc::kill` has 2 tests:** "other Unix" is the most expensive category, and nearly every test that calls `libc::kill` also names a signal (`SIGINT`, `SIGTERM`), so it counts there.
-- **What's not a Unix pattern:** `"kill"` in these tests is qex's own `kill` subcommand (`h.ok(&["kill", &id])`), and `SIGNAL` appears only as a word; neither counts. Step 3's `e2e-unix.py` counted `"kill"` and helper code, so its "281 tests using Unix" (at c693c90, the commit its log names; squashed into 7e4f9c6 on `main`; 326 tests) is too high; 271 here (at d73c760, 329 tests).
+- **What's not a Unix pattern:** `"kill"` in these tests is qex's own `kill` subcommand (`h.ok(&["kill", &id])`), and `SIGNAL` appears only as a word; neither counts. Step 3's `e2e-unix.py` counted `"kill"` and helper code, so its "281 tests using Unix" (at c693c90, the commit its log names; squashed into 7e4f9c6 on `main`; 326 tests) is too high; 270 here (at d73c760, 329 tests). A bare `"bash"` counts only as `bash -c`: in `the_completions_hold_the_commands_of_qex` it is a shell name for `qex completions`, not a shell that runs.
 - **Harness:** the harness and helpers outside the tests have 60 lines with a Unix pattern (comments excluded). They are not priced, because the sample didn't touch them: `Harness::stopped` alone uses `libc::kill` and `/proc`.
 - **What lines don't capture:** 38 tests name a signal (`libc::kill` or a `SIG*` name). Changing their lines is cheap; deciding what they test on Windows is the work that ADR 2 (who may signal a job) and ADR 3 (exit classification and `--signal`) must do first. This sample doesn't price that.
 
@@ -100,7 +100,7 @@ Time spent per test was not measured: an agent's editing time says nothing about
 - macOS.
 - How the 38 signal tests port: that waits for ADRs 2 and 3.
 - The cost of the 67 "other Unix" tests: none was sampled for its Unix part.
-- The cost of the 29 `sh -c` tests whose scripts use shell features `testjob` can't do: the category is priced from two one-line scripts.
+- The cost of the `sh -c` tests whose scripts use shell features `testjob` can't do (many of the 46): the category is priced from two one-line scripts.
 - Fixture growth: the 102-line `testjob` and the steps the remaining conversions need.
 - The cost of the 60 harness lines.
 - Only one machine was measured, with 3 runs per test (10 for the one whose mean moved).
