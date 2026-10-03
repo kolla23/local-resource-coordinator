@@ -23,11 +23,13 @@ where each sampled test is filed (chosen for -> filed under, lines):
 
 'other Unix': 66 tests, 726 of 1566 lines (46%); 2 of them sampled, for other categories: 2 lines, 8 lines
 break-even: the test port reaches 3635 lines if the 66 'other Unix' tests average 42 changed lines each
+  'other Unix' tests that use a Unix socket (UnixListener or UnixStream): 7
   'other Unix' tests that use std::os::unix: 20
   'other Unix' tests that use /proc: 5
   'other Unix' tests that use another Unix tool: 4
-  'other Unix' tests that use another libc call: 45
+  'other Unix' tests that use a libc item other than kill and the SIG* constants: 11
   'other Unix' tests that use a signal name: 36
+  'other Unix' tests there only because they name a signal: 33
 every Unix test at the highest sampled cost: 2970
 tests that name a signal (libc::kill or a SIG name): 38
 harness and helper lines with a Unix pattern (comments excluded): 56

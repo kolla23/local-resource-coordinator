@@ -62,14 +62,22 @@ CATS = {
 }
 
 # What the "other Unix" tests hold, for the write-up. A test can use several.
+# `libc::SIG*` constants are signal names (arguments to `libc::kill`), so the
+# libc item excludes them.
+TOOLS = r"Command::new\(\"(?:ps|mkfifo|bwrap|lsof|chmod|cp|touch|printf)\"\)"
 KINDS = {
+    "a Unix socket (UnixListener or UnixStream)": re.compile(r"Unix(?:Listener|Stream)"),
     "std::os::unix": re.compile(r"std::os::unix"),
     "/proc": re.compile(r"/proc"),
-    "another Unix tool": re.compile(
-        r"Command::new\(\"(?:ps|mkfifo|bwrap|lsof|chmod|cp|touch|printf)\"\)"),
-    "another libc call": re.compile(r"libc::(?!kill\b)\w+"),
+    "another Unix tool": re.compile(TOOLS),
+    "a libc item other than kill and the SIG* constants": re.compile(
+        r"libc::(?!kill\b|SIG)\w+"),
     "a signal name": re.compile(SIGNAL),
 }
+# The "other Unix" patterns other than signal names: a test that matches none
+# of these is in the category only because it names a signal.
+NOT_SIGNAL = re.compile(r"libc::(?!kill\b|SIG)\w+|std::os::unix|/proc|\"/bin/|\.sh\"|\"cat\"|"
+                        + TOOLS)
 
 UNIX = re.compile(r'"sh"|"bash"|"/bin/|"sleep"|"true"|"false"|"cat"|"echo"|libc::'
                   r'|std::os::unix|' + SIGNAL + r'|/proc|/tmp|\.sh"')
@@ -153,6 +161,9 @@ def main():
         n = sum(1 for name, body in tests.items()
                 if filed[name] == "other Unix" and rx.search(body))
         print(f"  'other Unix' tests that use {label}: {n}")
+    only = sum(1 for name, body in tests.items()
+               if filed[name] == "other Unix" and not NOT_SIGNAL.search(body))
+    print(f"  'other Unix' tests there only because they name a signal: {only}")
     print(f"every Unix test at the highest sampled cost: {unix * cost['other Unix']:.0f}")
     signals = sum(1 for body in tests.values() if re.search(r"libc::kill|" + SIGNAL, body))
     print(f"tests that name a signal (libc::kill or a SIG name): {signals}")
