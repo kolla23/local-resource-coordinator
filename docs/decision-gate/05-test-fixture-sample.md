@@ -5,7 +5,14 @@
 **Short answer.**
 - Of ten sampled tests, nine now run a portable job, `testjob`, in place of Unix programs; the tenth needed no change. Each changed **0 to 11 lines** (mean 3.7). All ten pass 3 of 3 runs on Linux before and after, with no runtime change beyond noise.
 - Scaled to the whole suite, the test port comes to **about 1,580 changed lines**, against **≈3,635** for the product port. The harness adds **60 lines** with a Unix pattern, which are counted but not priced.
-- **That does not settle the trigger.** Nearly half of the estimate (737 lines, 47%) is 67 tests in an "other Unix" category. Half of them (33) are there only because they name a signal: cheap in lines, with their real cost deferred to ADRs 2 and 3. The other 34 are where the hard porting is. By the first pattern each matches (a pattern, not a reading of what the test does): 7 `UnixListener` or `UnixStream`, mostly fake coordinators; 4 `/proc`; 5 a Unix tool such as `bwrap` or `mkfifo`; 10 another libc item (`flock`, `getuid`, `killpg`, …); 7 another `std::os::unix` item; 1 a `/bin/` path. **None was sampled for its Unix part**: two sampled tests fall in it, but only their `sleep` and `true` were converted, and their signal work was left for ADRs 2 and 3. Its 11 lines per test are borrowed from a sampled test whose 11 lines were mostly rustfmt layout. The test port reaches the product port if those 67 tests average **42 changed lines** each. With half of them signal-only, that needs the other half to average far more, which a fake coordinator rebuilt on named pipes might cost and a `getuid` swap would not. Only converting a few of them will tell. **Verdict: not met on this estimate, but not shown either way until a few "other Unix" tests are converted and measured.**
+- **That does not settle the trigger.** Nearly half of the estimate (737 lines, 47%) is 67 tests in an "other Unix" category. Half of them (33) are there only because they name a signal: cheap in lines, with their real cost deferred to ADRs 2 and 3. The other 34 are where the hard porting is. By the first pattern each matches (a pattern, not a reading of what the test does): 7 `UnixListener` or `UnixStream`, mostly fake coordinators; 4 `/proc`; 5 a Unix tool such as `bwrap` or `mkfifo`; 10 another libc item (`flock`, `getuid`, `killpg`, …); 7 another `std::os::unix` item; 1 a `/bin/` path. **None was sampled for its Unix part**: two sampled tests fall in it, but only their `sleep` and `true` were converted, and their signal work was left for ADRs 2 and 3. Its 11 lines per test are borrowed from a sampled test whose 11 lines were mostly rustfmt layout. The test port reaches the product port if those 67 tests average **42 changed lines** each. With half of them signal-only, that needs the other half to average far more, which a fake coordinator rebuilt on named pipes might cost and a `getuid` swap would not. Only converting a few of them will tell.
+- **Verdict: this is a partial measurement, and the whole estimate is likely low.** Each category is priced from its simplest tests, because PORT_PLAN's "first in file order" rule picks the easy ones first. Known gaps:
+  - the 67 "other Unix" tests, none sampled for its Unix part;
+  - 29 of the 47 `sh -c` tests use shell features `testjob` can't do (environment variables, loops and `seq`, `dd`, non-UTF-8 output, `/dev/zero`, background processes), but the category is priced from two one-line scripts;
+  - fixture growth: the 102-line `testjob` plus the steps the remaining conversions need are not counted;
+  - the 38 signal tests, waiting on ADRs 2 and 3.
+
+  **The trigger decision waits for the follow-up PR**, which converts the hardest example of each gap category rather than the first.
 - What lines don't capture: **38 tests** send or check a Unix signal. Their Windows meaning waits for ADRs 2 and 3, so their real cost is not known yet.
 
 ## Method
@@ -93,5 +100,7 @@ Time spent per test was not measured: an agent's editing time says nothing about
 - macOS.
 - How the 38 signal tests port: that waits for ADRs 2 and 3.
 - The cost of the 67 "other Unix" tests: none was sampled for its Unix part.
+- The cost of the 29 `sh -c` tests whose scripts use shell features `testjob` can't do: the category is priced from two one-line scripts.
+- Fixture growth: the 102-line `testjob` and the steps the remaining conversions need.
 - The cost of the 60 harness lines.
 - Only one machine was measured, with 3 runs per test (10 for the one whose mean moved).
