@@ -37,6 +37,12 @@ SAMPLE = {
     "the_harness_stops_a_coordinator_on_a_long_socket_path": "/tmp",
 }
 
+# Not `"kill"`: in tests/e2e.rs that is qex's own `kill` subcommand
+# (`h.ok(&["kill", &id])`), never a Unix program; no test runs
+# `Command::new("kill")`. And not `SIGNAL`, which is a word in comments and
+# in a completion string, not a signal.
+SIGNAL = r"SIG(?!NAL\b)[A-Z]+\b"
+
 CATS = {
     "libc::kill": re.compile(r"libc::kill\b"),
     "true/false": re.compile(r'"true"|"false"'),
@@ -45,12 +51,26 @@ CATS = {
     "sleep": re.compile(r'"sleep"'),
     "/tmp": re.compile(r"/tmp"),
     "other Unix": re.compile(
-        r"libc::(?!kill\b)\w+|std::os::unix|/proc|\"/bin/|\.sh\"|\"cat\"|\"kill\""
-        r"|SIG[A-Z]+"
+        r"libc::(?!kill\b)\w+|std::os::unix|/proc|\"/bin/|\.sh\"|\"cat\""
+        r"|" + SIGNAL +
         r"|Command::new\(\"(?:ps|mkfifo|bwrap|lsof|chmod|cp|touch|printf)\"\)"),
 }
+# The product port, in lines of code that change for Windows
+# (docs/decision-gate/03-unix-inventory.md, "Short answer").
+PRODUCT = 3635
+
+# What the "other Unix" tests hold, for the write-up. A test can use several.
+KINDS = {
+    "std::os::unix": re.compile(r"std::os::unix"),
+    "/proc": re.compile(r"/proc"),
+    "another Unix tool": re.compile(
+        r"Command::new\(\"(?:ps|mkfifo|bwrap|lsof|chmod|cp|touch|printf)\"\)"),
+    "another libc call": re.compile(r"libc::(?!kill\b)\w+"),
+    "a signal name": re.compile(SIGNAL),
+}
+
 UNIX = re.compile(r'"sh"|"bash"|"/bin/|"sleep"|"true"|"false"|"cat"|"echo"|libc::'
-                  r'|std::os::unix|"kill"|SIG[A-Z]+|/proc|/tmp|\.sh"')
+                  r'|std::os::unix|' + SIGNAL + r'|/proc|/tmp|\.sh"')
 
 
 def costs(path):
@@ -96,11 +116,28 @@ def main():
         total += lines
         print(f"{c}\t{counted[c]}\t{cost[c]:.1f}\t{lines:.0f}")
     print(f"total\t{sum(counted.values())}\t\t{total:.0f}")
-    print(f"upper case (every Unix test at the highest cost): "
-          f"{sum(counted.values()) * cost['other Unix']:.0f}")
+    print(f"every Unix test at the highest sampled cost: "
+          f"{sum(counted.values()) * cost['other Unix']:.0f} (not an upper bound: "
+          f"'other Unix' has no sample)")
+
+    # The share that rests on the unsampled category, what it holds, and the
+    # cost per test at which the test port would reach the product port.
+    other = counted["other Unix"] * cost["other Unix"]
+    print(f"'other Unix' share of the total: {other:.0f} of {total:.0f} "
+          f"({100 * other / total:.0f}%), with no sample")
+    if counted["other Unix"]:
+        rest = total - other
+        print(f"break-even: the test port reaches {PRODUCT} lines if the "
+              f"{counted['other Unix']} 'other Unix' tests average "
+              f"{(PRODUCT - rest) / counted['other Unix']:.0f} changed lines each")
+    for label, rx in KINDS.items():
+        n = sum(1 for b in tests if UNIX.search(b) and CATS["other Unix"].search(b)
+                and not any(CATS[c].search(b) for c in order if cost[c] > cost["other Unix"])
+                and rx.search(b))
+        print(f"  'other Unix' tests that use {label}: {n}")
     print(f"tests: {len(tests)}; Unix tests: {sum(counted.values()) + unmatched}; "
           f"Unix tests in no category: {unmatched}")
-    signals = sum(1 for b in tests if re.search(r"libc::kill|SIG[A-Z]+", b))
+    signals = sum(1 for b in tests if re.search(r"libc::kill|" + SIGNAL, b))
     print(f"tests that name a signal (libc::kill or a SIG name): {signals}")
 
     # Harness and helpers: every line outside a test body that has a Unix pattern.

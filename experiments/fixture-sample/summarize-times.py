@@ -22,9 +22,12 @@ def main():
     before, after = read(sys.argv[1]), read(sys.argv[2])
     print("test\tbefore pass\tbefore mean s\tafter pass\tafter mean s")
     for test in before:
-        b, a = before[test], after.get(test, [])
-        print(f"{test}\t{sum(r == 'pass' for r, _ in b)}/{len(b)}\t{sum(s for _, s in b) / len(b):.1f}"
-              f"\t{sum(r == 'pass' for r, _ in a)}/{len(a)}\t{sum(s for _, s in a) / max(len(a), 1):.1f}")
+        cells = [test]
+        for runs in (before[test], after.get(test, [])):
+            passed = sum(r == "pass" for r, _ in runs)
+            mean = sum(s for _, s in runs) / max(len(runs), 1)
+            cells += [f"{passed}/{len(runs)}", f"{mean:.1f}"]
+        print("\t".join(cells))
 
 
 if __name__ == "__main__":

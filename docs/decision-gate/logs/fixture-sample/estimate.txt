@@ -1,13 +1,20 @@
 category	tests	lines per test	estimate
-other Unix	129	11.0	1419
+other Unix	80	11.0	880
 libc::kill	1	8.0	8
-true/false	89	5.0	445
-echo	13	4.0	52
-sh -c / bash	40	3.0	120
-sleep	9	2.0	18
+true/false	114	5.0	570
+echo	16	4.0	64
+sh -c / bash	44	3.0	132
+sleep	21	2.0	42
 /tmp	1	0.0	0
-total	282		2062
-upper case (every Unix test at the highest cost): 3102
-tests: 329; Unix tests: 282; Unix tests in no category: 0
-tests that name a signal (libc::kill or a SIG name): 48
-harness and helper lines with a Unix pattern (comments excluded): 61
+total	277		1696
+every Unix test at the highest sampled cost: 3047 (not an upper bound: 'other Unix' has no sample)
+'other Unix' share of the total: 880 of 1696 (52%), with no sample
+break-even: the test port reaches 3635 lines if the 80 'other Unix' tests average 35 changed lines each
+  'other Unix' tests that use std::os::unix: 25
+  'other Unix' tests that use /proc: 10
+  'other Unix' tests that use another Unix tool: 6
+  'other Unix' tests that use another libc call: 48
+  'other Unix' tests that use a signal name: 45
+tests: 329; Unix tests: 277; Unix tests in no category: 0
+tests that name a signal (libc::kill or a SIG name): 46
+harness and helper lines with a Unix pattern (comments excluded): 56

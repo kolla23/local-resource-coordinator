@@ -37,6 +37,7 @@ for t in "${tests[@]}"; do
         if cargo test -q "${features[@]}" --test e2e -- --exact "$t" \
             --test-threads=1 >/dev/null 2>&1; then result=pass; else result=FAIL; fi
         end=$(date +%s.%N)
-        printf '%s\t%s\trun %s\t%s\t%.1f s\n' "$label" "$t" "$run" "$result" "$(echo "$end - $start" | bc)"
+        secs=$(echo "$end - $start" | bc)
+        printf '%s\t%s\trun %s\t%s\t%.1f s\n' "$label" "$t" "$run" "$result" "$secs"
     done
 done

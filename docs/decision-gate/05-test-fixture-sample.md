@@ -4,8 +4,9 @@
 
 **Short answer.**
 - Of ten sampled tests, nine now run a portable job, `testjob`, in place of Unix programs; the tenth needed no change. Each changed **0 to 11 lines** (mean 3.7). All ten pass 3 of 3 runs on Linux before and after, with no runtime change beyond noise.
-- Scaled to the whole suite, the test port is **about 2,060 changed lines**, and at most **3,100** if every Unix-using test cost as much as the most expensive sampled one. The harness adds **61 lines** with a Unix pattern, priced separately. The product port is estimated at **≈3,635 lines**. So on this measure **the test port costs less than the product port, and the trigger is not met.**
-- What lines don't capture: **48 tests** send or check a Unix signal. Their Windows meaning waits for ADRs 2 and 3, so their real cost is not known yet.
+- Scaled to the whole suite, the test port comes to **about 1,700 changed lines**, against **≈3,635** for the product port. The harness adds **56 lines** with a Unix pattern, priced separately.
+- **That does not settle the trigger.** Half of the estimate (880 lines, 52%) is 80 tests in an "other Unix" category that has **no sample**: Unix sockets standing in for a coordinator, `/proc`, `ps`, `mkfifo` and other libc calls. These are the hardest tests to port, and their 11 lines each are borrowed from a sampled test whose 11 lines were mostly rustfmt layout. The test port reaches the product port if those 80 tests average **35 changed lines** each, which a fake coordinator rebuilt on named pipes could well cost. **Verdict: not met on this estimate, but not shown either way until a few "other Unix" tests are converted and measured.**
+- What lines don't capture: **46 tests** send or check a Unix signal. Their Windows meaning waits for ADRs 2 and 3, so their real cost is not known yet.
 
 ## Method
 "Before" is `main` at d73c760, the commit before #40; "after" is `main` at db1abd0, #40's squash commit. Everything below runs from the repository root. Measurements were taken on one machine: WSL2 Ubuntu (kernel 5.15.167.4), Linux build, 12 CPUs, 7 GB RAM.
@@ -55,20 +56,22 @@ Time spent per test was not measured: an agent's editing time says nothing about
 
 | Category | Tests | Lines per test | Estimate |
 |---|---|---|---|
-| other Unix | 129 | 11.0 | 1,419 |
-| `true` / `false` | 89 | 5.0 | 445 |
-| `sh -c` / `bash` | 40 | 3.0 | 120 |
-| `echo` | 13 | 4.0 | 52 |
-| `sleep` | 9 | 2.0 | 18 |
+| other Unix | 80 | 11.0 | 880 |
+| `true` / `false` | 114 | 5.0 | 570 |
+| `sh -c` / `bash` | 44 | 3.0 | 132 |
+| `echo` | 16 | 4.0 | 64 |
+| `sleep` | 21 | 2.0 | 42 |
 | `libc::kill` | 1 | 8.0 | 8 |
 | `/tmp` | 1 | 0.0 | 0 |
-| **total** | **282** | | **2,062** |
+| **total** | **277** | | **1,696** |
 
-- **Why `libc::kill` has 1 test:** "other Unix" is the most expensive category, and nearly every test that calls `libc::kill` also names a signal (`SIGINT`, `SIGTERM`), so it counts there at 11 lines.
-- **Upper case:** all 282 tests at 11 lines each come to 3,102.
-- **Harness:** the harness and helpers outside the tests have 61 lines with a Unix pattern (comments excluded). They are not priced, because the sample didn't touch them: `Harness::stopped` alone uses `libc::kill` and `/proc`.
-- **Lower bound:** helpers aren't followed, so a test that uses Unix only through a helper doesn't count.
-- **What lines don't capture:** 48 tests name a signal (`libc::kill` or a `SIG*` name). Changing their lines is cheap; deciding what they test on Windows is the work that ADR 2 (who may signal a job) and ADR 3 (exit classification and `--signal`) must do first. This sample doesn't price that.
+- **What "other Unix" holds,** in its 80 tests (a test can count in several): 48 call another libc function, 45 name a signal, 25 use `std::os::unix` (Unix-socket stand-ins for a coordinator, `PermissionsExt`, `ExitStatusExt`), 10 read `/proc` and 6 start another Unix tool.
+- **Not a bound either way:** pricing all 277 tests at 11 lines gives 3,047, but that is no upper bound, because the unsampled category isn't capped at the highest sampled cost. Helpers aren't followed, so a test that uses Unix only through a helper doesn't count, and that pulls the other way.
+- **Break-even:** with the sampled categories as measured (816 lines), the test port reaches the product port's 3,635 lines if the 80 "other Unix" tests average 35 changed lines each.
+- **Why `libc::kill` has 1 test:** "other Unix" is the most expensive category, and nearly every test that calls `libc::kill` also names a signal (`SIGINT`, `SIGTERM`), so it counts there.
+- **What's not a Unix pattern:** `"kill"` in these tests is qex's own `kill` subcommand (`h.ok(&["kill", &id])`), and `SIGNAL` appears only as a word; neither counts. Step 3's `e2e-unix.py` counted `"kill"`, so its "281 tests using Unix" is a few too high; 277 here.
+- **Harness:** the harness and helpers outside the tests have 56 lines with a Unix pattern (comments excluded). They are not priced, because the sample didn't touch them: `Harness::stopped` alone uses `libc::kill` and `/proc`.
+- **What lines don't capture:** 46 tests name a signal (`libc::kill` or a `SIG*` name). Changing their lines is cheap; deciding what they test on Windows is the work that ADR 2 (who may signal a job) and ADR 3 (exit classification and `--signal`) must do first. This sample doesn't price that.
 
 ## Changes to the plan
 1. **`testjob` takes a list of steps.** PORT_PLAN lists four subcommands. `sh -c "echo bad >&2; exit 9"` needs two in one job, so the arguments are a sequence (`testjob print bad --stderr exit 9`). The four subcommands are unchanged.
@@ -86,6 +89,7 @@ Time spent per test was not measured: an agent's editing time says nothing about
 
 ## Not evaluated
 - macOS.
-- How the 48 signal tests port: that waits for ADRs 2 and 3.
-- The cost of the 61 harness lines.
+- How the 46 signal tests port: that waits for ADRs 2 and 3.
+- The cost of the 80 "other Unix" tests: no test of that kind was sampled.
+- The cost of the 56 harness lines.
 - Only one machine was measured, with 3 runs per test (10 for the one whose mean moved).
