@@ -16,8 +16,9 @@ Every function in a changed .rs file at <base> must pair with its own
 byte-identical copy at <head>, each copy used once: first in the same file, then
 in another file (a move). The item is the function, from its visibility and
 qualifiers on whatever line they start, with the attributes and comments directly
-above it; a function inside any { } block (mod, impl, trait, fn) must keep the
-same enclosing headers, each read whole across lines, and may not move. For a
+above it. A function inside any { } block (mod, impl, trait, fn) may not move,
+and counts as unchanged only if its whole top-level block, from the header to
+the closing brace, is byte-identical in the same file at <head>. For a
 move, only the call path may differ: a leading crate::, super::, self::, sys::,
 os:: or os::<name>:: on a path in the body's code (not in the signature, a
 string, a comment or a use statement, not after another ::). Prints each move,
@@ -148,23 +149,38 @@ def functions(text):
             i = line(p - 1) - 1
         return i
 
-    def header(b):
-        """From the previous item's end, so a header split over lines (a `where` clause,
-        `impl<T>` then `for A<T>`) counts whole."""
-        start = max(masked.rfind(c, 0, b) for c in ";{}") + 1
-        return " ".join(plain[start:b].split())
+    item_end, brace, paren = [], 0, 0
+    for row in mlines:
+        for ch in row:
+            brace += (ch == "{") - (ch == "}")
+            paren += (ch in "([") - (ch in ")]")
+        item_end.append(brace == 0 and paren == 0 and row.rstrip().endswith(("}", ";")))
 
-    open_at, stack, scan = {}, [], 0
+    def block(b):
+        """The whole top-level item around the brace at b, from the line after the previous
+        item's end, so a header with `;` or `{ }` inside brackets can't be cut short."""
+        k = line(b) - 2
+        while k >= 0 and not item_end[k]:
+            k -= 1
+        k += 1
+        while k < line(b) - 1 and not lines[k].strip():
+            k += 1
+        stop = text.find("\n", close.get(b, len(text)))
+        return text[starts[k]:len(text) if stop < 0 else stop]
+
+    open_at, close, stack = {}, {}, []
+    fns = iter(FN.finditer(masked))
+    upcoming = next(fns, None)
+    for pos, ch in enumerate(masked):
+        while upcoming and upcoming.start() == pos:
+            open_at[pos] = list(stack)
+            upcoming = next(fns, None)
+        if ch == "{":
+            stack.append(pos)
+        elif ch == "}" and stack:
+            close[stack.pop()] = pos
     for m in FN.finditer(masked):
-        while scan < m.start():
-            if masked[scan] == "{":
-                stack.append(scan)
-            elif masked[scan] == "}" and stack:
-                stack.pop()
-            scan += 1
-        open_at[m.start()] = list(stack)
-    for m in FN.finditer(masked):
-        scope = " / ".join(header(b) for b in open_at[m.start()])
+        outer = block(open_at[m.start()][0]) if open_at[m.start()] else ""
         depth, j = 0, m.end()
         while j < len(masked) and not (depth == 0 and masked[j] in "{;"):
             depth += (masked[j] in "([") - (masked[j] in ")]")
@@ -183,7 +199,7 @@ def functions(text):
         end = text.find("\n", k)
         found.append({
             "name": m[1], "cfg": " ".join(plain[starts[top]:q].split()), "line": first,
-            "scope": scope, "nested": bool(open_at[m.start()]),
+            "outer": outer, "nested": bool(open_at[m.start()]),
             "item": text[starts[top]:len(text) if end < 0 else end],
             "body_at": j - starts[top],
             "lines": range(top + 1, line(k) + 1),
@@ -246,7 +262,7 @@ def main():
             if i in pairs:
                 continue
             for j, (g_file, g) in enumerate(new):
-                if j in claimed or g["name"] != fn["name"] or g["scope"] != fn["scope"] \
+                if j in claimed or g["name"] != fn["name"] or g["outer"] != fn["outer"] \
                         or (kind == "in place") != (g_file == f) \
                         or (kind != "in place" and fn["nested"]):
                     continue
