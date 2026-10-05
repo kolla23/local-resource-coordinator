@@ -75,7 +75,8 @@ def mask(text, strings=True):
                     j += 1
             blank(i, j, literal=False)
             i = j
-        elif (m := re.match(r'b?r(#*)"', text[i:i + 260])) and (i == 0 or not text[i - 1].isalnum()):
+        elif (m := re.match(r'[bc]?r(#*)"', text[i:i + 260])) \
+                and (i == 0 or not text[i - 1].isalnum()):
             end = text.find('"' + m[1], i + len(m[0]))
             j = n if end < 0 else end + 1 + len(m[1])
             blank(i, j)
@@ -212,8 +213,9 @@ def same(a, b, ignore_paths):
 
 def diff_lines(base, head, path):
     removed, added, o, n, o_left, n_left = {}, {}, 0, 0, 0, 0
-    rows = git("diff", "-U0", "--text", "--no-color", "--no-renames", "--no-ext-diff",
-               "--no-textconv", "--ignore-submodules=none", base, head, "--", path).split("\n")
+    rows = git("--literal-pathspecs", "diff", "-U0", "--text", "--no-color", "--no-renames",
+               "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", base, head, "--",
+               path).split("\n")
     for row in rows:
         if o_left == 0 and n_left == 0 and (h := HUNK.match(row)):
             o, n = int(h[1]), int(h[3])
