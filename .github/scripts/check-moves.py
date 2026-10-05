@@ -21,7 +21,8 @@ same enclosing headers, each read whole across lines, and may not move. For a
 move, only the call path may differ: a leading crate::, super::, self::, sys::,
 os:: or os::<name>:: on a path in the body's code (not in the signature, a
 string, a comment or a use statement, not after another ::). Prints each move,
-then every changed line that is not part of a move. Exits 1 when a function has
+then every changed line that is not part of a move, in every changed file: lines
+outside .rs files and file mode changes never are. Exits 1 when a function has
 no copy, 2 on a usage error."""
 CALL_PATH = re.compile(r"(?<![\w:])(?:(?:crate|super|self|sys)::|os::(?:\w+::)?)+")
 FN = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
@@ -36,12 +37,12 @@ def git(*args):
     if r.returncode != 0:
         sys.exit(f"check-moves: `git {' '.join(args)}` failed: "
                  f"{r.stderr.decode('utf-8', 'replace').strip()}")
-    return r.stdout.decode("utf-8")
+    return r.stdout.decode("utf-8", "surrogateescape")
 
 
 def show(rev, path):
     r = subprocess.run(["git", "cat-file", "blob", f"{rev}:{path}"], capture_output=True)
-    return r.stdout.decode("utf-8") if r.returncode == 0 else None
+    return r.stdout.decode("utf-8", "surrogateescape") if r.returncode == 0 else None
 
 
 def mask(text, strings=True):
@@ -212,7 +213,7 @@ def same(a, b, ignore_paths):
 def diff_lines(base, head, path):
     removed, added, o, n, o_left, n_left = {}, {}, 0, 0, 0, 0
     rows = git("diff", "-U0", "--text", "--no-color", "--no-renames", "--no-ext-diff",
-               "--no-textconv", base, head, "--", path).split("\n")
+               "--no-textconv", "--ignore-submodules=none", base, head, "--", path).split("\n")
     for row in rows:
         if o_left == 0 and n_left == 0 and (h := HUNK.match(row)):
             o, n = int(h[1]), int(h[3])
@@ -230,10 +231,13 @@ def main():
         sys.exit(2)
     base, head = sys.argv[1], sys.argv[2] if len(sys.argv) == 3 else "HEAD"
     os.chdir(git("rev-parse", "--show-toplevel").strip())
-    files = [f for f in git("diff", "--name-only", "-z", "--no-renames", base, head, "--", "*.rs")
-             .split("\0") if f]
-    old = [(f, fn) for f in files if (t := show(base, f)) is not None for fn in functions(t)]
-    new = [(f, g) for f in files if (t := show(head, f)) is not None for g in functions(t)]
+    sys.stdout.reconfigure(errors="backslashreplace")
+    raw = git("diff", "--raw", "-z", "--no-renames", "--no-abbrev", "--ignore-submodules=none",
+              base, head).split("\0")
+    modes = {f: meta.split()[:2] for meta, f in zip(raw[0::2], raw[1::2]) if f}
+    files, rs = list(modes), [f for f in modes if f.endswith(".rs")]
+    old = [(f, fn) for f in rs if (t := show(base, f)) is not None for fn in functions(t)]
+    new = [(f, g) for f in rs if (t := show(head, f)) is not None for g in functions(t)]
     pairs, claimed = {}, set()
     for kind in ("in place", "identical", "identical apart from call paths"):
         for i, (f, fn) in enumerate(old):
@@ -266,6 +270,9 @@ def main():
     rest = []
     for f in files:
         removed, added = diffs[f]
+        before, after = modes[f]
+        if "000000" not in (before[1:], after) and before[1:] != after:
+            rest.append(f"  {f}: mode {before[1:]} -> {after}")
         rest += [f"  {f}:{o} -{t}" for o, t in removed.items() if (f, o) not in moved_old]
         rest += [f"  {f}:{n} +{t}" for n, t in added.items() if (f, n) not in moved_new]
     print(f"\n{len(rest)} changed lines are not part of a move" + (":" if rest else "."))

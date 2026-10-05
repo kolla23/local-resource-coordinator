@@ -42,7 +42,7 @@ WHERE_IMPL = "impl %s\nwhere\n    %s: Sized,\n{\n%s}\n"
 GO = "    fn go(&self) -> u32 {\n        1\n    }\n"
 
 
-def run(base, head, args=None, config=(), attributes="", cwd=""):
+def run(base, head, args=None, config=(), attributes="", cwd="", chmod=()):
     repo = tempfile.mkdtemp()
     try:
         def g(*a):
@@ -61,9 +61,15 @@ def run(base, head, args=None, config=(), attributes="", cwd=""):
                     os.remove(path)
                     continue
                 os.makedirs(os.path.dirname(path), exist_ok=True)
+                if isinstance(files[name], bytes):
+                    with open(path, "wb") as f:
+                        f.write(files[name])
+                    continue
                 with open(path, "w", newline="\n") as f:
                     f.write(files[name])
             g("add", "-A")
+            for name in chmod if msg == "head" else ():
+                g("update-index", "--chmod=+x", name)
             g("commit", "-q", "--allow-empty", "-m", msg)
         args = ["HEAD~1", "HEAD"] if args is None else args
         p = subprocess.run([sys.executable, CHECK, *args], cwd=os.path.join(repo, cwd),
@@ -291,6 +297,15 @@ CASES = [
      {"src/a.rs": None,
       "src/b.rs": "/*\n  note\n*/\n#[cfg(unix)] // why\n#[inline] pub fn f() {}\n"},
      0, ["moved: src/a.rs:5 f [#[cfg(unix)] #[inline]] -> src/b.rs:5  identical"]),
+    ("a Cargo.toml change next to a real move is listed",
+     {"src/a.rs": "pub fn f() {}\n", "Cargo.toml": "[features]\nx = []\n"},
+     {"src/a.rs": None, "src/b.rs": "pub fn f() {}\n",
+      "Cargo.toml": '[features]\nx = []\ndefault = ["x"]\n'},
+     0, ["moved: src/a.rs:1 f -> src/b.rs:1  identical", "1 changed lines",
+         'Cargo.toml:3 +default = ["x"]']),
+    ("a change in a file that is not UTF-8 is listed",
+     {"data.bin": b"a\xff\n"}, {"data.bin": b"a\xfe\n"},
+     0, ["2 changed lines", "data.bin:1 -a\\udcff", "data.bin:1 +a\\udcfe"]),
 ]
 
 
@@ -314,6 +329,13 @@ def main():
     ok = rc == 1 and "NOT A MOVE: tests/t.rs:1 t" in out and "src/a.rs:2 +static X" in out
     failed += not ok
     print(f"{'ok  ' if ok else 'FAIL'} run from a subfolder, it still checks the whole repository")
+    if not ok:
+        print("\n".join("     " + r for r in out.splitlines()))
+    rc, out = run({"src/a.rs": "pub fn f() {}\n", "run.sh": "echo\n"},
+                  {"src/a.rs": "pub fn f() {}\n", "run.sh": "echo\n"}, chmod=["run.sh"])
+    ok = rc == 0 and "run.sh: mode 100644 -> 100755" in out and "1 changed lines" in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} a file mode change is listed")
     if not ok:
         print("\n".join("     " + r for r in out.splitlines()))
     for name, config, attributes in (

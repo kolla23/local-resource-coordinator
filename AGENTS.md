@@ -17,7 +17,7 @@ An independently maintained fork of qex (Apache-2.0). It is a local coordinator 
 - MSRV check: `cargo +1.85 check --features test-fixtures --all-targets --locked`
 - The upstream baseline, with logs: `docs/baseline/run-baseline-linux.sh <clone> <log-dir>` (it checks out upstream v0.33.0, which has no `test-fixtures` feature, so it keeps the upstream commands)
 - Control characters: stage your changes (by name), then `python3 .github/scripts/check-control-chars.py`. It checks staged content only and names any unstaged or untracked files it skipped. Tests: `check-control-chars-test.py`
-- Move checker (the R-PRs of `docs/fork/PORT_PLAN.md`): `python3 .github/scripts/check-moves.py <base> [<head>]`. It lists each moved function and every changed line that is not part of a move, and exits 1 when a changed function has no identical copy. Tests: `check-moves-test.py`
+- Move checker (the R-PRs of `docs/fork/PORT_PLAN.md`): `python3 .github/scripts/check-moves.py <base> [<head>]`. It lists each moved function and every changed line that is not part of a move, in every changed file (lines outside `.rs` files and mode changes never are), and exits 1 when a changed function has no identical copy. Tests: `check-moves-test.py`
 
 ## Structure
 - `src/`: upstream qex (coordinator `daemon.rs`, scheduler `sched.rs`, per-job `supervisor.rs`, platform metrics `sys.rs`).
