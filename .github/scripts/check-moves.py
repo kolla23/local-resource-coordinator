@@ -11,12 +11,14 @@ USAGE = """usage: check-moves.py <base> [<head>]
 Every function in a changed .rs file whose item changed or disappeared between
 <base> and <head> must have a byte-identical copy at <head>. The item is the
 function with the attribute and comment lines directly above it. Only the call
-path may differ: a leading crate::, super::, self::, sys:: or os::...:: on a path
-in code (not in a string or comment, not after another ::). Prints each move,
+path may differ: a leading crate::, super::, self::, sys::, os:: or os::<name>::
+on a path in code (not in a string, comment or use statement, not after another
+::). A copy only counts if no unchanged function already accounts for it. Prints each move,
 then every changed line that is not part of a move. Exits 1 when a changed
 function has no identical copy, 2 on a usage error."""
-CALL_PATH = re.compile(r"(?<![\w:])(?:(?:crate|super|self|sys|os|unix|linux|macos|windows)::)+")
+CALL_PATH = re.compile(r"(?<![\w:])(?:(?:crate|super|self|sys)::|os::(?:\w+::)?)+")
 FN = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
+USE = re.compile(r"\buse\b")
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.M)
 
 
@@ -128,6 +130,9 @@ def without_call_paths(text):
     masked = mask(text)
     out, last = [], 0
     for m in CALL_PATH.finditer(masked):
+        last_use = max((u.end() for u in USE.finditer(masked, 0, m.start())), default=-1)
+        if last_use >= 0 and ";" not in masked[last_use:m.start()]:
+            continue
         out.append(text[last:m.start()])
         last = m.end()
     return "".join(out) + text[last:]
@@ -139,14 +144,17 @@ def same(a, b, ignore_paths):
     return a["item"] == b["item"]
 
 
-def find_copy(fn, new, used):
-    for exact in (True, False):
-        for g_file, g_fns in new.items():
-            for g in g_fns:
-                if (g_file, g["line"]) not in used and g["name"] == fn["name"] \
-                        and same(fn, g, not exact):
-                    return g_file, g, exact
-    return None
+def diff_lines(base, head, path):
+    removed, added, o, n, o_left, n_left = {}, {}, 0, 0, 0, 0
+    for row in git("diff", "-U0", "--no-color", "--no-renames", base, head, "--", path).split("\n"):
+        if o_left == 0 and n_left == 0 and (h := HUNK.match(row)):
+            o, n = int(h[1]), int(h[3])
+            o_left, n_left = int(h[2] or 1), int(h[4] or 1)
+        elif o_left and row.startswith("-"):
+            removed[o], o, o_left = row[1:], o + 1, o_left - 1
+        elif n_left and row.startswith("+"):
+            added[n], n, n_left = row[1:], n + 1, n_left - 1
+    return removed, added
 
 
 def main():
@@ -158,17 +166,28 @@ def main():
              .split("\0") if f]
     old = {f: functions(t) for f in files if (t := show(base, f)) is not None}
     new = {f: functions(t) for f in files if (t := show(head, f)) is not None}
-    used, moves, failures = set(), [], []
+    diffs = {f: diff_lines(base, head, f) for f in files}
+    claimed, moves, failures, touched = set(), [], [], []
     for f, fns in old.items():
         for fn in fns:
-            if any(g["name"] == fn["name"] and same(fn, g, False) for g in new.get(f, [])):
+            if any(n in diffs[f][0] for n in fn["lines"]):
+                touched.append((f, fn))
                 continue
-            target = find_copy(fn, new, used)
-            if target is None:
-                failures.append((f, fn))
-                continue
-            used.add((target[0], target[1]["line"]))
-            moves.append((f, fn, *target))
+            for g in new.get(f, []):
+                if (f, g["line"]) not in claimed and g["name"] == fn["name"] and same(fn, g, False):
+                    claimed.add((f, g["line"]))
+                    break
+    for f, fn in touched:
+        target = None
+        for exact in (True, False):
+            target = target or next(((g_file, g, exact) for g_file, g_fns in new.items()
+                                     for g in g_fns if (g_file, g["line"]) not in claimed
+                                     and g["name"] == fn["name"] and same(fn, g, not exact)), None)
+        if target is None:
+            failures.append((f, fn))
+            continue
+        claimed.add((target[0], target[1]["line"]))
+        moves.append((f, fn, *target))
 
     for f, fn, g_file, g, exact in moves:
         how = "identical" if exact else "identical apart from call paths"
@@ -181,18 +200,11 @@ def main():
     moved_new = {(g_file, n) for _, _, g_file, g, _ in moves for n in g["lines"]}
     rest = []
     for f in files:
-        o = n = 0
-        for row in git("diff", "-U0", "--no-color", "--no-renames", base, head, "--", f).split("\n"):
-            if (h := HUNK.match(row)):
-                o, n = int(h[1]), int(h[3])
-            elif row.startswith("-") and not row.startswith("---"):
-                if (f, o) not in moved_old and row[1:].strip():
-                    rest.append(f"  {f}:{o} -{row[1:]}")
-                o += 1
-            elif row.startswith("+") and not row.startswith("+++"):
-                if (f, n) not in moved_new and row[1:].strip():
-                    rest.append(f"  {f}:{n} +{row[1:]}")
-                n += 1
+        removed, added = diffs[f]
+        rest += [f"  {f}:{o} -{t}" for o, t in removed.items()
+                 if (f, o) not in moved_old and t.strip()]
+        rest += [f"  {f}:{n} +{t}" for n, t in added.items()
+                 if (f, n) not in moved_new and t.strip()]
     print(f"\n{len(rest)} changed lines are not part of a move" + (":" if rest else "."))
     if rest:
         print("\n".join(rest))
