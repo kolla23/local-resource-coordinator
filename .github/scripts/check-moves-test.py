@@ -38,6 +38,8 @@ BASE_SYS = "/// Total memory.\n" + LINUX + "\n" + MACOS + "\n" + FIELD + "\npub 
 HEAD_SYS = "pub fn total() -> u64 {\n    crate::os::total()\n}\n\npub fn keep() {}\n"
 TOTAL = "pub fn total() -> u64 {\n    %s(\"%s\")\n}\n"
 MULTI_CFG = '#[cfg(any(\n    target_os = "%s",\n    target_os = "freebsd"\n))]\npub fn f() {}\n'
+WHERE_IMPL = "impl %s\nwhere\n    %s: Sized,\n{\n%s}\n"
+GO = "    fn go(&self) -> u32 {\n        1\n    }\n"
 
 
 def run(base, head, args=None, config=(), attributes=""):
@@ -244,6 +246,50 @@ CASES = [
      {"src/a.rs": "pub fn f() {}\n\npub fn g() {\n    1;\n}\n"},
      {"src/a.rs": "pub fn g() {\n    1;\n}\n\npub fn f() {}\n"},
      0, ["identical (within the file)"]),
+    ("a method moved between where-clause impls in other files",
+     {"src/a.rs": WHERE_IMPL % ("A", "A", GO), "src/b.rs": WHERE_IMPL % ("B", "B", "")},
+     {"src/a.rs": WHERE_IMPL % ("A", "A", ""), "src/b.rs": WHERE_IMPL % ("B", "B", GO)},
+     1, ["NOT A MOVE: src/a.rs:5 go"]),
+    ("a method moved between where-clause impls in one file",
+     {"src/a.rs": WHERE_IMPL % ("A", "A", GO) + WHERE_IMPL % ("B", "B", "")},
+     {"src/a.rs": WHERE_IMPL % ("A", "A", "") + WHERE_IMPL % ("B", "B", GO)},
+     1, ["NOT A MOVE: src/a.rs:5 go"]),
+    ("a method moved between impls whose headers span lines",
+     {"src/a.rs": "impl<T> Tr\n    for A<T>\n{\n" + GO + "}\nimpl<T> Tr\n    for B<T>\n{\n}\n"},
+     {"src/a.rs": "impl<T> Tr\n    for A<T>\n{\n}\nimpl<T> Tr\n    for B<T>\n{\n" + GO + "}\n"},
+     1, ["NOT A MOVE: src/a.rs:4 go"]),
+    ("a function moved between mods whose braces sit on their own lines",
+     {"src/a.rs": "mod a\n{\n    pub fn f() {}\n}\nmod b\n{\n}\n"},
+     {"src/a.rs": "mod a\n{\n}\nmod b\n{\n    pub fn f() {}\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:3 f"]),
+    ("a visibility on its own line changed during the move",
+     {"src/a.rs": "pub(crate)\nfn f() {}\n"}, {"src/a.rs": None, "src/b.rs": "pub\nfn f() {}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("an extern ABI on its own line changed during the move",
+     {"src/a.rs": 'pub unsafe extern "C"\nfn f() {}\n'},
+     {"src/a.rs": None, "src/b.rs": 'pub unsafe extern "system"\nfn f() {}\n'},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("qualifiers on their own line moved unchanged",
+     {"src/a.rs": 'pub unsafe extern "C"\nfn f() {}\n'},
+     {"src/a.rs": None, "src/b.rs": 'pub unsafe extern "C"\nfn f() {}\n'},
+     0, ["moved: src/a.rs:1 f -> src/b.rs:1  identical", "0 changed lines"]),
+    ("one of two attributes on a line changed during the move",
+     {"src/a.rs": "#[inline] #[cfg(unix)]\nfn f() {}\n"},
+     {"src/a.rs": None, "src/b.rs": "#[inline(always)] #[cfg(unix)]\nfn f() {}\n"},
+     1, ["NOT A MOVE: src/a.rs:2 f"]),
+    ("a comment line that mixes comment kinds changed during the move",
+     {"src/a.rs": "/* a */ // b\nfn f() {}\n"},
+     {"src/a.rs": None, "src/b.rs": "/* a */ // c\nfn f() {}\n"},
+     1, ["NOT A MOVE: src/a.rs:2 f"]),
+    ("a where clause changed during the move",
+     {"src/a.rs": "fn f<T>(x: T) -> u8\nwhere\n    T: Copy,\n{\n    1\n}\n"},
+     {"src/a.rs": None, "src/b.rs": "fn f<T>(x: T) -> u8\nwhere\n    T: Clone,\n{\n    1\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("the attributes shown leave out comments and include the fn line's own",
+     {"src/a.rs": "/*\n  note\n*/\n#[cfg(unix)] // why\n#[inline] pub fn f() {}\n"},
+     {"src/a.rs": None,
+      "src/b.rs": "/*\n  note\n*/\n#[cfg(unix)] // why\n#[inline] pub fn f() {}\n"},
+     0, ["moved: src/a.rs:5 f [#[cfg(unix)] #[inline]] -> src/b.rs:5  identical"]),
 ]
 
 
