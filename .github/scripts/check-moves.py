@@ -31,7 +31,7 @@ def git(*args):
 
 
 def show(rev, path):
-    r = subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True)
+    r = subprocess.run(["git", "cat-file", "blob", f"{rev}:{path}"], capture_output=True)
     return r.stdout.decode("utf-8").replace("\r\n", "\n") if r.returncode == 0 else None
 
 
@@ -118,9 +118,10 @@ def functions(text):
             if lines[above].strip().startswith("#[cfg"):
                 cfg.insert(0, lines[above].strip())
             above -= 1
+        end = text.find("\n", k)
         found.append({
             "name": m[1], "cfg": " ".join(cfg), "line": first,
-            "item": text[starts[above + 1]:k + 1],
+            "item": text[starts[above + 1]:len(text) if end < 0 else end],
             "lines": range(above + 2, line(k) + 1),
         })
     return found
@@ -145,16 +146,20 @@ def same(a, b, ignore_paths):
 
 
 def diff_lines(base, head, path):
-    removed, added, o, n, o_left, n_left = {}, {}, 0, 0, 0, 0
-    for row in git("diff", "-U0", "--no-color", "--no-renames", base, head, "--", path).split("\n"):
+    removed, added, inserted_after, o, n, o_left, n_left = {}, {}, [], 0, 0, 0, 0
+    rows = git("diff", "-U0", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv",
+               base, head, "--", path).split("\n")
+    for row in rows:
         if o_left == 0 and n_left == 0 and (h := HUNK.match(row)):
             o, n = int(h[1]), int(h[3])
             o_left, n_left = int(h[2] or 1), int(h[4] or 1)
+            if o_left == 0:
+                inserted_after.append(o)
         elif o_left and row.startswith("-"):
             removed[o], o, o_left = row[1:], o + 1, o_left - 1
         elif n_left and row.startswith("+"):
             added[n], n, n_left = row[1:], n + 1, n_left - 1
-    return removed, added
+    return removed, added, inserted_after
 
 
 def main():
@@ -170,7 +175,9 @@ def main():
     claimed, moves, failures, touched = set(), [], [], []
     for f, fns in old.items():
         for fn in fns:
-            if any(n in diffs[f][0] for n in fn["lines"]):
+            span = fn["lines"]
+            if any(n in diffs[f][0] for n in span) \
+                    or any(span.start - 1 <= p < span.stop - 1 for p in diffs[f][2]):
                 touched.append((f, fn))
                 continue
             for g in new.get(f, []):
@@ -200,7 +207,7 @@ def main():
     moved_new = {(g_file, n) for _, _, g_file, g, _ in moves for n in g["lines"]}
     rest = []
     for f in files:
-        removed, added = diffs[f]
+        removed, added, _ = diffs[f]
         rest += [f"  {f}:{o} -{t}" for o, t in removed.items()
                  if (f, o) not in moved_old and t.strip()]
         rest += [f"  {f}:{n} +{t}" for n, t in added.items()

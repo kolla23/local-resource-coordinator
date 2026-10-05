@@ -39,7 +39,7 @@ HEAD_SYS = "pub fn total() -> u64 {\n    crate::os::total()\n}\n\npub fn keep() 
 TOTAL = "pub fn total() -> u64 {\n    %s(\"%s\")\n}\n"
 
 
-def run(base, head, args=None):
+def run(base, head, args=None, config=()):
     repo = tempfile.mkdtemp()
     try:
         def g(*a):
@@ -47,6 +47,8 @@ def run(base, head, args=None):
                            check=True, capture_output=True)
         g("init", "-q")
         g("config", "core.autocrlf", "false")
+        for key, value in config:
+            g("config", key, value)
         for files, msg in ((base, "base"), (head, "head")):
             for name in list(files):
                 path = os.path.join(repo, name)
@@ -131,6 +133,18 @@ CASES = [
      {"src/a.rs": 'pub const HELP: &str = r"\n--signal\n--other\n";\n'},
      {"src/a.rs": 'pub const HELP: &str = r"\n--other\n";\n'},
      0, ["1 changed lines are not part of a move", "src/a.rs:2 ---signal"]),
+    ("a line inserted inside a body",
+     {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": "pub fn f() -> u8 {\n    std::process::exit(3);\n    1\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("an attribute inserted above a function",
+     {"src/a.rs": "pub fn g() {}\n\npub fn f() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": "pub fn g() {}\n\n#[cfg(test)]\npub fn f() -> u8 {\n    1\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:3 f"]),
+    ("text added after a closing brace",
+     {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": "pub fn f() -> u8 {\n    1\n} fn g() {}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
     ("a visibility change is not a move",
      {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
      {"src/b.rs": "pub(crate) fn f() -> u8 {\n    1\n}\n", "src/a.rs": None},
@@ -180,6 +194,14 @@ def main():
     ok = rc == 2 and "usage" in out
     failed += not ok
     print(f"{'ok  ' if ok else 'FAIL'} no arguments is a usage error")
+    rc, out = run({"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
+                  {"src/a.rs": "pub fn f() -> u8 {\n    2\n}\n"},
+                  config=[("diff.external", "true"), ("diff.rs.textconv", "true")])
+    ok = rc == 1 and "NOT A MOVE: src/a.rs:1 f" in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} an external diff tool or textconv in git config is ignored")
+    if not ok:
+        print("\n".join("     " + r for r in out.splitlines()))
     print(f"\n{failed} failed")
     sys.exit(1 if failed else 0)
 
