@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Checks that a refactor only moves Rust functions (docs/fork/PORT_PLAN.md, "Code only moves").
 Tests: check-moves-test.py"""
+import os
 import re
 import subprocess
 import sys
 
 USAGE = """usage: check-moves.py <base> [<head>]
-(from the repository root; <head> defaults to HEAD)
+(from anywhere in the repository; <head> defaults to HEAD)
 
 Scope: only top-level functions can be verified as moved; anything else is
 reported as NOT A MOVE for a human to explain.
@@ -228,6 +229,7 @@ def main():
         print(USAGE, file=sys.stderr)
         sys.exit(2)
     base, head = sys.argv[1], sys.argv[2] if len(sys.argv) == 3 else "HEAD"
+    os.chdir(git("rev-parse", "--show-toplevel").strip())
     files = [f for f in git("diff", "--name-only", "-z", "--no-renames", base, head, "--", "*.rs")
              .split("\0") if f]
     old = [(f, fn) for f in files if (t := show(base, f)) is not None for fn in functions(t)]

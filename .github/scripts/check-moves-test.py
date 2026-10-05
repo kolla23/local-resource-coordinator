@@ -42,7 +42,7 @@ WHERE_IMPL = "impl %s\nwhere\n    %s: Sized,\n{\n%s}\n"
 GO = "    fn go(&self) -> u32 {\n        1\n    }\n"
 
 
-def run(base, head, args=None, config=(), attributes=""):
+def run(base, head, args=None, config=(), attributes="", cwd=""):
     repo = tempfile.mkdtemp()
     try:
         def g(*a):
@@ -66,7 +66,8 @@ def run(base, head, args=None, config=(), attributes=""):
             g("add", "-A")
             g("commit", "-q", "--allow-empty", "-m", msg)
         args = ["HEAD~1", "HEAD"] if args is None else args
-        p = subprocess.run([sys.executable, CHECK, *args], cwd=repo, capture_output=True, text=True)
+        p = subprocess.run([sys.executable, CHECK, *args], cwd=os.path.join(repo, cwd),
+                           capture_output=True, text=True)
         return p.returncode, p.stdout + p.stderr
     finally:
         shutil.rmtree(repo, ignore_errors=True)
@@ -307,6 +308,14 @@ def main():
     ok = rc == 2 and "usage" in out
     failed += not ok
     print(f"{'ok  ' if ok else 'FAIL'} no arguments is a usage error")
+    rc, out = run({"src/a.rs": "pub fn f() {}\n", "tests/t.rs": "fn t() {}\n"},
+                  {"src/a.rs": "pub fn f() {}\nstatic X: u8 = 1;\n",
+                   "tests/t.rs": "fn t() {\n    evil()\n}\n"}, cwd="src")
+    ok = rc == 1 and "NOT A MOVE: tests/t.rs:1 t" in out and "src/a.rs:2 +static X" in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} run from a subfolder, it still checks the whole repository")
+    if not ok:
+        print("\n".join("     " + r for r in out.splitlines()))
     for name, config, attributes in (
             ("an external diff tool in git config", [("diff.external", "true")], ""),
             ("a textconv driver for .rs", [("diff.rs.textconv", "echo")], "*.rs diff=rs\n"),
