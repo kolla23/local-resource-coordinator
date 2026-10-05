@@ -8,14 +8,14 @@ import sys
 USAGE = """usage: check-moves.py <base> [<head>]
 (from the repository root; <head> defaults to HEAD)
 
-Every function in a changed .rs file whose item changed or disappeared between
-<base> and <head> must have a byte-identical copy at <head>. The item is the
-function with the attribute and comment lines directly above it. Only the call
-path may differ: a leading crate::, super::, self::, sys::, os:: or os::<name>::
-on a path in code (not in a string, comment or use statement, not after another
-::). A copy only counts if no unchanged function already accounts for it. Prints each move,
-then every changed line that is not part of a move. Exits 1 when a changed
-function has no identical copy, 2 on a usage error."""
+Every function in a changed .rs file at <base> must pair with its own
+byte-identical copy at <head>, each copy used once: first in the same file, then
+in another file (a move). The item is the function with the attributes and
+comments directly above it. For a move, only the call path may differ: a leading
+crate::, super::, self::, sys::, os:: or os::<name>:: on a path in code (not in a
+string, comment or use statement, not after another ::). Prints each move, then
+every changed line that is not part of a move. Exits 1 when a function has no
+copy, 2 on a usage error."""
 CALL_PATH = re.compile(r"(?<![\w:])(?:(?:crate|super|self|sys)::|os::(?:\w+::)?)+")
 FN = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
 USE = re.compile(r"\buse\b")
@@ -112,19 +112,45 @@ def functions(text):
             if depth == 0:
                 break
             k += 1
-        start = text.rfind("\n", 0, m.start()) + 1
-        first, cfg, above = line(start), [], line(start) - 2
-        while above >= 0 and lines[above].strip().startswith(("#[", "//")):
-            if lines[above].strip().startswith("#[cfg"):
-                cfg.insert(0, lines[above].strip())
-            above -= 1
+        first = line(text.rfind("\n", 0, m.start()) + 1)
+        top = header_top(text, masked, lines, starts, first - 1, line)
         end = text.find("\n", k)
+        attrs = [s.strip() for s in lines[top:first - 1]
+                 if not s.strip().startswith(("//", "/*", "*"))]
         found.append({
-            "name": m[1], "cfg": " ".join(cfg), "line": first,
-            "item": text[starts[above + 1]:len(text) if end < 0 else end],
-            "lines": range(above + 2, line(k) + 1),
+            "name": m[1], "cfg": " ".join(attrs), "line": first,
+            "item": text[starts[top]:len(text) if end < 0 else end],
+            "lines": range(top + 1, line(k) + 1),
         })
     return found
+
+
+def header_top(text, masked, lines, starts, i, line):
+    """Index of the first line of the attributes and comments directly above line i."""
+    mlines = masked.split("\n")
+    while i > 0 and lines[i - 1].strip():
+        prev, code = lines[i - 1].strip(), mlines[i - 1].strip()
+        if not code and prev.startswith("//"):
+            i -= 1
+        elif not code and prev.endswith("*/"):
+            opened = text.rfind("/*", 0, starts[i - 1] + len(lines[i - 1]))
+            if opened < 0 or text[starts[line(opened) - 1]:opened].strip():
+                break
+            i = line(opened) - 1
+        elif code.endswith("]"):
+            p, depth = starts[i - 1] + len(mlines[i - 1].rstrip()) - 1, 0
+            while p >= 0:
+                depth += (masked[p] == "]") - (masked[p] == "[")
+                if depth == 0:
+                    break
+                p -= 1
+            hash_at = p - 1
+            if p <= 0 or masked[hash_at] != "#" or masked[starts[line(hash_at) - 1]:hash_at].strip():
+                break
+            i = line(hash_at) - 1
+        else:
+            break
+    return i
 
 
 def without_call_paths(text):
@@ -146,20 +172,18 @@ def same(a, b, ignore_paths):
 
 
 def diff_lines(base, head, path):
-    removed, added, inserted_after, o, n, o_left, n_left = {}, {}, [], 0, 0, 0, 0
-    rows = git("diff", "-U0", "--no-color", "--no-renames", "--no-ext-diff", "--no-textconv",
-               base, head, "--", path).split("\n")
+    removed, added, o, n, o_left, n_left = {}, {}, 0, 0, 0, 0
+    rows = git("diff", "-U0", "--text", "--no-color", "--no-renames", "--no-ext-diff",
+               "--no-textconv", base, head, "--", path).split("\n")
     for row in rows:
         if o_left == 0 and n_left == 0 and (h := HUNK.match(row)):
             o, n = int(h[1]), int(h[3])
             o_left, n_left = int(h[2] or 1), int(h[4] or 1)
-            if o_left == 0:
-                inserted_after.append(o)
         elif o_left and row.startswith("-"):
             removed[o], o, o_left = row[1:], o + 1, o_left - 1
         elif n_left and row.startswith("+"):
             added[n], n, n_left = row[1:], n + 1, n_left - 1
-    return removed, added, inserted_after
+    return removed, added
 
 
 def main():
@@ -169,45 +193,35 @@ def main():
     base, head = sys.argv[1], sys.argv[2] if len(sys.argv) == 3 else "HEAD"
     files = [f for f in git("diff", "--name-only", "-z", "--no-renames", base, head, "--", "*.rs")
              .split("\0") if f]
-    old = {f: functions(t) for f in files if (t := show(base, f)) is not None}
-    new = {f: functions(t) for f in files if (t := show(head, f)) is not None}
-    diffs = {f: diff_lines(base, head, f) for f in files}
-    claimed, moves, failures, touched = set(), [], [], []
-    for f, fns in old.items():
-        for fn in fns:
-            span = fn["lines"]
-            if any(n in diffs[f][0] for n in span) \
-                    or any(span.start - 1 <= p < span.stop - 1 for p in diffs[f][2]):
-                touched.append((f, fn))
+    old = [(f, fn) for f in files if (t := show(base, f)) is not None for fn in functions(t)]
+    new = [(f, g) for f in files if (t := show(head, f)) is not None for g in functions(t)]
+    pairs, claimed = {}, set()
+    for kind in ("in place", "identical", "identical apart from call paths"):
+        for i, (f, fn) in enumerate(old):
+            if i in pairs:
                 continue
-            for g in new.get(f, []):
-                if (f, g["line"]) not in claimed and g["name"] == fn["name"] and same(fn, g, False):
-                    claimed.add((f, g["line"]))
+            for j, (g_file, g) in enumerate(new):
+                if j in claimed or g["name"] != fn["name"] or (kind == "in place") != (g_file == f):
+                    continue
+                if same(fn, g, kind == "identical apart from call paths"):
+                    pairs[i] = (j, kind)
+                    claimed.add(j)
                     break
-    for f, fn in touched:
-        target = None
-        for exact in (True, False):
-            target = target or next(((g_file, g, exact) for g_file, g_fns in new.items()
-                                     for g in g_fns if (g_file, g["line"]) not in claimed
-                                     and g["name"] == fn["name"] and same(fn, g, not exact)), None)
-        if target is None:
-            failures.append((f, fn))
-            continue
-        claimed.add((target[0], target[1]["line"]))
-        moves.append((f, fn, *target))
 
-    for f, fn, g_file, g, exact in moves:
-        how = "identical" if exact else "identical apart from call paths"
-        cfg = f" [{fn['cfg']}]" if fn["cfg"] else ""
-        print(f"moved: {f}:{fn['line']} {fn['name']}{cfg} -> {g_file}:{g['line']}  {how}")
+    for i, (j, kind) in sorted(pairs.items()):
+        if kind != "in place":
+            (f, fn), (g_file, g) = old[i], new[j]
+            cfg = f" [{fn['cfg']}]" if fn["cfg"] else ""
+            print(f"moved: {f}:{fn['line']} {fn['name']}{cfg} -> {g_file}:{g['line']}  {kind}")
+    failures = [old[i] for i in range(len(old)) if i not in pairs]
     for f, fn in failures:
         print(f"NOT A MOVE: {f}:{fn['line']} {fn['name']} changed or went, with no identical copy")
 
-    moved_old = {(f, n) for f, fn, *_ in moves for n in fn["lines"]}
-    moved_new = {(g_file, n) for _, _, g_file, g, _ in moves for n in g["lines"]}
+    moved_old = {(old[i][0], n) for i in pairs for n in old[i][1]["lines"]}
+    moved_new = {(new[j][0], n) for j, _ in pairs.values() for n in new[j][1]["lines"]}
     rest = []
     for f in files:
-        removed, added, _ = diffs[f]
+        removed, added = diff_lines(base, head, f)
         rest += [f"  {f}:{o} -{t}" for o, t in removed.items()
                  if (f, o) not in moved_old and t.strip()]
         rest += [f"  {f}:{n} +{t}" for n, t in added.items()

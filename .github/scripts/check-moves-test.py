@@ -37,9 +37,10 @@ TRICKY = '''pub fn tricky() -> usize {
 BASE_SYS = "/// Total memory.\n" + LINUX + "\n" + MACOS + "\n" + FIELD + "\npub fn keep() {}\n"
 HEAD_SYS = "pub fn total() -> u64 {\n    crate::os::total()\n}\n\npub fn keep() {}\n"
 TOTAL = "pub fn total() -> u64 {\n    %s(\"%s\")\n}\n"
+MULTI_CFG = '#[cfg(any(\n    target_os = "%s",\n    target_os = "freebsd"\n))]\npub fn f() {}\n'
 
 
-def run(base, head, args=None, config=()):
+def run(base, head, args=None, config=(), attributes=""):
     repo = tempfile.mkdtemp()
     try:
         def g(*a):
@@ -49,6 +50,8 @@ def run(base, head, args=None, config=()):
         g("config", "core.autocrlf", "false")
         for key, value in config:
             g("config", key, value)
+        with open(os.path.join(repo, ".git", "info", "attributes"), "w") as f:
+            f.write(attributes)
         for files, msg in ((base, "base"), (head, "head")):
             for name in list(files):
                 path = os.path.join(repo, name)
@@ -145,6 +148,23 @@ CASES = [
      {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
      {"src/a.rs": "pub fn f() -> u8 {\n    1\n} fn g() {}\n"},
      1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("a multi-line cfg moved unchanged",
+     {"src/a.rs": MULTI_CFG % "linux"}, {"src/a.rs": None, "src/b.rs": MULTI_CFG % "linux"},
+     0, ["moved: src/a.rs:5 f", "src/b.rs:5  identical"]),
+    ("a multi-line cfg swapped during the move",
+     {"src/a.rs": MULTI_CFG % "linux"}, {"src/a.rs": None, "src/b.rs": MULTI_CFG % "macos"},
+     1, ["NOT A MOVE: src/a.rs:5 f"]),
+    ("a multi-line cfg swapped in place",
+     {"src/a.rs": MULTI_CFG % "linux"}, {"src/a.rs": MULTI_CFG % "macos"},
+     1, ["NOT A MOVE: src/a.rs:5 f"]),
+    ("a /** */ doc changed during the move",
+     {"src/a.rs": "/**\n * Reads it.\n */\npub fn f() {}\n"},
+     {"src/a.rs": None, "src/b.rs": "/**\n * Writes it.\n */\npub fn f() {}\n"},
+     1, ["NOT A MOVE: src/a.rs:4 f"]),
+    ("a function hidden in a block comment opened above it",
+     {"src/a.rs": "pub fn g() {}\n\npub fn f() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": "pub fn g() {}\n/*\n\npub fn f() -> u8 {\n    1\n}\n*/\n"},
+     1, ["NOT A MOVE: src/a.rs:3 f"]),
     ("a visibility change is not a move",
      {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
      {"src/b.rs": "pub(crate) fn f() -> u8 {\n    1\n}\n", "src/a.rs": None},
@@ -194,14 +214,19 @@ def main():
     ok = rc == 2 and "usage" in out
     failed += not ok
     print(f"{'ok  ' if ok else 'FAIL'} no arguments is a usage error")
-    rc, out = run({"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
-                  {"src/a.rs": "pub fn f() -> u8 {\n    2\n}\n"},
-                  config=[("diff.external", "true"), ("diff.rs.textconv", "true")])
-    ok = rc == 1 and "NOT A MOVE: src/a.rs:1 f" in out
-    failed += not ok
-    print(f"{'ok  ' if ok else 'FAIL'} an external diff tool or textconv in git config is ignored")
-    if not ok:
-        print("\n".join("     " + r for r in out.splitlines()))
+    for name, config, attributes in (
+            ("an external diff tool in git config", [("diff.external", "true")], ""),
+            ("a textconv driver for .rs", [("diff.rs.textconv", "echo")], "*.rs diff=rs\n"),
+            ("the -diff attribute on .rs", [], "*.rs -diff\n"),
+            ("the binary attribute on .rs", [], "*.rs binary\n")):
+        rc, out = run({"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
+                      {"src/a.rs": "pub fn f() -> u8 {\n    2\n}\n"},
+                      config=config, attributes=attributes)
+        ok = rc == 1 and "NOT A MOVE: src/a.rs:1 f" in out and "src/a.rs:2 +    2" in out
+        failed += not ok
+        print(f"{'ok  ' if ok else 'FAIL'} {name} hides nothing")
+        if not ok:
+            print("\n".join("     " + r for r in out.splitlines()))
     print(f"\n{failed} failed")
     sys.exit(1 if failed else 0)
 
