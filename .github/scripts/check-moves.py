@@ -8,15 +8,18 @@ import sys
 USAGE = """usage: check-moves.py <base> [<head>]
 (from the repository root; <head> defaults to HEAD)
 
+Scope: only top-level functions can be verified as moved; anything else is
+reported as NOT A MOVE for a human to explain.
+
 Every function in a changed .rs file at <base> must pair with its own
 byte-identical copy at <head>, each copy used once: first in the same file, then
 in another file (a move). The item is the function with the attributes and
-comments directly above it. For a move, only the call path may differ: a leading
-crate::, super::, self::, sys::, os:: or os::<name>:: on a path in the body's code
-(not in the signature, a string, a comment or a use statement, not after another
-::). Prints each move, then
-every changed line that is not part of a move. Exits 1 when a function has no
-copy, 2 on a usage error."""
+comments directly above it; a function inside a mod, impl or trait must keep the
+same enclosing headers and may not move. For a move, only the call path may
+differ: a leading crate::, super::, self::, sys::, os:: or os::<name>:: on a path
+in the body's code (not in the signature, a string, a comment or a use
+statement, not after another ::). Prints each move, then every changed line that
+is not part of a move. Exits 1 when a function has no copy, 2 on a usage error."""
 CALL_PATH = re.compile(r"(?<![\w:])(?:(?:crate|super|self|sys)::|os::(?:\w+::)?)+")
 FN = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
 USE = re.compile(r"\buse\b")
@@ -100,7 +103,20 @@ def functions(text):
             lo, hi = (mid, hi) if starts[mid] <= pos else (lo, mid - 1)
         return lo + 1
 
+    open_at, stack, scan = {}, [], 0
     for m in FN.finditer(masked):
+        while scan < m.start():
+            if masked[scan] == "{":
+                stack.append(scan)
+            elif masked[scan] == "}" and stack:
+                stack.pop()
+            scan += 1
+        open_at[m.start()] = list(stack)
+    for m in FN.finditer(masked):
+        scope = " / ".join(
+            " ".join(text[starts[header_top(text, masked, lines, starts, line(b) - 1, line)]:b]
+                     .split())
+            for b in open_at[m.start()])
         depth, j = 0, m.end()
         while j < len(masked) and not (depth == 0 and masked[j] in "{;"):
             depth += (masked[j] in "([") - (masked[j] in ")]")
@@ -119,7 +135,7 @@ def functions(text):
         attrs = [s.strip() for s in lines[top:first - 1]
                  if not s.strip().startswith(("//", "/*", "*"))]
         found.append({
-            "name": m[1], "cfg": " ".join(attrs), "line": first,
+            "name": m[1], "cfg": " ".join(attrs), "line": first, "scope": scope,
             "item": text[starts[top]:len(text) if end < 0 else end],
             "body_at": j - starts[top],
             "lines": range(top + 1, line(k) + 1),
@@ -205,18 +221,23 @@ def main():
             if i in pairs:
                 continue
             for j, (g_file, g) in enumerate(new):
-                if j in claimed or g["name"] != fn["name"] or (kind == "in place") != (g_file == f):
+                if j in claimed or g["name"] != fn["name"] or g["scope"] != fn["scope"] \
+                        or (kind == "in place") != (g_file == f) \
+                        or (kind != "in place" and fn["scope"]):
                     continue
                 if same(fn, g, kind == "identical apart from call paths"):
                     pairs[i] = (j, kind)
                     claimed.add(j)
                     break
 
+    diffs = {f: diff_lines(base, head, f) for f in files}
     for i, (j, kind) in sorted(pairs.items()):
-        if kind != "in place":
-            (f, fn), (g_file, g) = old[i], new[j]
-            cfg = f" [{fn['cfg']}]" if fn["cfg"] else ""
-            print(f"moved: {f}:{fn['line']} {fn['name']}{cfg} -> {g_file}:{g['line']}  {kind}")
+        (f, fn), (g_file, g) = old[i], new[j]
+        if kind == "in place" and not any(n in diffs[f][0] for n in fn["lines"]):
+            continue
+        cfg = f" [{fn['cfg']}]" if fn["cfg"] else ""
+        how = "identical (within the file)" if kind == "in place" else kind
+        print(f"moved: {f}:{fn['line']} {fn['name']}{cfg} -> {g_file}:{g['line']}  {how}")
     failures = [old[i] for i in range(len(old)) if i not in pairs]
     for f, fn in failures:
         print(f"NOT A MOVE: {f}:{fn['line']} {fn['name']} changed or went, with no identical copy")
@@ -225,11 +246,9 @@ def main():
     moved_new = {(new[j][0], n) for j, _ in pairs.values() for n in new[j][1]["lines"]}
     rest = []
     for f in files:
-        removed, added = diff_lines(base, head, f)
-        rest += [f"  {f}:{o} -{t}" for o, t in removed.items()
-                 if (f, o) not in moved_old and t.strip()]
-        rest += [f"  {f}:{n} +{t}" for n, t in added.items()
-                 if (f, n) not in moved_new and t.strip()]
+        removed, added = diffs[f]
+        rest += [f"  {f}:{o} -{t}" for o, t in removed.items() if (f, o) not in moved_old]
+        rest += [f"  {f}:{n} +{t}" for n, t in added.items() if (f, n) not in moved_new]
     print(f"\n{len(rest)} changed lines are not part of a move" + (":" if rest else "."))
     if rest:
         print("\n".join(rest))
