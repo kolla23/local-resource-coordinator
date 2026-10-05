@@ -8,14 +8,14 @@ import sys
 USAGE = """usage: check-moves.py <base> [<head>]
 (from the repository root; <head> defaults to HEAD)
 
-Every function in a changed .rs file whose body changed or disappeared between
-<base> and <head> must have an identical copy at <head>: the same name, signature
-and body. Only the visibility (pub, pub(crate), ...) and the call path (crate::,
-super::, self::, sys::, os::...::) may differ. Prints each move, then every
-changed line that is not part of a move. Exits 1 when a changed function has no
-identical copy, 2 on a usage error."""
-CALL_PATH = re.compile(r"\b(?:(?:crate|super|self|sys|os|unix|linux|macos|windows)::)+")
-VISIBILITY = re.compile(r"^\s*pub(?:\s*\([^)]*\))?\s+")
+Every function in a changed .rs file whose item changed or disappeared between
+<base> and <head> must have a byte-identical copy at <head>. The item is the
+function with the attribute and comment lines directly above it. Only the call
+path may differ: a leading crate::, super::, self::, sys:: or os::...:: on a path
+in code (not in a string or comment, not after another ::). Prints each move,
+then every changed line that is not part of a move. Exits 1 when a changed
+function has no identical copy, 2 on a usage error."""
+CALL_PATH = re.compile(r"(?<![\w:])(?:(?:crate|super|self|sys|os|unix|linux|macos|windows)::)+")
 FN = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.M)
 
@@ -104,7 +104,7 @@ def functions(text):
             j += 1
         if j >= len(masked) or masked[j] == ";":
             continue
-        open_at, depth, k = j, 0, j
+        depth, k = 0, j
         while k < len(masked):
             depth += (masked[k] == "{") - (masked[k] == "}")
             if depth == 0:
@@ -118,24 +118,25 @@ def functions(text):
             above -= 1
         found.append({
             "name": m[1], "cfg": " ".join(cfg), "line": first,
-            "sig": " ".join(VISIBILITY.sub("", text[start:open_at]).split()),
-            "body": undent(text[open_at:k + 1],
-                           len(lines[first - 1]) - len(lines[first - 1].lstrip())),
+            "item": text[starts[above + 1]:k + 1],
             "lines": range(above + 2, line(k) + 1),
         })
     return found
 
 
-def undent(body, indent):
-    """The body as if its `fn` line started at column 0, so a move between nesting levels
-    still compares equal."""
-    first, *rest = body.split("\n")
-    return "\n".join([first] + [r[indent:] if not r[:indent].strip() else r.lstrip() for r in rest])
+def without_call_paths(text):
+    masked = mask(text)
+    out, last = [], 0
+    for m in CALL_PATH.finditer(masked):
+        out.append(text[last:m.start()])
+        last = m.end()
+    return "".join(out) + text[last:]
 
 
 def same(a, b, ignore_paths):
-    norm = (lambda s: CALL_PATH.sub("", s)) if ignore_paths else (lambda s: s)
-    return norm(a["sig"]) == norm(b["sig"]) and norm(a["body"]) == norm(b["body"])
+    if ignore_paths:
+        return without_call_paths(a["item"]) == without_call_paths(b["item"])
+    return a["item"] == b["item"]
 
 
 def find_copy(fn, new, used):
