@@ -17,6 +17,7 @@ An independently maintained fork of qex (Apache-2.0). It is a local coordinator 
 - MSRV check: `cargo +1.85 check --features test-fixtures --all-targets --locked`
 - The upstream baseline, with logs: `docs/baseline/run-baseline-linux.sh <clone> <log-dir>` (it checks out upstream v0.33.0, which has no `test-fixtures` feature, so it keeps the upstream commands)
 - Control characters: stage your changes (by name), then `python3 .github/scripts/check-control-chars.py`. It checks staged content only and names any unstaged or untracked files it skipped. Tests: `check-control-chars-test.py`
+- Move checker (the R-PRs of `docs/fork/PORT_PLAN.md`): `python3 .github/scripts/check-moves.py <base> [<head>]`. It lists each moved function and every changed line that is not part of a move, and exits 1 when a changed function has no identical copy. Tests: `check-moves-test.py`
 
 ## Structure
 - `src/`: upstream qex (coordinator `daemon.rs`, scheduler `sched.rs`, per-job `supervisor.rs`, platform metrics `sys.rs`).
@@ -43,6 +44,7 @@ An independently maintained fork of qex (Apache-2.0). It is a local coordinator 
   - Every PR, however small, opens as a draft (`gh pr create --draft`) and runs the review loop until a round finds no real issues; any fix starts a new round. Keep each round's report in `$(git rev-parse --git-common-dir)/reviews/<branch>/` (shared by all worktrees, so removing one keeps the reports), never on GitHub. Then add one line to the PR body, `Reviewed at <full head commit id>: no real issues`, and mark the PR ready (`gh pr ready`). A push to a ready PR first turns it back into a draft (`gh pr ready --undo`) and needs a new round. The CI check "Reviewed at the head commit" (`.github/scripts/check-reviewed.sh`) runs only on ready PRs and confirms that line names the head commit.
 - Don't add fork documents directly in `docs/`; use `docs/fork/` or another subfolder.
 - Decisions that change upstream interfaces (persistence, IPC framing, CLI compatibility, launch protocol) need an ADR first.
+- Scripts may write code only for pure moves that check-moves.py verifies; every other change uses the normal edit tools.
 
 ## Gotchas
 Add one line each time the same mistake happens twice.

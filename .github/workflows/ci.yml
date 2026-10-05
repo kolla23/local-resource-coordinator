@@ -4,6 +4,8 @@
 # rejects raw control characters in text files.
 # Modified by the local-resource-coordinator fork, 2026-10-02: clippy, the
 # end-to-end tests and the MSRV check build with --features test-fixtures.
+# Modified by the local-resource-coordinator fork, 2026-10-05: the Style job
+# runs the tests of the move checker.
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -36,6 +38,8 @@ jobs:
         run: python3 .github/scripts/check-control-chars-test.py
       - name: No raw control characters in text files
         run: python3 .github/scripts/check-control-chars.py
+      - name: The tests of the move checker
+        run: python3 .github/scripts/check-moves-test.py
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
       - uses: Swatinem/rust-cache@v2
