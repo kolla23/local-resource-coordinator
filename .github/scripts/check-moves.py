@@ -12,8 +12,9 @@ Every function in a changed .rs file at <base> must pair with its own
 byte-identical copy at <head>, each copy used once: first in the same file, then
 in another file (a move). The item is the function with the attributes and
 comments directly above it. For a move, only the call path may differ: a leading
-crate::, super::, self::, sys::, os:: or os::<name>:: on a path in code (not in a
-string, comment or use statement, not after another ::). Prints each move, then
+crate::, super::, self::, sys::, os:: or os::<name>:: on a path in the body's code
+(not in the signature, a string, a comment or a use statement, not after another
+::). Prints each move, then
 every changed line that is not part of a move. Exits 1 when a function has no
 copy, 2 on a usage error."""
 CALL_PATH = re.compile(r"(?<![\w:])(?:(?:crate|super|self|sys)::|os::(?:\w+::)?)+")
@@ -32,7 +33,7 @@ def git(*args):
 
 def show(rev, path):
     r = subprocess.run(["git", "cat-file", "blob", f"{rev}:{path}"], capture_output=True)
-    return r.stdout.decode("utf-8").replace("\r\n", "\n") if r.returncode == 0 else None
+    return r.stdout.decode("utf-8") if r.returncode == 0 else None
 
 
 def mask(text):
@@ -120,6 +121,7 @@ def functions(text):
         found.append({
             "name": m[1], "cfg": " ".join(attrs), "line": first,
             "item": text[starts[top]:len(text) if end < 0 else end],
+            "body_at": j - starts[top],
             "lines": range(top + 1, line(k) + 1),
         })
     return found
@@ -167,7 +169,9 @@ def without_call_paths(text):
 
 def same(a, b, ignore_paths):
     if ignore_paths:
-        return without_call_paths(a["item"]) == without_call_paths(b["item"])
+        head_a, body_a = a["item"][:a["body_at"]], a["item"][a["body_at"]:]
+        head_b, body_b = b["item"][:b["body_at"]], b["item"][b["body_at"]:]
+        return head_a == head_b and without_call_paths(body_a) == without_call_paths(body_b)
     return a["item"] == b["item"]
 
 
