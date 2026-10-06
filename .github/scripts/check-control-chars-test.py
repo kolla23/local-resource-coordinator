@@ -116,7 +116,9 @@ def main():
                {**clean, "u.md": b"ok\nx" + raw + b"y\n"})
     expect("several invisible kinds are all named", 1, "U+0085, U+2028, U+202E",
            {**clean, "v.txt": b"\xe2\x80\xae\xc2\x85\xe2\x80\xa8\n"})
-    expect("a file with both kinds names both", 1, "w.txt: invisible character(s) U+2028",
+    expect("a file with both kinds names both and counts once", 1,
+           "w.txt: control character(s) 0x00, first on line 1\n"
+           "w.txt: invisible character(s) U+2028, first on line 1\n\n1 file(s) hold",
            {**clean, "w.txt": b"\x00\xe2\x80\xa8\n"})
     expect("ordinary non-ASCII text passes", 0, "no invisible characters",
            {**clean, "n.md": b"caf\xc3\xa9 \xe2\x86\x92 \xc3\xbcber \xe6\xbc\xa2\n"})
