@@ -3376,6 +3376,12 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
     });
     q(&["kill", &aborted, "--grace", "1s"]);
     run(&["wait", &aborted, "--timeout", "30s"]);
+    // The supervisor writes the usage and runs the hook after the record says the job stopped.
+    h.until(
+        "the stop hook of the killed job ran",
+        Duration::from_secs(30),
+        || h.job_dir(&aborted).join("hook.log").exists(),
+    );
     q(&["pause", "queue"]);
 
     let mut seen = std::collections::BTreeMap::new();
@@ -3385,7 +3391,14 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
     while let Some(dir) = todo.pop() {
         for entry in std::fs::read_dir(&dir).unwrap().flatten() {
             let path = entry.path();
-            let meta = std::fs::symlink_metadata(&path).unwrap();
+            // A write_atomic temp file (`.<name>.tmp.<pid>.<n>`) exists only during a write.
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            if file_name.starts_with('.') && file_name.contains(".tmp.") {
+                continue;
+            }
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
             let kind = if meta.is_dir() {
                 todo.push(path.clone());
                 "dir"
