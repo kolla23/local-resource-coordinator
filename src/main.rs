@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-10-05: declares the os module (R1 of docs/fork/PORT_PLAN.md).
 //! qex — Queued EXecutor.
 //!
 //! qex is a job queue for long tasks on a local machine. It controls the
@@ -66,6 +67,8 @@ mod lifecycle;
 mod logcap;
 #[cfg(unix)]
 mod logsel;
+#[cfg(unix)]
+mod os;
 #[cfg(unix)]
 mod paths;
 #[cfg(unix)]
