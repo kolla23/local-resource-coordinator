@@ -95,8 +95,8 @@ def main():
            {**clean, "I.PNG": b"\x00"})
     # What git tracks is checked, not the working tree (review round 2 of PR #38).
     expect("symlinks are skipped and counted, never followed", 0,
-           "2 staged text files checked; no control characters "
-           "(2 symlinks and submodules skipped)",
+           "2 staged text files checked; no control characters and no invisible "
+           "characters (2 symlinks and submodules skipped)",
            clean, index=[(b"120000", b"tool", b"/usr/bin/true"),
                          (b"120000", b"zero", b"/dev/zero")])
     expect("a file name that is not UTF-8 is still checked", 1,
@@ -104,6 +104,26 @@ def main():
            clean, index=[(b"100644", b"caf\xe9.txt", b"a\x00b\n")])
     expect("an executable file is checked", 1, "run.sh: control character(s) 0x00",
            clean, index=[(b"100755", b"run.sh", b"\x00")])
+    # Invisible characters that an editing tool can leave raw (issue #50).
+    for name, raw, code in (("a line separator", b"\xe2\x80\xa8", "U+2028"),
+                            ("a paragraph separator", b"\xe2\x80\xa9", "U+2029"),
+                            ("a bidi override", b"\xe2\x80\xae", "U+202E"),
+                            ("a zero-width space", b"\xe2\x80\x8b", "U+200B"),
+                            ("a byte-order mark", b"\xef\xbb\xbf", "U+FEFF"),
+                            ("a C1 next-line control", b"\xc2\x85", "U+0085")):
+        expect(f"{name} fails, with its line", 1,
+               f"u.md: invisible character(s) {code}, first on line 2",
+               {**clean, "u.md": b"ok\nx" + raw + b"y\n"})
+    expect("several invisible kinds are all named", 1, "U+0085, U+2028, U+202E",
+           {**clean, "v.txt": b"\xe2\x80\xae\xc2\x85\xe2\x80\xa8\n"})
+    expect("a file with both kinds names both and counts once", 1,
+           "w.txt: control character(s) 0x00, first on line 1\n"
+           "w.txt: invisible character(s) U+2028, first on line 1\n\n1 file(s) hold",
+           {**clean, "w.txt": b"\x00\xe2\x80\xa8\n"})
+    expect("ordinary non-ASCII text passes", 0, "no invisible characters",
+           {**clean, "n.md": b"caf\xc3\xa9 \xe2\x86\x92 \xc3\xbcber \xe6\xbc\xa2\n"})
+    expect("a file that is not UTF-8 keeps the byte check only", 0, "no invisible characters",
+           {**clean, "l.txt": b"caf\xe9 \x85\n"})
 
     print(f"\n{failed} failed")
     return 1 if failed else 0
