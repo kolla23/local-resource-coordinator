@@ -9,8 +9,8 @@ reviews stop showing it.
 
 Every regular file in git's index must hold no control character other than
 tab, LF, and CR as part of a CRLF line end; a bare CR (not followed by LF) is
-rejected too. Files whose extension marks them as binary (BINARY below) are
-skipped.
+rejected too, and in UTF-8 text so are C1, U+2028/2029 and Cf characters.
+Files with a binary extension (BINARY below) are skipped.
 
 The content comes from git (`git ls-files -s`, `git cat-file --batch`), not
 from the working tree: what is checked is what is tracked, symlinks
@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import unicodedata
 
 CONTROL = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\r(?!\n)")
 BINARY = {"png", "jpg", "jpeg", "gif", "ico", "webp", "pdf", "zip", "gz", "tgz", "xz",
@@ -63,6 +64,20 @@ def blobs(top, ids):
         pos = start + size + 1
 
 
+def invisible(data):
+    """C1 controls, line and paragraph separators and format characters (bidi overrides,
+    zero-width characters, a BOM) in UTF-8 text; a file that isn't UTF-8 gives none."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return [], 0
+    hits = [i for i, c in enumerate(text) if unicodedata.category(c) in ("Cf", "Zl", "Zp")
+            or (unicodedata.category(c) == "Cc" and ord(c) >= 0x80)]
+    if not hits:
+        return [], 0
+    return sorted({ord(text[i]) for i in hits}), text.count("\n", 0, hits[0]) + 1
+
+
 def main():
     top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
                          text=True, check=True).stdout.strip()
@@ -73,13 +88,17 @@ def main():
     bad = 0
     for (path, _), data in zip(text, blobs(top, [b for _, b in text])):
         found = sorted(set(CONTROL.findall(data)))
+        name = path.decode("utf-8", "backslashreplace")
         if found:
             first = CONTROL.search(data).start()
             line = data.count(b"\n", 0, first) + 1
             kinds = ", ".join(f"0x{c[0]:02x}" for c in found)
-            name = path.decode("utf-8", "backslashreplace")
             print(f"{name}: control character(s) {kinds}, first on line {line}")
-            bad += 1
+        hidden, line = invisible(data)
+        if hidden:
+            kinds = ", ".join(f"U+{c:04X}" for c in hidden)
+            print(f"{name}: invisible character(s) {kinds}, first on line {line}")
+        bad += bool(found or hidden)
     # Only the index was read. Say so when the working tree holds more, so a
     # local run before `git add` can't look clean for edits it never saw.
     unstaged = subprocess.run(["git", "diff", "--name-only", "-z"], cwd=top,
@@ -92,11 +111,12 @@ def main():
               f"(stage them with `git add` and run again): {', '.join(unseen[:10])}"
               + (" ..." if len(unseen) > 10 else ""))
     if bad:
-        print(f"\n{bad} file(s) hold raw control characters. Write escapes such as \\0 "
-              "with the Write tool, not through a heredoc, and remove the raw bytes.")
+        print(f"\n{bad} file(s) hold raw control or invisible characters. Write escapes such "
+              "as \\0 with the Write tool, not through a heredoc; name a Unicode character "
+              "as U+XXXX in prose; and remove the raw characters.")
         return 1
-    print(f"{len(text)} staged text files checked; no control characters "
-          f"({skipped} symlinks and submodules skipped).")
+    print(f"{len(text)} staged text files checked; no control characters and no invisible "
+          f"characters ({skipped} symlinks and submodules skipped).")
     return 0
 
 
