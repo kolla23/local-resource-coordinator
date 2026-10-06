@@ -5,6 +5,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: a coordinator with no [update] check writes no update record (issue #4).
 // Modified by the local-resource-coordinator fork, 2026-10-02: the suite needs the test-fixtures feature; nine of the ten sampled tests run the portable `testjob` in place of Unix programs (the /tmp one is unchanged).
 // Modified by the local-resource-coordinator fork, 2026-10-03: two more tests run `testjob`: the record dated before the boot (std `set_modified` in place of `touch`) and the job that starts again (`count`/`if-count-below`/`spin` in place of `sh -c`).
+// Modified by the local-resource-coordinator fork, 2026-10-06: four tests pin the mode of each path qex makes: the state-directory census, the first start, the tail file and the TMPDIR socket directory (R3 of docs/fork/PORT_PLAN.md).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -3312,6 +3313,262 @@ fn a_follower_that_makes_the_log_file_makes_it_private() {
             None => std::thread::sleep(Duration::from_millis(50)),
         }
     }
+}
+
+/// R3 of docs/fork/PORT_PLAN.md moves the code that sets these modes; a move that changes
+/// one must fail here, and the owner-only fix must change this table on purpose.
+#[test]
+fn every_path_in_the_state_directory_keeps_its_mode() {
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+    use std::os::unix::process::CommandExt;
+
+    let h = Harness::with_default_config("census");
+    let answer = h.root.join("latest.json");
+    std::fs::write(&answer, r#"{"tag_name": "v0.0.1"}"#).unwrap();
+    h.write_config(&format!(
+        "[peers]\nenabled = false\n\
+         [budget]\ncpu = \"3\"\n\
+         [defaults]\nmem = \"256MB\"\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [hooks]\non_stop = [\"sh\", \"-c\", \"true\"]\n\
+         [update]\ncheck = \"300s\"\nurl = \"file://{}\"\n",
+        answer.display()
+    ));
+    // A umask of 0077 would hide a missing mode: 0666 & !0077 is 0600.
+    let run = |args: &[&str]| {
+        let mut cmd = h.command(args);
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::umask(0o002);
+                Ok(())
+            });
+        }
+        cmd.output().unwrap()
+    };
+    let q = |args: &[&str]| {
+        let out = run(args);
+        assert!(out.status.success(), "qex {args:?}: {out:?}");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+
+    let id_file = h.root.join("job.id");
+    let done = q(&[
+        "submit",
+        "--id-file",
+        id_file.to_str().unwrap(),
+        "--",
+        TESTJOB,
+        "print",
+        "census",
+    ]);
+    q(&["wait", &done, "--timeout", "30s"]);
+    let state = h.root.join("state/qex");
+    h.until("the stop hook ran", Duration::from_secs(30), || {
+        h.job_dir(&done).join("hook.log").exists()
+    });
+    h.until("the update record", Duration::from_secs(45), || {
+        state.join("update.json").exists()
+    });
+
+    let aborted = q(&["submit", "--", TESTJOB, "sleep", "60"]);
+    h.until("the second job runs", Duration::from_secs(30), || {
+        h.has_started(&aborted)
+    });
+    q(&["kill", &aborted, "--grace", "1s"]);
+    run(&["wait", &aborted, "--timeout", "30s"]);
+    q(&["pause", "queue"]);
+
+    let mut seen = std::collections::BTreeMap::new();
+    let state_mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o7777;
+    seen.insert("state/qex".to_string(), format!("dir {state_mode:o}"));
+    let mut todo = vec![state.clone()];
+    while let Some(dir) = todo.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            let kind = if meta.is_dir() {
+                todo.push(path.clone());
+                "dir"
+            } else if meta.file_type().is_socket() {
+                "socket"
+            } else {
+                "file"
+            };
+            let name = path.strip_prefix(&h.root).unwrap().to_string_lossy();
+            let name = name.replace(&done, "<done>").replace(&aborted, "<aborted>");
+            seen.insert(
+                name,
+                format!("{kind} {:o}", meta.permissions().mode() & 0o7777),
+            );
+        }
+    }
+    let id_mode = std::fs::metadata(&id_file).unwrap().permissions().mode() & 0o7777;
+    seen.insert("job.id".to_string(), format!("file {id_mode:o}"));
+
+    // "file 664" is a file made with no mode: 0666 less the umask 0002.
+    let job_files = [
+        ("dir", "", "700"),
+        ("file", "/hook.log", "600"),
+        ("file", "/hook.ran", "600"),
+        ("file", "/spec.json", "600"),
+        ("file", "/status.json", "600"),
+        ("file", "/stderr.log", "600"),
+        ("file", "/stdout.log", "600"),
+        ("file", "/supervisor.log", "600"),
+        ("file", "/supervisor.pid", "600"),
+    ];
+    let mut expected: std::collections::BTreeMap<String, String> = [
+        ("job.id", "file 644"),
+        ("state/qex", "dir 700"),
+        ("state/qex/history.jsonl", "file 600"),
+        ("state/qex/jobs", "dir 700"),
+        ("state/qex/jobs/<aborted>/killed-by-user", "file 664"),
+        ("state/qex/run", "dir 700"),
+        ("state/qex/run/daemon.log", "file 664"),
+        ("state/qex/run/paused.json", "file 600"),
+        ("state/qex/run/pid", "file 664"),
+        ("state/qex/run/s", "socket 600"),
+        ("state/qex/run/spawn.lock", "file 664"),
+        ("state/qex/update.json", "file 600"),
+        ("state/qex/update.lock", "file 600"),
+        ("state/qex/usage.json", "file 600"),
+        ("state/qex/usage.lock", "file 664"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    for job in ["<done>", "<aborted>"] {
+        for (kind, file, mode) in job_files {
+            expected.insert(
+                format!("state/qex/jobs/{job}{file}"),
+                format!("{kind} {mode}"),
+            );
+        }
+    }
+    assert_eq!(seen, expected, "\nseen:\n{seen:#?}");
+}
+
+/// The first start makes the state directory as a parent of the runtime directory, and
+/// only the runtime directory gets a mode; the owner-only fix must change this test.
+#[test]
+fn the_state_directory_of_a_first_start_takes_the_umask() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+
+    let h = Harness::with_default_config("statemode");
+    let mut cmd = h.command(&["info"]);
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::umask(0o002);
+            Ok(())
+        });
+    }
+    let out = cmd.output().unwrap();
+    assert!(out.status.success(), "qex info: {out:?}");
+
+    let mode = |p: &str| {
+        std::fs::metadata(h.root.join(p))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777
+    };
+    assert_eq!(
+        mode("state/qex"),
+        0o775,
+        "made as a parent, with 0777 less the umask"
+    );
+    assert_eq!(mode("state/qex/run"), 0o700);
+}
+
+/// The tail file exists only while a job is over its log limit and still runs.
+#[test]
+fn the_tail_file_of_a_long_log_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+
+    let h = Harness::new(
+        "tailmode",
+        "[peers]\nenabled = false\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [logs]\nmax_bytes = \"64KB\"\n",
+    );
+    let mut cmd = h.command(&["submit", "--", "sh", "-c", "seq 1 500000; sleep 5"]);
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::umask(0o002);
+            Ok(())
+        });
+    }
+    let out = cmd.output().unwrap();
+    assert!(out.status.success(), "qex submit: {out:?}");
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let tail = h.job_dir(&id).join("stdout.log.tail");
+    h.until(
+        "the output passes the limit",
+        Duration::from_secs(60),
+        || tail.exists(),
+    );
+    let mode = std::fs::metadata(&tail).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "the tail file must not take the umask");
+    h.stop(&id);
+}
+
+/// A state directory too deep for `sun_path` moves the socket to a directory in TMPDIR;
+/// that directory is shared with other users, so its modes matter most.
+#[test]
+fn the_socket_directory_in_tmpdir_is_private() {
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+    use std::os::unix::process::CommandExt;
+
+    let mut h = Harness::with_default_config("tmpsock");
+    let deep = h
+        .root
+        .join("a-directory-with-a-very-long-name-to-pass-the-limit")
+        .join("another-directory-with-a-long-name-to-pass-the-limit");
+    std::fs::create_dir_all(&deep).unwrap();
+    h.extra_env.push((
+        "XDG_STATE_HOME".to_string(),
+        deep.to_string_lossy().into_owned(),
+    ));
+
+    let mut cmd = h.command(&["info", "--json"]);
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::umask(0o002);
+            Ok(())
+        });
+    }
+    let out = cmd.output().unwrap();
+    assert!(out.status.success(), "qex info: {out:?}");
+    let info: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let pid = info["pid"]
+        .as_i64()
+        .expect("info gives the pid")
+        .to_string();
+    let prefix = format!("qex-{}-", unsafe { libc::getuid() });
+    let dir = std::fs::read_dir(std::env::temp_dir())
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&prefix)
+                && std::fs::read_to_string(p.join("pid")).ok().as_deref() == Some(pid.as_str())
+        })
+        .expect("the socket directory of this coordinator in TMPDIR");
+    let socket = dir.join("s");
+
+    let meta = |p: &Path| std::fs::symlink_metadata(p).unwrap();
+    assert_eq!(meta(&dir).permissions().mode() & 0o777, 0o700);
+    assert_eq!(meta(&dir.join("pid")).permissions().mode() & 0o777, 0o600);
+    assert!(meta(&socket).file_type().is_socket());
+    assert_eq!(meta(&socket).permissions().mode() & 0o777, 0o600);
+
+    h.stop_coordinator();
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// qex must not use a command line to find a job. This test submits a job whose

@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: the socket directory keeps temp_dir; tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the pid file a kept socket directory gets (R3 of docs/fork/PORT_PLAN.md).
 //! This module gives the location of each file that qex uses.
 //!
 //! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
@@ -1976,5 +1977,29 @@ mod tests {
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A socket that answers keeps the directory, and the pid file the sweep made stays;
+    /// pinned as it is today (no mode, R3 of docs/fork/PORT_PLAN.md).
+    #[test]
+    fn a_kept_socket_directory_keeps_a_pid_file_that_takes_the_umask() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = TestDir::make("qex-claimmode");
+        let dir = base.path().join("qex-claim");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _listener = std::os::unix::net::UnixListener::bind(dir.join("s")).unwrap();
+        std::fs::write(dir.join("reference"), b"").unwrap();
+        assert!(
+            claim_unused_dir(&dir, std::time::Duration::from_secs(3)).is_none(),
+            "a socket that answers keeps the directory"
+        );
+        let mode = |name: &str| {
+            std::fs::metadata(dir.join(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(mode("pid"), mode("reference"), "a file made with no mode");
     }
 }

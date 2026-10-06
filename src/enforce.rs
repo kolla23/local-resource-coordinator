@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the oom mark (R3 of docs/fork/PORT_PLAN.md).
 //! This module reports a kill for memory. It applies no limit.
 //!
 //! qex does not limit a job. A claim decides what STARTS and when, and a job
@@ -439,5 +440,25 @@ mod tests {
 
         std::fs::remove_dir_all(&job).ok();
         std::fs::remove_dir_all(&cgroup).ok();
+    }
+
+    /// Pins the mode of the mark as it is today: none, so it takes the umask (R3 of
+    /// docs/fork/PORT_PLAN.md). The owner-only fix must change this test.
+    #[test]
+    fn the_out_of_memory_mark_takes_the_umask() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::testutil::temp_dir().join(format!("qex-oommode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("reference"), b"").unwrap();
+        mark_oom(&dir);
+        let mode = |name: &str| {
+            std::fs::metadata(dir.join(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(mode("oom"), mode("reference"), "a file made with no mode");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
