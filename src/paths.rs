@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: the socket directory keeps temp_dir; tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the pid file a kept socket directory gets (R3 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-10-06: ensure_dir gives its mode to the parents it makes; the pid file is made and kept 0600 (make_private).
+// Modified by the local-resource-coordinator fork, 2026-10-06: two tests wait out a lock that a forked child of a different test holds for a moment.
 //! This module gives the location of each file that qex uses.
 //!
 //! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
@@ -1892,7 +1893,7 @@ mod tests {
         );
         drop(claim);
         assert_eq!(
-            pid_file_state(base.path()),
+            wait_for_pid_file(base.path(), PidFile::Free),
             PidFile::Free,
             "the claim must give the lock back when it goes out of scope"
         );
@@ -2008,23 +2009,32 @@ mod tests {
         let dir = base.path().join("qex-claim");
         std::fs::create_dir_all(&dir).unwrap();
         let _listener = std::os::unix::net::UnixListener::bind(dir.join("s")).unwrap();
-        let claim_and_read_mode = || {
-            assert!(
-                claim_unused_dir(&dir, std::time::Duration::from_secs(3)).is_none(),
-                "a socket that answers keeps the directory"
-            );
-            std::fs::metadata(dir.join("pid"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777
+        // A child that a different test forks can hold the last claim's lock for a moment (see
+        // `wait_for_pid_file`), and a claim that finds it busy sets no mode, so claim again.
+        let claim_until_private = |what: &str| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                assert!(
+                    claim_unused_dir(&dir, std::time::Duration::from_secs(3)).is_none(),
+                    "a socket that answers keeps the directory"
+                );
+                let mode = std::fs::metadata(dir.join("pid"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777;
+                if mode == 0o600 {
+                    return;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{what}: the claims never made it 0600 in 5 s; the last mode was {mode:o}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
         };
-        assert_eq!(claim_and_read_mode(), 0o600, "a new pid file");
+        claim_until_private("a new pid file");
         std::fs::set_permissions(dir.join("pid"), std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert_eq!(
-            claim_and_read_mode(),
-            0o600,
-            "a pid file that existed with 0644"
-        );
+        claim_until_private("a pid file that existed with 0644");
     }
 }
