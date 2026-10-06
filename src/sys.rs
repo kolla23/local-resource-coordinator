@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-05: the memory and clock bodies moved to src/os/ unchanged; these functions forward to them (R1 of docs/fork/PORT_PLAN.md).
+// Modified by the local-resource-coordinator fork, 2026-10-06: R2a of docs/fork/PORT_PLAN.md, the process identity in src/os/unix.rs.
 //! This module reads the machine capacity and the current machine load.
 //! It also holds the process functions that qex needs.
 //!
@@ -33,145 +34,36 @@ pub fn memory_pressure() -> Option<f64> {
     None
 }
 
-/// Gives an identifier for the current start of the machine.
-///
-/// qex deletes a peer record that has a different identifier. The system uses
-/// each pid again after a restart. Without this test, an old record can look
-/// like a live process.
 pub fn boot_id() -> String {
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(id) = std::fs::read_to_string("/proc/sys/kernel/random/boot_id") {
-            return id.trim().to_string();
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        if let Some(boot) = sysctl_boottime() {
-            return boot;
-        }
-    }
-    // Without this identifier, qex loses the restart test only. It continues to
-    // test each peer process for life.
-    "unknown".to_string()
-}
-
-#[cfg(target_os = "macos")]
-fn sysctl_boottime() -> Option<String> {
-    boot_time_secs().map(|secs| format!("boot-{secs}"))
+    crate::os::boot_id()
 }
 
 pub fn boot_time_secs() -> Option<u64> {
     crate::os::boot_time_secs()
 }
 
-/// Tests if a process is alive.
-///
-/// qex uses this function to delete the records of dead peers. It also uses the
-/// function to find a coordinator that stopped and left its files.
-///
-/// For a live process of a different user, `kill(pid, 0)` gives `EPERM`. That
-/// result also shows that the process is alive.
 pub fn pid_alive(pid: i32) -> bool {
-    if pid <= 0 {
-        return false;
-    }
-    let rc = unsafe { libc::kill(pid, 0) };
-    if rc == 0 {
-        return true;
-    }
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    crate::os::pid_alive(pid)
 }
 
-/// Tests if a JOB process is alive, with a guard against the reuse of its pid.
-///
-/// The supervisor makes each job process the leader of its own process group.
-/// The machine uses each pid again after the process stops, but a new process
-/// with that number is almost never the leader of a group with the same
-/// number. A pid that is not a group leader is therefore not the job.
-///
-/// Unlike `pid_alive`, a refusal of permission does not count as alive here.
-/// Each caller of this function sends a signal to the group of the pid when
-/// the answer is yes, and qex must not signal a process that it cannot prove
-/// is the job.
 pub fn job_pid_alive(pid: i32) -> bool {
-    if pid <= 0 {
-        return false;
-    }
-    unsafe { libc::getpgid(pid) == pid }
+    crate::os::job_pid_alive(pid)
 }
 
-/// Tests if a process of THIS USER is alive.
-///
-/// Unlike `pid_alive`, a refusal of permission does not count as alive. The
-/// supervisor of a job always runs as the user of the coordinator, so a pid
-/// that `kill(pid, 0)` refuses belongs to somebody else: the machine gave the
-/// number of the supervisor to a new process.
 pub fn own_pid_alive(pid: i32) -> bool {
-    if pid <= 0 {
-        return false;
-    }
-    unsafe { libc::kill(pid, 0) == 0 }
+    crate::os::own_pid_alive(pid)
 }
 
-/// Tests if the process that holds `pid` NOW is the process that a record
-/// named, by its start time.
-///
-/// `recorded` is the value that `process_start_token` gave when the record was
-/// written. `None` comes from a record of an earlier version of qex, which
-/// wrote no value; for such a record qex loses this test only and the answer
-/// is yes. A recorded value that the current process does not show — because
-/// the value differs, or because the current process will not show a start
-/// time although the record has one — is a no: qex must not act on a process
-/// that it cannot prove is the recorded one.
 pub fn same_process_start(pid: i32, recorded: Option<u64>) -> bool {
-    match recorded {
-        None => true,
-        Some(recorded) => process_start_token(pid) == Some(recorded),
-    }
+    crate::os::same_process_start(pid, recorded)
 }
 
-/// Gives a value that identifies ONE START of a process.
-///
-/// The machine uses each pid again. Two processes that had one pid started at
-/// different times, so a recorded value that differs from the current value
-/// shows that the recorded process stopped and a stranger holds the number.
-///
-/// The unit of the value differs between systems. Compare two values for
-/// equality only; never read the value as a time.
 pub fn process_start_token(pid: i32) -> Option<u64> {
-    if pid <= 0 {
-        return None;
-    }
-    #[cfg(target_os = "linux")]
-    if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        // The command name can hold spaces and `)`. The stable fields start
-        // after the LAST `)`, and `starttime` is the 20th of them.
-        if let Some((_, rest)) = stat.rsplit_once(')') {
-            return rest.split_whitespace().nth(19).and_then(|f| f.parse().ok());
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
-        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-        let rc = unsafe {
-            libc::proc_pidinfo(
-                pid,
-                libc::PROC_PIDTBSDINFO,
-                0,
-                info.as_mut_ptr().cast(),
-                size,
-            )
-        };
-        if rc == size {
-            let info = unsafe { info.assume_init() };
-            return Some(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec);
-        }
-    }
-    // Without this value, qex loses the reuse test only. It continues to test
-    // the process for life.
-    None
+    crate::os::process_start_token(pid)
+}
+
+pub fn pid_namespace() -> Option<String> {
+    crate::os::pid_namespace()
 }
 
 /// What qex reads about one process for the chain of a submission.
@@ -387,26 +279,6 @@ pub fn process_exe(pid: i32) -> Option<std::path::PathBuf> {
         Some(std::path::PathBuf::from(
             String::from_utf8_lossy(&buf).into_owned(),
         ))
-    }
-}
-
-/// Names the pid namespace of this process.
-///
-/// A process id has a meaning in one pid namespace only. A record that holds
-/// process ids also holds this name, and a reader with a different name must
-/// not test those ids: it would find a stranger, or nothing, and report a
-/// state that is not true. `None` is a system with one namespace (macOS), or
-/// a system that refused to say; two `None` values are the same namespace.
-pub fn pid_namespace() -> Option<String> {
-    #[cfg(target_os = "linux")]
-    {
-        std::fs::read_link("/proc/self/ns/pid")
-            .ok()
-            .map(|p| p.to_string_lossy().into_owned())
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        None
     }
 }
 
