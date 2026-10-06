@@ -3383,6 +3383,14 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
         || h.job_dir(&aborted).join("hook.log").exists(),
     );
     q(&["pause", "queue"]);
+    // An abort writes the record of a queued job with write_status_unsynced (job.rs:842).
+    let cancelled = q(&["submit", "--", TESTJOB, "print", "never"]);
+    q(&["abort", "--all", "--keep-running"]);
+    h.until(
+        "the queued job is cancelled",
+        Duration::from_secs(30),
+        || h.state_of(&cancelled) == "cancelled",
+    );
 
     let mut seen = std::collections::BTreeMap::new();
     let state_mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o7777;
@@ -3408,7 +3416,10 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
                 "file"
             };
             let name = path.strip_prefix(&h.root).unwrap().to_string_lossy();
-            let name = name.replace(&done, "<done>").replace(&aborted, "<aborted>");
+            let name = name
+                .replace(&done, "<done>")
+                .replace(&aborted, "<aborted>")
+                .replace(&cancelled, "<cancelled>");
             seen.insert(
                 name,
                 format!("{kind} {:o}", meta.permissions().mode() & 0o7777),
@@ -3436,6 +3447,9 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
         ("state/qex/history.jsonl", "file 600"),
         ("state/qex/jobs", "dir 700"),
         ("state/qex/jobs/<aborted>/killed-by-user", "file 664"),
+        ("state/qex/jobs/<cancelled>", "dir 700"),
+        ("state/qex/jobs/<cancelled>/spec.json", "file 600"),
+        ("state/qex/jobs/<cancelled>/status.json", "file 600"),
         ("state/qex/run", "dir 700"),
         ("state/qex/run/daemon.log", "file 664"),
         ("state/qex/run/paused.json", "file 600"),
