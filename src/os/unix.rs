@@ -1,5 +1,5 @@
-//! The Unix code of `sys` (boot time, local time, process identity and inspection) and of the
-//! `paths` mode helpers, with the platform-specific parts inside the functions or behind a `cfg`.
+//! The Unix code of `sys` (boot time, local time, process identity and inspection, the terminal)
+//! and of the `paths` mode helpers, with the platform parts inside the functions or behind a `cfg`.
 
 use super::process_info;
 #[cfg(not(target_os = "linux"))]
@@ -414,4 +414,31 @@ pub fn make_private(file: &std::fs::File) {
     use std::os::unix::fs::PermissionsExt;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
         .ok();
+}
+
+/// Tests if the standard input is a terminal.
+///
+/// A command that reads a key needs a terminal. In a pipe or a script there is
+/// no key to read.
+pub fn stdin_is_terminal() -> bool {
+    unsafe { libc::isatty(libc::STDIN_FILENO) == 1 }
+}
+
+/// The size of the terminal that this command writes to, as `(rows, columns)`.
+///
+/// `None` when the output is not a terminal, or when the system does not
+/// give a size. A page that has no size writes every job and draws no frame.
+pub fn terminal_size() -> Option<(usize, usize)> {
+    let mut size: libc::winsize = unsafe { std::mem::zeroed() };
+    let ok = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) };
+    if ok == 0 && size.ws_row > 0 {
+        let cols = if size.ws_col > 0 {
+            size.ws_col as usize
+        } else {
+            80
+        };
+        Some((size.ws_row as usize, cols))
+    } else {
+        None
+    }
 }

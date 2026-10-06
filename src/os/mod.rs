@@ -7,7 +7,7 @@ pub use unix::group_usage;
 pub use unix::{
     boot_id, boot_time_secs, chain_from, clock_text, ensure_dir, job_pid_alive, make_private,
     near_stamp_text, own_pid_alive, pid_alive, pid_namespace, process_exe, process_start_token,
-    rfc3339, same_process_start, stamp_text, submitter_chain,
+    rfc3339, same_process_start, stamp_text, stdin_is_terminal, submitter_chain, terminal_size,
 };
 
 #[cfg(target_os = "linux")]
