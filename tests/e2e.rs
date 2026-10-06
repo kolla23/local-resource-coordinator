@@ -6,6 +6,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-02: the suite needs the test-fixtures feature; nine of the ten sampled tests run the portable `testjob` in place of Unix programs (the /tmp one is unchanged).
 // Modified by the local-resource-coordinator fork, 2026-10-03: two more tests run `testjob`: the record dated before the boot (std `set_modified` in place of `touch`) and the job that starts again (`count`/`if-count-below`/`spin` in place of `sh -c`).
 // Modified by the local-resource-coordinator fork, 2026-10-06: nine tests pin the mode of each path qex makes: the state-directory census, the first start, four directories whose last writer is one call, the pruned history, the tail file and the TMPDIR socket directory (R3 of docs/fork/PORT_PLAN.md).
+// Modified by the local-resource-coordinator fork, 2026-10-06: the census and first-start tests expect owner-only modes; a test for coordinator files left wide by an earlier version.
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -3316,11 +3317,10 @@ fn a_follower_that_makes_the_log_file_makes_it_private() {
 }
 
 /// R3 of docs/fork/PORT_PLAN.md moves the code that sets these modes; a move that changes
-/// one must fail here, and the owner-only fix must change this table on purpose.
+/// one must fail here.
 #[test]
 fn every_path_in_the_state_directory_keeps_its_mode() {
     use std::os::unix::fs::{FileTypeExt, PermissionsExt};
-    use std::os::unix::process::CommandExt;
 
     let h = Harness::with_default_config("census");
     let answer = h.root.join("latest.json");
@@ -3335,16 +3335,7 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
         answer.display()
     ));
     // A umask of 0077 would hide a missing mode: 0666 & !0077 is 0600.
-    let run = |args: &[&str]| {
-        let mut cmd = h.command(args);
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::umask(0o002);
-                Ok(())
-            });
-        }
-        cmd.output().unwrap()
-    };
+    let run = |args: &[&str]| with_umask_002(h.command(args));
     let q = |args: &[&str]| {
         let out = run(args);
         assert!(out.status.success(), "qex {args:?}: {out:?}");
@@ -3429,7 +3420,6 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
     let id_mode = std::fs::metadata(&id_file).unwrap().permissions().mode() & 0o7777;
     seen.insert("job.id".to_string(), format!("file {id_mode:o}"));
 
-    // "file 664" is a file made with no mode: 0666 less the umask 0002.
     let job_files = [
         ("dir", "", "700"),
         ("file", "/hook.log", "600"),
@@ -3446,20 +3436,20 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
         ("state/qex", "dir 700"),
         ("state/qex/history.jsonl", "file 600"),
         ("state/qex/jobs", "dir 700"),
-        ("state/qex/jobs/<aborted>/killed-by-user", "file 664"),
+        ("state/qex/jobs/<aborted>/killed-by-user", "file 600"),
         ("state/qex/jobs/<cancelled>", "dir 700"),
         ("state/qex/jobs/<cancelled>/spec.json", "file 600"),
         ("state/qex/jobs/<cancelled>/status.json", "file 600"),
         ("state/qex/run", "dir 700"),
-        ("state/qex/run/daemon.log", "file 664"),
+        ("state/qex/run/daemon.log", "file 600"),
         ("state/qex/run/paused.json", "file 600"),
-        ("state/qex/run/pid", "file 664"),
+        ("state/qex/run/pid", "file 600"),
         ("state/qex/run/s", "socket 600"),
-        ("state/qex/run/spawn.lock", "file 664"),
+        ("state/qex/run/spawn.lock", "file 600"),
         ("state/qex/update.json", "file 600"),
         ("state/qex/update.lock", "file 600"),
         ("state/qex/usage.json", "file 600"),
-        ("state/qex/usage.lock", "file 664"),
+        ("state/qex/usage.lock", "file 600"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -3475,37 +3465,53 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
     assert_eq!(seen, expected, "\nseen:\n{seen:#?}");
 }
 
-/// The first start makes the state directory as a parent of the runtime directory, and
-/// only the runtime directory gets a mode; the owner-only fix must change this test.
+/// The first start makes the state directory as a parent of the runtime directory, before
+/// any later call sets its mode.
 #[test]
-fn the_state_directory_of_a_first_start_takes_the_umask() {
-    use std::os::unix::fs::PermissionsExt;
-    use std::os::unix::process::CommandExt;
-
+fn the_state_directory_of_a_first_start_is_private() {
     let h = Harness::with_default_config("statemode");
-    let mut cmd = h.command(&["info"]);
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::umask(0o002);
-            Ok(())
-        });
-    }
-    let out = cmd.output().unwrap();
+    let out = with_umask_002(h.command(&["info"]));
     assert!(out.status.success(), "qex info: {out:?}");
 
-    let mode = |p: &str| {
-        std::fs::metadata(h.root.join(p))
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777
-    };
     assert_eq!(
-        mode("state/qex"),
-        0o775,
-        "made as a parent, with 0777 less the umask"
+        mode_of(&h.root.join("state/qex")),
+        0o700,
+        "made as a parent of the runtime directory"
     );
-    assert_eq!(mode("state/qex/run"), 0o700);
+    assert_eq!(mode_of(&h.root.join("state/qex/run")), 0o700);
+}
+
+/// An earlier version made these files with no mode; opening a file that exists keeps
+/// its mode, so qex must also set it on the open file.
+#[test]
+fn the_coordinator_files_an_earlier_version_left_wide_become_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let h = Harness::with_default_config("widefiles");
+    let run = h.root.join("state/qex/run");
+    std::fs::create_dir_all(&run).unwrap();
+    let files = [
+        run.join("daemon.log"),
+        run.join("pid"),
+        run.join("spawn.lock"),
+        h.root.join("state/qex/usage.lock"),
+    ];
+    for file in &files {
+        std::fs::write(file, b"").unwrap();
+        std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o664)).unwrap();
+    }
+
+    let out = with_umask_002(h.command(&["submit", "--", TESTJOB, "print", "x"]));
+    assert!(out.status.success(), "qex submit: {out:?}");
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    with_umask_002(h.command(&["wait", &id, "--timeout", "30s"]));
+    h.until("the usage record", Duration::from_secs(30), || {
+        h.root.join("state/qex/usage.json").exists()
+    });
+
+    for file in &files {
+        assert_eq!(mode_of(file), 0o600, "{}", file.display());
+    }
 }
 
 fn with_umask_002(mut cmd: Command) -> Output {

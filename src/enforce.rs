@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the oom mark (R3 of docs/fork/PORT_PLAN.md).
+// Modified by the local-resource-coordinator fork, 2026-10-06: the oom and killed-by-user marks are made and kept 0600.
 //! This module reports a kill for memory. It applies no limit.
 //!
 //! qex does not limit a job. A claim decides what STARTS and when, and a job
@@ -191,7 +192,23 @@ pub fn oom_evidence(job_dir: &Path) -> bool {
 
 /// Records an out-of-memory event for a job.
 pub fn mark_oom(job_dir: &Path) {
-    std::fs::write(job_dir.join("oom"), b"1").ok();
+    write_mark(&job_dir.join("oom"));
+}
+
+/// Writes a mark like `fs::write`, but with the mode 0600.
+fn write_mark(path: &Path) {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+    {
+        crate::paths::make_private(&file);
+        file.write_all(b"1").ok();
+    }
 }
 
 /// Deletes the out-of-memory record of a job.
@@ -219,7 +236,7 @@ pub fn clear_oom(job_dir: &Path) {
 ///
 /// This mark is thus the first evidence, and it wins against the counter.
 pub fn mark_user_kill(job_dir: &Path) {
-    std::fs::write(job_dir.join("killed-by-user"), b"1").ok();
+    write_mark(&job_dir.join("killed-by-user"));
 }
 
 /// Tests if a command stopped this job.
@@ -442,23 +459,24 @@ mod tests {
         std::fs::remove_dir_all(&cgroup).ok();
     }
 
-    /// Pins the mode of the mark as it is today: none, so it takes the umask (R3 of
-    /// docs/fork/PORT_PLAN.md). The owner-only fix must change this test.
+    /// A new mark and one that existed with a wider mode both end at 0600.
     #[test]
-    fn the_out_of_memory_mark_takes_the_umask() {
+    fn the_out_of_memory_mark_is_private() {
         use std::os::unix::fs::PermissionsExt;
         let dir = crate::testutil::temp_dir().join(format!("qex-oommode-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("reference"), b"").unwrap();
-        mark_oom(&dir);
-        let mode = |name: &str| {
-            std::fs::metadata(dir.join(name))
+        let mode = || {
+            std::fs::metadata(dir.join("oom"))
                 .unwrap()
                 .permissions()
                 .mode()
                 & 0o777
         };
-        assert_eq!(mode("oom"), mode("reference"), "a file made with no mode");
+        mark_oom(&dir);
+        assert_eq!(mode(), 0o600, "a new mark");
+        std::fs::set_permissions(dir.join("oom"), std::fs::Permissions::from_mode(0o644)).unwrap();
+        mark_oom(&dir);
+        assert_eq!(mode(), 0o600, "a mark that existed with 0644");
         std::fs::remove_dir_all(&dir).ok();
     }
 }
