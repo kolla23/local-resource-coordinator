@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: the socket directory keeps temp_dir; tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the pid file a kept socket directory gets (R3 of docs/fork/PORT_PLAN.md).
+// Modified by the local-resource-coordinator fork, 2026-10-06: ensure_dir gives its mode to the parents it makes; the pid file is made and kept 0600 (make_private).
 //! This module gives the location of each file that qex uses.
 //!
 //! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
@@ -293,16 +294,21 @@ fn claim_unused_dir(dir: &std::path::Path, limit: std::time::Duration) -> Option
     // inode. A sweep that reads only takes no lock in a directory with no pid
     // file, and the two then have no common lock at all. The file costs one
     // call of the system, and the sweep deletes it with the directory.
+    use std::os::unix::fs::OpenOptionsExt;
     let file = match std::fs::OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
         .truncate(false)
+        .mode(0o600)
         .open(dir.join(PID_FILE))
     {
         Ok(file) => match try_lock(&file) {
             // This process holds the lock now, and it keeps the file to hold it.
-            LockTry::Taken => Some(file),
+            LockTry::Taken => {
+                make_private(&file);
+                Some(file)
+            }
             LockTry::Held | LockTry::Failed(_) => return None,
         },
         // qex cannot use the file, so it cannot say that the directory is free.
@@ -488,6 +494,7 @@ pub fn hold_pid_file(socket: &std::path::Path, patience: std::time::Duration) ->
     //
     // `st_nlink` of 0 is the test: no name points to the file. The answer is a
     // new open of the path, which gives the inode that the name points to now.
+    use std::os::unix::fs::OpenOptionsExt;
     let deadline = std::time::Instant::now() + patience;
     for _ in 0..PID_LOCK_ATTEMPTS {
         // OPEN WITH NO TRUNCATION. A file that this process empties before it
@@ -498,6 +505,7 @@ pub fn hold_pid_file(socket: &std::path::Path, patience: std::time::Duration) ->
             .read(true)
             .write(true)
             .truncate(false)
+            .mode(0o600)
             .open(&path)
         {
             Ok(file) => file,
@@ -545,6 +553,7 @@ pub fn hold_pid_file(socket: &std::path::Path, patience: std::time::Duration) ->
         if gone {
             continue;
         }
+        make_private(&file);
 
         // The lock is this process's now, so the number of the earlier
         // coordinator has no more use.
@@ -994,16 +1003,29 @@ pub fn job_dir(id: &uuid::Uuid) -> Result<PathBuf> {
 /// This function sets the mode after it makes the directory. A permissive umask
 /// thus cannot make the directory more open than the `mode` parameter.
 pub fn ensure_dir(path: &std::path::Path, mode: u32) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     if !path.exists() {
-        std::fs::create_dir_all(path)
+        // Each missing parent, such as the state directory on a first start,
+        // gets the mode too; a parent that exists keeps its own.
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(mode)
+            .create(path)
             .with_context(|| format!("creating directory {}", path.display()))?;
     }
-    // Set the mode here. `create_dir_all` subtracts the umask. With a
-    // permissive umask, it keeps the group bits and the other bits.
+    // Set the mode here. The umask narrows the mode of a new directory, and a
+    // directory that existed keeps its old mode.
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
         .with_context(|| format!("setting mode {mode:o} on {}", path.display()))?;
     Ok(())
+}
+
+/// Sets 0600 on an open file, also one that existed with a wider mode. Best effort:
+/// each such file lies in a 0700 directory, and a refused change must not stop qex.
+pub fn make_private(file: &std::fs::File) {
+    use std::os::unix::fs::PermissionsExt;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .ok();
 }
 
 #[cfg(test)]
@@ -1979,27 +2001,30 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// A socket that answers keeps the directory, and the pid file the sweep made stays;
-    /// pinned as it is today (no mode, R3 of docs/fork/PORT_PLAN.md).
     #[test]
-    fn a_kept_socket_directory_keeps_a_pid_file_that_takes_the_umask() {
+    fn a_kept_socket_directory_keeps_a_private_pid_file() {
         use std::os::unix::fs::PermissionsExt;
         let base = TestDir::make("qex-claimmode");
         let dir = base.path().join("qex-claim");
         std::fs::create_dir_all(&dir).unwrap();
         let _listener = std::os::unix::net::UnixListener::bind(dir.join("s")).unwrap();
-        std::fs::write(dir.join("reference"), b"").unwrap();
-        assert!(
-            claim_unused_dir(&dir, std::time::Duration::from_secs(3)).is_none(),
-            "a socket that answers keeps the directory"
-        );
-        let mode = |name: &str| {
-            std::fs::metadata(dir.join(name))
+        let claim_and_read_mode = || {
+            assert!(
+                claim_unused_dir(&dir, std::time::Duration::from_secs(3)).is_none(),
+                "a socket that answers keeps the directory"
+            );
+            std::fs::metadata(dir.join("pid"))
                 .unwrap()
                 .permissions()
                 .mode()
                 & 0o777
         };
-        assert_eq!(mode("pid"), mode("reference"), "a file made with no mode");
+        assert_eq!(claim_and_read_mode(), 0o600, "a new pid file");
+        std::fs::set_permissions(dir.join("pid"), std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            claim_and_read_mode(),
+            0o600,
+            "a pid file that existed with 0644"
+        );
     }
 }

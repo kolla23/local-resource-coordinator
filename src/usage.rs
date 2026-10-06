@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-06: usage.lock is made and kept 0600.
 //! This module remembers what a job really used, and gives the claim for the
 //! next job of the same kind.
 //!
@@ -346,14 +347,17 @@ fn add(spec: &JobSpec, status: &JobStatus, kind: Measurement, bytes: u64) {
     }
 
     let lock_path = dir.join("usage.lock");
+    use std::os::unix::fs::OpenOptionsExt;
     let Ok(lock) = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
+        .mode(0o600)
         .open(&lock_path)
     else {
         return;
     };
+    paths::make_private(&lock);
     use std::os::unix::io::AsRawFd;
     if let Err(e) = lock_exclusive(lock.as_raw_fd()) {
         crate::daemon::log(&format!(

@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-06: daemon.log and spawn.lock are made and kept 0600.
 //! This module connects the CLI to the coordinator.
 //!
 //! If no coordinator operates, the CLI starts one. Many CLI processes can do
@@ -1266,6 +1267,7 @@ fn last_lines_of(path: &Path, count: usize) -> String {
 /// terminal. The system does not send it `SIGHUP` when the terminal closes.
 /// This is the behaviour of `nohup`, but qex does not need a shell.
 fn spawn_daemon() -> Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::process::CommandExt;
 
     let exe = paths::program_path()?;
@@ -1275,8 +1277,10 @@ fn spawn_daemon() -> Result<()> {
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
+        .mode(0o600)
         .open(&log_path)
         .with_context(|| format!("opening the log file {}", log_path.display()))?;
+    paths::make_private(&log);
     let log_err = log.try_clone().context("copying the log file handle")?;
 
     let mut cmd = std::process::Command::new(exe);
@@ -1318,12 +1322,15 @@ impl SpawnLock {
         paths::ensure_dir(&dir, 0o700)?;
         let path = paths::spawn_lock_path()?;
 
+        use std::os::unix::fs::OpenOptionsExt;
         let file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
+            .mode(0o600)
             .open(&path)
             .with_context(|| format!("opening the lock file {}", path.display()))?;
+        paths::make_private(&file);
 
         use std::os::unix::io::AsRawFd;
         // Take the lock inside the limit for a coordinator.
