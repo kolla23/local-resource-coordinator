@@ -3508,6 +3508,111 @@ fn the_state_directory_of_a_first_start_takes_the_umask() {
     assert_eq!(mode("state/qex/run"), 0o700);
 }
 
+fn with_umask_002(mut cmd: Command) -> Output {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::umask(0o002);
+            Ok(())
+        });
+    }
+    cmd.output().unwrap()
+}
+
+fn mode_of(path: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+#[test]
+fn the_runtime_directory_of_a_coordinator_started_alone_is_private() {
+    let mut h = Harness::with_default_config("daemonmode");
+    h.extra_env
+        .push(("QEX_IDLE_EXIT_SECS".to_string(), "1".to_string()));
+    let out = with_umask_002(h.command(&["daemon"]));
+    assert!(out.status.success(), "qex daemon: {out:?}");
+    assert_eq!(mode_of(&h.root.join("state/qex/run")), 0o700);
+}
+
+#[test]
+fn the_runtime_directory_the_client_makes_is_private() {
+    let h = Harness::new("clientmode", "budget = 5\n");
+    let out = with_umask_002(h.command(&["info"]));
+    assert!(
+        !out.status.success(),
+        "the coordinator must refuse this config: {out:?}"
+    );
+    assert!(
+        !h.root.join("state/qex/jobs").exists(),
+        "the coordinator must stop before it makes its directories"
+    );
+    assert_eq!(mode_of(&h.root.join("state/qex/run")), 0o700);
+}
+
+#[test]
+fn the_state_directory_after_an_update_check_is_private() {
+    let h = Harness::with_default_config("updmode");
+    let answer = h.root.join("latest.json");
+    std::fs::write(&answer, r#"{"tag_name": "v0.0.1"}"#).unwrap();
+    h.write_config(&format!(
+        "[peers]\nenabled = false\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [update]\ncheck = \"300s\"\nurl = \"file://{}\"\n",
+        answer.display()
+    ));
+    let out = with_umask_002(h.command(&["info"]));
+    assert!(out.status.success(), "qex info: {out:?}");
+    let state = h.root.join("state/qex");
+    h.until("the update record", Duration::from_secs(45), || {
+        state.join("update.json").exists()
+    });
+    assert_eq!(mode_of(&state), 0o700);
+}
+
+#[test]
+fn the_state_directory_after_one_job_is_private() {
+    let h = Harness::with_default_config("usagemode");
+    let out = with_umask_002(h.command(&["submit", "--", TESTJOB, "print", "x"]));
+    assert!(out.status.success(), "qex submit: {out:?}");
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let state = h.root.join("state/qex");
+    h.until("the usage record", Duration::from_secs(45), || {
+        state.join("usage.json").exists()
+    });
+    with_umask_002(h.command(&["wait", &id, "--timeout", "30s"]));
+    assert_eq!(mode_of(&state), 0o700);
+}
+
+#[test]
+fn a_pruned_history_is_rewritten_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Harness::with_default_config("prunemode");
+    let state = h.root.join("state/qex");
+    std::fs::create_dir_all(&state).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let lines = format!(
+        "{{\"id\":\"{}\",\"name\":\"old\",\"submitted_at\":1}}\n\
+         {{\"id\":\"{}\",\"name\":\"new\",\"submitted_at\":{now}}}\n",
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4()
+    );
+    let file = state.join("history.jsonl");
+    std::fs::write(&file, lines).unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let out = with_umask_002(h.command(&["info"]));
+    assert!(out.status.success(), "qex info: {out:?}");
+    h.until(
+        "the start prunes the history",
+        Duration::from_secs(30),
+        || !std::fs::read_to_string(&file).unwrap().contains("\"old\""),
+    );
+    assert_eq!(mode_of(&file), 0o600);
+}
+
 /// The tail file exists only while a job is over its log limit and still runs.
 #[test]
 fn the_tail_file_of_a_long_log_is_private() {
