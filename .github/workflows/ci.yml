@@ -69,17 +69,23 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
-        # The checker comes from the base revision, so a refactor PR can't change the
-        # checker that judges it.
+        # The checker comes from the base revision. This job itself runs from the PR,
+        # so a PR could still change it; the summary then warns about .github/.
         run: |
           set +e
+          mb=$(git merge-base "$BASE" HEAD)
           {
             git show "$BASE:.github/scripts/check-moves.py" > "$RUNNER_TEMP/check-moves.py" \
-              && python3 "$RUNNER_TEMP/check-moves.py" "$(git merge-base "$BASE" HEAD)" HEAD
+              && python3 "$RUNNER_TEMP/check-moves.py" "$mb" HEAD
           } > moves.txt 2>&1
           code=$?
           cat moves.txt
           {
+            if ! git diff --quiet "$mb" HEAD -- .github/; then
+              echo "**Warning: this PR changes .github/, which holds this job and the"
+              echo "checker. Read that diff before trusting this result.**"
+              echo
+            fi
             echo "## Move check: exit $code"
             echo "0: every function moved; 1: some are not moves and the PR must explain"
             echo "them; anything else: the checker failed."

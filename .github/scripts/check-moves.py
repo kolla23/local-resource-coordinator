@@ -24,7 +24,8 @@ the closing brace, is byte-identical in the same file at <head>. For a
 move, only the call path may differ: a leading crate::, super::, self::, sys::,
 os:: or os::<name>:: on a path in the body's code (not in the signature, a
 string, a comment or a use statement, not after another ::). Prints each move,
-then every changed line that is not part of a move, in every changed file: lines
+then every changed line that is not part of a move, in every changed file. Lines
+that differ between the two copies of a move apart from call paths, lines
 outside .rs files, file mode changes and submodule changes never are. Changed
 lines come from comparing the stored blobs, not from `git diff`. Exits 1 when a
 function has no copy, 2 on a usage error, 3 when the checker itself fails.
@@ -306,6 +307,12 @@ def main():
             rest.append(f"  {f}: submodule {sa} -> {sb}")
         rest += [f"  {f}:{o} -{t}" for o, t in removed.items() if (f, o) not in moved_old]
         rest += [f"  {f}:{n} +{t}" for n, t in added.items() if (f, n) not in moved_new]
+    for i, (j, kind) in sorted(pairs.items()):
+        if kind == "identical apart from call paths":
+            (f, fn), (g_file, g) = old[i], new[j]
+            removed, added = diff_lines(fn["item"] + "\n", g["item"] + "\n")
+            rest += [f"  {f}:{fn['lines'].start + o - 1} -{t}" for o, t in removed.items()]
+            rest += [f"  {g_file}:{g['lines'].start + n - 1} +{t}" for n, t in added.items()]
     print(f"\n{len(rest)} changed lines are not part of a move" + (":" if rest else "."))
     if rest:
         print("\n".join(rest))
