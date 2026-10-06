@@ -5,7 +5,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: a coordinator with no [update] check writes no update record (issue #4).
 // Modified by the local-resource-coordinator fork, 2026-10-02: the suite needs the test-fixtures feature; nine of the ten sampled tests run the portable `testjob` in place of Unix programs (the /tmp one is unchanged).
 // Modified by the local-resource-coordinator fork, 2026-10-03: two more tests run `testjob`: the record dated before the boot (std `set_modified` in place of `touch`) and the job that starts again (`count`/`if-count-below`/`spin` in place of `sh -c`).
-// Modified by the local-resource-coordinator fork, 2026-10-06: four tests pin the mode of each path qex makes: the state-directory census, the first start, the tail file and the TMPDIR socket directory (R3 of docs/fork/PORT_PLAN.md).
+// Modified by the local-resource-coordinator fork, 2026-10-06: nine tests pin the mode of each path qex makes: the state-directory census, the first start, four directories whose last writer is one call, the pruned history, the tail file and the TMPDIR socket directory (R3 of docs/fork/PORT_PLAN.md).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
