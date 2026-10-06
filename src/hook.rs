@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the hook.log that `note` makes, and the doc of `note` says so (R3 of docs/fork/PORT_PLAN.md).
 //! This module runs the command that qex starts when a job stops.
 //!
 //! The hook is a property of the machine and of the person at it, and not a
@@ -208,9 +209,9 @@ fn fire_with(origin: Origin, cfg: &Config, dir: &Path, status: &JobStatus) {
 
 /// Adds one line to the log of the hook.
 ///
-/// The mode below is belt AND braces, and a deletion of it leaves the test
-/// suite green. [`run`] opens the same file with the same mode before it starts
-/// the hook, so on every path that a test can drive, the file already exists and
+/// The mode below is belt AND braces, and only a unit test that calls `note`
+/// reaches it. [`run`] opens the same file with the same mode before it starts
+/// the hook, so whenever that open worked, the file already exists and
 /// `create` does nothing. This call makes the file only when THAT open failed.
 /// The mode stays: the two places that make this file must not disagree, and a
 /// reader who sees one of them must find the same rule in the other.
@@ -973,6 +974,20 @@ mod tests {
             mode, 0o600,
             "the log of a hook that did not start has the mode {mode:o}"
         );
+    }
+
+    #[test]
+    fn the_log_that_note_makes_is_readable_by_the_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp("note-mode");
+        note(&dir, "a line");
+        let mode = std::fs::metadata(dir.join(LOG_FILE))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "note made hook.log with the mode {mode:o}");
     }
 
     /// The hook gets no standard input.
