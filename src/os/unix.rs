@@ -2,9 +2,9 @@
 //! `paths` mode helpers, with the platform-specific parts inside the functions or behind a `cfg`.
 
 use super::process_info;
-use anyhow::{Context, Result};
 #[cfg(not(target_os = "linux"))]
 use crate::sys::GroupUsage;
+use anyhow::{Context, Result};
 
 /// Gives the moment when this machine started, in seconds after the Unix epoch.
 ///
