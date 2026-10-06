@@ -87,8 +87,9 @@ jobs:
               echo
             fi
             echo "## Move check: exit $code"
-            echo "0: every function has a copy; 1: some have none; anything else: the"
-            echo "checker failed. At 0 or 1, the PR must explain every line listed below."
+            echo "0: every changed function has a byte-identical copy; 1: some have none;"
+            echo "anything else: the checker failed. At 0 or 1, the PR must explain every"
+            echo "line listed below."
             echo '````'
             cat moves.txt
             echo '````'

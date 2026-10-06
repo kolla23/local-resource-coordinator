@@ -20,28 +20,28 @@ in another file (a move). The item is the function, from its visibility and
 qualifiers on whatever line they start, with the attributes and comments directly
 above it. A function inside any { } block (mod, impl, trait, fn) may not move,
 and counts as unchanged only if its whole top-level block, from the header to
-the closing brace, is byte-identical in the same file at <head>. For a
-move, only the call path may differ: a leading crate::, super::, self::, sys::,
-os:: or os::<name>:: on a path in the body's code (not in the signature, a
-string, a comment or a use statement, not after another ::). Prints each move,
-then every changed line that is not part of a move, in every changed file. Lines
-that differ between the two copies of a move apart from call paths, lines
-outside .rs files, file mode changes and submodule changes never are. Changed
-lines come from comparing the stored blobs, not from `git diff`. Exits 1 when a
-function has no copy, 2 on a usage error, 3 when the checker itself fails.
+the closing brace, is byte-identical in the same file at <head>.
+
+Prints each move, then every line that is not part of a move, in every changed
+file. A changed line is left out only when it belongs to a paired function on
+its side (the <base> function for a removed line, the <head> function for an
+added one). Every line of a <head> function that pairs with nothing is listed,
+changed or not, and so are lines outside .rs files, file mode changes and
+submodule changes. Changed lines come from comparing the stored blobs, not from
+`git diff`. Exits 1 when a <base> function has no byte-identical copy, 2 on a
+usage error, 3 when the checker itself fails. At 0 or 1, every listed line needs
+an explanation.
 
 Known blind spots (#48): an attribute separated from its function by a blank line
-is not part of the item; call paths are also stripped in `$crate::` inside a
-macro_rules! body and in code after the closing brace on its line; a `{` inside
-generics in a signature is taken as the body's opening brace.
+is not part of the item; a `{` inside generics in a signature is taken as the
+body's opening brace, so only the signature line is compared (the body's
+changed lines are still listed).
 
 The authoritative result is the CI run, which uses a clean git config; local
 runs are a convenience."""
-CALL_PATH = re.compile(r"(?<![\w:])(?:(?:crate|super|self|sys)::|os::(?:\w+::)?)+")
 FN = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
 QUALIFIERS = re.compile(
     r"(?<!\w)(?:(?:pub(?:\s*\([^()]*\))?|const|async|unsafe|safe|extern|default)\s+)*\Z")
-USE = re.compile(r"\buse\b")
 
 
 def git(*args):
@@ -208,30 +208,9 @@ def functions(text):
             "name": m[1], "cfg": " ".join(plain[starts[top]:q].split()), "line": first,
             "outer": outer, "nested": bool(open_at[m.start()]),
             "item": text[starts[top]:len(text) if end < 0 else end],
-            "body_at": j - starts[top],
             "lines": range(top + 1, line(k) + 1),
         })
     return found
-
-
-def without_call_paths(text):
-    masked = mask(text)
-    out, last = [], 0
-    for m in CALL_PATH.finditer(masked):
-        last_use = max((u.end() for u in USE.finditer(masked, 0, m.start())), default=-1)
-        if last_use >= 0 and ";" not in masked[last_use:m.start()]:
-            continue
-        out.append(text[last:m.start()])
-        last = m.end()
-    return "".join(out) + text[last:]
-
-
-def same(a, b, ignore_paths):
-    if ignore_paths:
-        head_a, body_a = a["item"][:a["body_at"]], a["item"][a["body_at"]:]
-        head_b, body_b = b["item"][:b["body_at"]], b["item"][b["body_at"]:]
-        return head_a == head_b and without_call_paths(body_a) == without_call_paths(body_b)
-    return a["item"] == b["item"]
 
 
 def blob(sha, mode):
@@ -274,7 +253,7 @@ def main():
     old = [(f, fn) for f in rs if (t := texts[f][0]) is not None for fn in functions(t)]
     new = [(f, g) for f in rs if (t := texts[f][1]) is not None for g in functions(t)]
     pairs, claimed = {}, set()
-    for kind in ("in place", "identical", "identical apart from call paths"):
+    for kind in ("in place", "identical"):
         for i, (f, fn) in enumerate(old):
             if i in pairs:
                 continue
@@ -283,7 +262,7 @@ def main():
                         or (kind == "in place") != (g_file == f) \
                         or (kind != "in place" and fn["nested"]):
                     continue
-                if same(fn, g, kind == "identical apart from call paths"):
+                if fn["item"] == g["item"]:
                     pairs[i] = (j, kind)
                     claimed.add(j)
                     break
@@ -305,6 +284,11 @@ def main():
     rest = []
     for f in files:
         removed, added = diffs[f]
+        head_rows = rows(texts[f][1])
+        for j, (g_file, g) in enumerate(new):
+            if g_file == f and j not in claimed:
+                added.update((n, shown(head_rows[n - 1])) for n in g["lines"])
+        added = dict(sorted(added.items()))
         before, after, sa, sb = meta[f]
         if "000000" not in (before, after) and before != after:
             rest.append(f"  {f}: mode {before} -> {after}")
@@ -312,13 +296,7 @@ def main():
             rest.append(f"  {f}: submodule {sa} -> {sb}")
         rest += [f"  {f}:{o} -{t}" for o, t in removed.items() if (f, o) not in moved_old]
         rest += [f"  {f}:{n} +{t}" for n, t in added.items() if (f, n) not in moved_new]
-    for i, (j, kind) in sorted(pairs.items()):
-        if kind == "identical apart from call paths":
-            (f, fn), (g_file, g) = old[i], new[j]
-            removed, added = diff_lines(fn["item"] + "\n", g["item"] + "\n")
-            rest += [f"  {f}:{fn['lines'].start + o - 1} -{t}" for o, t in removed.items()]
-            rest += [f"  {g_file}:{g['lines'].start + n - 1} +{t}" for n, t in added.items()]
-    print(f"\n{len(rest)} changed lines are not part of a move" + (":" if rest else "."))
+    print(f"\n{len(rest)} lines are not part of a move" + (":" if rest else "."))
     if rest:
         print("\n".join(rest))
     sys.exit(1 if failures else 0)

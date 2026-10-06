@@ -100,39 +100,10 @@ CASES = [
      {"src/a.rs": "// SAFETY: one caller.\n" + LINUX},
      {"src/a.rs": None, "src/b.rs": LINUX},
      1, ["NOT A MOVE: src/a.rs:3 total"]),
-    ("a path changed inside a string",
-     {"src/a.rs": 'pub fn f() -> &\'static str {\n    "crate::x"\n}\n'},
-     {"src/a.rs": None, "src/b.rs": 'pub fn f() -> &\'static str {\n    "x"\n}\n'},
-     1, ["NOT A MOVE: src/a.rs:1 f"]),
-    ("a path changed after std::",
-     {"src/a.rs": "pub fn f() {\n    use std::os::unix::fs::MetadataExt;\n}\n"},
-     {"src/a.rs": None, "src/b.rs": "pub fn f() {\n    use std::os::linux::fs::MetadataExt;\n}\n"},
-     1, ["NOT A MOVE: src/a.rs:1 f"]),
-    ("a moved body whose calls gain a path",
+    ("a call that gains a path during the move is not a move, and its lines are listed",
      {"src/sys.rs": FIELD + "pub fn total() -> u64 {\n    field(\"MemTotal:\")\n}\n"},
      {"src/sys.rs": FIELD, "src/os/unix.rs": TOTAL % ("super::field", "MemTotal:")},
-     0, ["moved: src/sys.rs:5 total -> src/os/unix.rs:1  identical apart from call paths"]),
-    ("a call that loses os::linux:: is still a move",
-     {"src/sys.rs": "pub fn g() -> u8 {\n    os::linux::h()\n}\n"},
-     {"src/sys.rs": None, "src/os/linux.rs": "pub fn g() -> u8 {\n    h()\n}\n"},
-     0, ["identical apart from call paths"]),
-    ("a call switched to another platform module is a move whose lines are listed",
-     {"src/sys.rs": "pub fn g() -> u8 {\n    os::linux::h()\n}\n"},
-     {"src/sys.rs": None, "src/os/x.rs": "pub fn g() -> u8 {\n    os::macos::h()\n}\n"},
-     0, ["identical apart from call paths", "2 changed lines",
-         "src/sys.rs:2 -    os::linux::h()", "src/os/x.rs:2 +    os::macos::h()"]),
-    ("a call that loses a bare linux:: is not a move",
-     {"src/a.rs": "pub fn g() -> u8 {\n    linux::h()\n}\n"},
-     {"src/a.rs": None, "src/b.rs": "pub fn g() -> u8 {\n    h()\n}\n"},
-     1, ["NOT A MOVE: src/a.rs:1 g"]),
-    ("a path changed in a use group is not a move",
-     {"src/a.rs": "pub fn f() {\n    use std::os::{unix::fs::MetadataExt};\n}\n"},
-     {"src/a.rs": None, "src/b.rs": "pub fn f() {\n    use std::os::{linux::fs::MetadataExt};\n}\n"},
-     1, ["NOT A MOVE: src/a.rs:1 f"]),
-    ("a use path that loses crate:: is not a move",
-     {"src/a.rs": "pub fn f() {\n    use crate::sys::x;\n}\n"},
-     {"src/a.rs": None, "src/b.rs": "pub fn f() {\n    use x;\n}\n"},
-     1, ["NOT A MOVE: src/a.rs:1 f"]),
+     1, ["NOT A MOVE: src/sys.rs:5 total", 'src/os/unix.rs:2 +    super::field("MemTotal:")']),
     ("a deleted function with an unchanged twin in another changed file",
      {"src/a.rs": "fn helper() -> u8 {\n    1\n}\n", "src/b.rs": "fn helper() -> u8 {\n    1\n}\n"},
      {"src/a.rs": None, "src/b.rs": "fn helper() -> u8 {\n    1\n}\n\nfn other() {}\n"},
@@ -151,7 +122,7 @@ CASES = [
     ("a changed line that starts with -- is listed",
      {"src/a.rs": 'pub const HELP: &str = r"\n--signal\n--other\n";\n'},
      {"src/a.rs": 'pub const HELP: &str = r"\n--other\n";\n'},
-     0, ["1 changed lines are not part of a move", "src/a.rs:2 ---signal"]),
+     0, ["1 lines are not part of a move", "src/a.rs:2 ---signal"]),
     ("a line inserted inside a body",
      {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
      {"src/a.rs": "pub fn f() -> u8 {\n    std::process::exit(3);\n    1\n}\n"},
@@ -189,14 +160,6 @@ CASES = [
      {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
      {"src/a.rs": None, "src/b.rs": "pub fn f() -> u8 {\r\n    1\r\n}\r\n"},
      1, ["NOT A MOVE: src/a.rs:1 f"]),
-    ("a pub(in path) changed during the move",
-     {"src/a/b.rs": "pub(in super::super) fn f() {}\n"},
-     {"src/a/b.rs": None, "src/a/c.rs": "pub(in super) fn f() {}\n"},
-     1, ["NOT A MOVE: src/a/b.rs:1 f"]),
-    ("a path changed in a signature during the move",
-     {"src/a.rs": "pub fn f() -> sys::Info {\n    Info\n}\n"},
-     {"src/a.rs": None, "src/b.rs": "pub fn f() -> Info {\n    Info\n}\n"},
-     1, ["NOT A MOVE: src/a.rs:1 f"]),
     ("a visibility change is not a move",
      {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
      {"src/b.rs": "pub(crate) fn f() -> u8 {\n    1\n}\n", "src/a.rs": None},
@@ -205,7 +168,7 @@ CASES = [
      {"src/sys.rs": TRICKY + "\npub fn keep() {}\n"},
      {"src/sys.rs": "pub fn keep() {}\n", "src/os/unix.rs": TRICKY},
      0, ["moved: src/sys.rs:1 tricky -> src/os/unix.rs:1  identical",
-         "1 changed lines are not part of a move", "src/sys.rs:10 -"]),
+         "1 lines are not part of a move", "src/sys.rs:10 -"]),
     ("a re-indented function is not a move",
      {"src/a.rs": "mod inner {\n    pub fn f() -> u8 {\n        let x = 1;\n        x\n    }\n}\n"},
      {"src/a.rs": "mod inner {}\n", "src/b.rs": "pub fn f() -> u8 {\n    let x = 1;\n    x\n}\n"},
@@ -229,7 +192,7 @@ CASES = [
     ("unchanged functions are not listed",
      {"src/a.rs": "pub fn f() {}\n\npub fn g() {}\n"},
      {"src/a.rs": "pub fn f() {}\n\npub fn g() {}\n\npub fn h() {}\n"},
-     0, ["2 changed lines are not part of a move", "src/a.rs:5 +pub fn h() {}"]),
+     0, ["2 lines are not part of a move", "src/a.rs:5 +pub fn h() {}"]),
     ("a whitespace-only change inside a string is listed",
      {"src/a.rs": 'pub const S: &str = "a\n  \nb";\n'},
      {"src/a.rs": 'pub const S: &str = "a\n    \nb";\n'},
@@ -255,7 +218,7 @@ CASES = [
     ("a nested function unchanged while its file changes",
      {"src/a.rs": "impl A {\n    fn f() {}\n}\n"},
      {"src/a.rs": "impl A {\n    fn f() {}\n}\n\npub fn g() {}\n"},
-     0, ["2 changed lines are not part of a move", "src/a.rs:5 +pub fn g() {}"]),
+     0, ["2 lines are not part of a move", "src/a.rs:5 +pub fn g() {}"]),
     ("a top-level function moved within its file",
      {"src/a.rs": "pub fn f() {}\n\npub fn g() {\n    1;\n}\n"},
      {"src/a.rs": "pub fn g() {\n    1;\n}\n\npub fn f() {}\n"},
@@ -298,7 +261,7 @@ CASES = [
     ("qualifiers on their own line moved unchanged",
      {"src/a.rs": 'pub unsafe extern "C"\nfn f() {}\n'},
      {"src/a.rs": None, "src/b.rs": 'pub unsafe extern "C"\nfn f() {}\n'},
-     0, ["moved: src/a.rs:1 f -> src/b.rs:1  identical", "0 changed lines"]),
+     0, ["moved: src/a.rs:1 f -> src/b.rs:1  identical", "0 lines are not part of a move"]),
     ("one of two attributes on a line changed during the move",
      {"src/a.rs": "#[inline] #[cfg(unix)]\nfn f() {}\n"},
      {"src/a.rs": None, "src/b.rs": "#[inline(always)] #[cfg(unix)]\nfn f() {}\n"},
@@ -320,7 +283,7 @@ CASES = [
      {"src/a.rs": "pub fn f() {}\n", "Cargo.toml": "[features]\nx = []\n"},
      {"src/a.rs": None, "src/b.rs": "pub fn f() {}\n",
       "Cargo.toml": '[features]\nx = []\ndefault = ["x"]\n'},
-     0, ["moved: src/a.rs:1 f -> src/b.rs:1  identical", "1 changed lines",
+     0, ["moved: src/a.rs:1 f -> src/b.rs:1  identical", "1 lines are not part of a move",
          'Cargo.toml:3 +default = ["x"]']),
     ("a brace inside a raw C string",
      {"src/a.rs": 'pub fn f() {\n    let _ = cr#"x"}"#;\n}\npub fn g() {}\n'},
@@ -330,13 +293,30 @@ CASES = [
     ("a file whose name is a glob gets only its own lines",
      {"src/a.rs": "pub fn a() {}\nconst A: u8 = 1;\n", "src/[ab].rs": "const Z: u8 = 1;\n"},
      {"src/a.rs": "pub fn a() {}\nconst A: u8 = 2;\n", "src/[ab].rs": "const Z: u8 = 2;\n"},
-     0, ["4 changed lines", "src/[ab].rs:1 +const Z: u8 = 2;", "src/a.rs:2 +const A: u8 = 2;"]),
+     0, ["4 lines are not part of a move", "src/[ab].rs:1 +const Z: u8 = 2;",
+         "src/a.rs:2 +const A: u8 = 2;"]),
+] + [
+    (f"a copy left behind with {what} while the original moves is listed",
+     {"src/a.rs": before}, {"src/a.rs": after, "src/b.rs": before},
+     0, ["moved: src/a.rs:", f"src/a.rs:1 +{after.split(chr(10))[0]}",
+         f"{after.count(chr(10))} lines are not part of a move"])
+    for what, before, after in (
+        ("a deleted line", "pub fn f(x: u8) -> u8 {\n    assert!(x < 9);\n    x\n}\n",
+         "pub fn f(x: u8) -> u8 {\n    x\n}\n"),
+        ("its cfg dropped", '#[cfg(target_os = "linux")]\npub fn f() -> u8 {\n    1\n}\n',
+         "pub fn f() -> u8 {\n    1\n}\n"),
+        ("its pub(crate) line dropped", "pub(crate)\nfn f() -> u8 {\n    1\n}\n",
+         "fn f() -> u8 {\n    1\n}\n"),
+        ("its SAFETY comment dropped", "// SAFETY: one caller.\npub fn f() -> u8 {\n    1\n}\n",
+         "pub fn f() -> u8 {\n    1\n}\n"))
+] + [
     ("a final newline removed is listed",
      {"src/a.rs": "pub const A: u8 = 1;\n"}, {"src/a.rs": "pub const A: u8 = 1;"},
-     0, ["2 changed lines", "src/a.rs:1 +pub const A: u8 = 1;  (no newline at end of file)"]),
+     0, ["2 lines are not part of a move",
+         "src/a.rs:1 +pub const A: u8 = 1;  (no newline at end of file)"]),
     ("a change in a file that is not UTF-8 is listed",
      {"data.bin": b"a\xff\n"}, {"data.bin": b"a\xfe\n"},
-     0, ["2 changed lines", "data.bin:1 -a\\udcff", "data.bin:1 +a\\udcfe"]),
+     0, ["2 lines are not part of a move", "data.bin:1 -a\\udcff", "data.bin:1 +a\\udcfe"]),
 ]
 
 
@@ -369,8 +349,8 @@ def main():
                      ("GIT_DIFF_OPTS in the environment",
                       {"env": {"GIT_DIFF_OPTS": "--unified=3"}})):
         rc, out = run(*secret, **kw)
-        ok = rc == 0 and "4 changed lines" in out and "a.rs:5 +const SECRET: u8 = 2;" in out \
-            and "moved:" not in out
+        ok = rc == 0 and "4 lines are not part of a move" in out \
+            and "a.rs:5 +const SECRET: u8 = 2;" in out and "moved:" not in out
         failed += not ok
         print(f"{'ok  ' if ok else 'FAIL'} {name} hides nothing")
         if not ok:
@@ -388,7 +368,8 @@ def main():
         print("\n".join("     " + r for r in out.splitlines()))
     rc, out = run({"src/a.rs": "pub fn f() {}\n", "run.sh": "echo\n"},
                   {"src/a.rs": "pub fn f() {}\n", "run.sh": "echo\n"}, chmod=["run.sh"])
-    ok = rc == 0 and "run.sh: mode 100644 -> 100755" in out and "1 changed lines" in out
+    ok = rc == 0 and "run.sh: mode 100644 -> 100755" in out \
+        and "1 lines are not part of a move" in out
     failed += not ok
     print(f"{'ok  ' if ok else 'FAIL'} a file mode change is listed")
     if not ok:
