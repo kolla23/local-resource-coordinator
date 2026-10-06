@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the pid file a kept socket directory gets (R3 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-10-06: ensure_dir gives its mode to the parents it makes; the pid file is made and kept 0600 (make_private).
 // Modified by the local-resource-coordinator fork, 2026-10-06: two tests wait out a lock that a forked child of a different test holds for a moment.
+// Modified by the local-resource-coordinator fork, 2026-10-06: the bodies of ensure_dir and make_private move to src/os/unix.rs; these forward (R3a of docs/fork/PORT_PLAN.md).
 //! This module gives the location of each file that qex uses.
 //!
 //! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
@@ -999,34 +1000,12 @@ pub fn job_dir(id: &uuid::Uuid) -> Result<PathBuf> {
     Ok(jobs_dir()?.join(id.to_string()))
 }
 
-/// Makes a directory and its parent directories, then sets the mode.
-///
-/// This function sets the mode after it makes the directory. A permissive umask
-/// thus cannot make the directory more open than the `mode` parameter.
 pub fn ensure_dir(path: &std::path::Path, mode: u32) -> Result<()> {
-    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-    if !path.exists() {
-        // Each missing parent, such as the state directory on a first start,
-        // gets the mode too; a parent that exists keeps its own.
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(mode)
-            .create(path)
-            .with_context(|| format!("creating directory {}", path.display()))?;
-    }
-    // Set the mode here. The umask narrows the mode of a new directory, and a
-    // directory that existed keeps its old mode.
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-        .with_context(|| format!("setting mode {mode:o} on {}", path.display()))?;
-    Ok(())
+    crate::os::ensure_dir(path, mode)
 }
 
-/// Sets 0600 on an open file, also one that existed with a wider mode. Best effort:
-/// each such file lies in a 0700 directory, and a refused change must not stop qex.
 pub fn make_private(file: &std::fs::File) {
-    use std::os::unix::fs::PermissionsExt;
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))
-        .ok();
+    crate::os::make_private(file)
 }
 
 #[cfg(test)]

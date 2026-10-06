@@ -1,7 +1,8 @@
-//! The Unix code of `sys` (boot time, local time, process identity and inspection), with the
-//! platform-specific parts inside the functions or behind their own `cfg`.
+//! The Unix code of `sys` (boot time, local time, process identity and inspection) and of the
+//! `paths` mode helpers, with the platform-specific parts inside the functions or behind a `cfg`.
 
 use super::process_info;
+use anyhow::{Context, Result};
 #[cfg(not(target_os = "linux"))]
 use crate::sys::GroupUsage;
 
@@ -383,4 +384,34 @@ fn parse_ps_time(text: &str) -> f64 {
         seconds = seconds * 60.0 + part.parse::<f64>().unwrap_or(0.0);
     }
     seconds
+}
+
+/// Makes a directory and its parent directories, then sets the mode.
+///
+/// This function sets the mode after it makes the directory. A permissive umask
+/// thus cannot make the directory more open than the `mode` parameter.
+pub fn ensure_dir(path: &std::path::Path, mode: u32) -> Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    if !path.exists() {
+        // Each missing parent, such as the state directory on a first start,
+        // gets the mode too; a parent that exists keeps its own.
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(mode)
+            .create(path)
+            .with_context(|| format!("creating directory {}", path.display()))?;
+    }
+    // Set the mode here. The umask narrows the mode of a new directory, and a
+    // directory that existed keeps its old mode.
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+        .with_context(|| format!("setting mode {mode:o} on {}", path.display()))?;
+    Ok(())
+}
+
+/// Sets 0600 on an open file, also one that existed with a wider mode. Best effort:
+/// each such file lies in a 0700 directory, and a refused change must not stop qex.
+pub fn make_private(file: &std::fs::File) {
+    use std::os::unix::fs::PermissionsExt;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .ok();
 }
