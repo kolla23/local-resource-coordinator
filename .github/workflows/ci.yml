@@ -90,9 +90,12 @@ jobs:
             echo "0: every changed function has a byte-identical copy; 1: some have none;"
             echo "anything else: the checker failed. At 0 or 1, the PR must explain every"
             echo "line listed below."
-            echo '````'
-            cat moves.txt
-            echo '````'
+            echo
+            # Escaped, so nothing in a path or line can end the block or hide text.
+            echo '<pre>'
+            python3 -c 'import html, sys; sys.stdout.write(html.escape(sys.stdin.read()))' \
+              < moves.txt
+            echo '</pre>'
           } >> "$GITHUB_STEP_SUMMARY"
           [ "$code" -le 1 ]
 

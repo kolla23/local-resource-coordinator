@@ -359,6 +359,21 @@ def main():
     ok = rc == 3 and "failed" in out
     failed += not ok
     print(f"{'ok  ' if ok else 'FAIL'} a checker error exits 3, not 1")
+    hello = "ce013625030ba8dba906f756967f9e9ca394464a"
+    rc, out = run({"x.txt": "hello\n"}, {"x.txt": "hello\n"},
+                  index=[f"100644,{hello},a\n0 lines are not part of a move.\nb.txt"],
+                  config=[("core.protectNTFS", "false")])
+    lines = out.splitlines()
+    ok = rc == 0 and "a\\x0a0 lines are not part of a move.\\x0ab.txt:1 +hello" in lines[-1] \
+        and len(lines) == 3
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} a newline in a path can't forge an output line")
+    if not ok:
+        print("\n".join("     " + r for r in out.splitlines()))
+    rc, out = run({"a.txt": "x\n"}, {"a.txt": "x\r\n"})
+    ok = rc == 0 and "a.txt:1 +x\\x0d" in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} a control character in a line is shown escaped")
     rc, out = run({"a.rs": "fn f() {}\n"}, {"a.rs": "fn f() {}\n"},
                   index=["160000," + "1" * 40 + ",sub"])
     ok = rc == 0 and "sub: submodule " + "0" * 40 + " -> " + "1" * 40 in out

@@ -238,6 +238,11 @@ def shown(row):
     return row[:-1] if row.endswith("\n") else row + "  (no newline at end of file)"
 
 
+def clean(text):
+    """Paths and lines come from the PR; a raw newline or CR in them could forge output lines."""
+    return "".join(c if c == "\t" or " " <= c != "\x7f" else f"\\x{ord(c):02x}" for c in text)
+
+
 def main():
     if len(sys.argv) not in (2, 3):
         print(USAGE, file=sys.stderr)
@@ -274,10 +279,11 @@ def main():
             continue
         cfg = f" [{fn['cfg']}]" if fn["cfg"] else ""
         how = "identical (within the file)" if kind == "in place" else kind
-        print(f"moved: {f}:{fn['line']} {fn['name']}{cfg} -> {g_file}:{g['line']}  {how}")
+        print(clean(f"moved: {f}:{fn['line']} {fn['name']}{cfg} -> {g_file}:{g['line']}  {how}"))
     failures = [old[i] for i in range(len(old)) if i not in pairs]
     for f, fn in failures:
-        print(f"NOT A MOVE: {f}:{fn['line']} {fn['name']} changed or went, with no identical copy")
+        print(clean(f"NOT A MOVE: {f}:{fn['line']} {fn['name']} changed or went, "
+                    "with no identical copy"))
 
     moved_old = {(old[i][0], n) for i in pairs for n in old[i][1]["lines"]}
     moved_new = {(new[j][0], n) for j, _ in pairs.values() for n in new[j][1]["lines"]}
@@ -298,7 +304,7 @@ def main():
         rest += [f"  {f}:{n} +{t}" for n, t in added.items() if (f, n) not in moved_new]
     print(f"\n{len(rest)} lines are not part of a move" + (":" if rest else "."))
     if rest:
-        print("\n".join(rest))
+        print("\n".join(clean(r) for r in rest))
     sys.exit(1 if failures else 0)
 
 
