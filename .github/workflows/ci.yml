@@ -5,8 +5,8 @@
 # Modified by the local-resource-coordinator fork, 2026-10-02: clippy, the
 # end-to-end tests and the MSRV check build with --features test-fixtures.
 # Modified by the local-resource-coordinator fork, 2026-10-05: the Style job
-# runs the tests of the move checker, and the Move check job runs the checker
-# on refactor/ pull requests.
+# runs the tests of the move checker, and the Move check job runs the base
+# revision's checker on refactor/ pull requests.
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -69,10 +69,14 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           GIT_CONFIG_GLOBAL: /dev/null
           GIT_CONFIG_NOSYSTEM: "1"
+        # The checker comes from the base revision, so a refactor PR can't change the
+        # checker that judges it.
         run: |
           set +e
-          python3 .github/scripts/check-moves.py "$(git merge-base "$BASE" HEAD)" HEAD \
-            > moves.txt 2>&1
+          {
+            git show "$BASE:.github/scripts/check-moves.py" > "$RUNNER_TEMP/check-moves.py" \
+              && python3 "$RUNNER_TEMP/check-moves.py" "$(git merge-base "$BASE" HEAD)" HEAD
+          } > moves.txt 2>&1
           code=$?
           cat moves.txt
           {
