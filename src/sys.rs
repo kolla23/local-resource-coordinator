@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-05: the memory and clock bodies moved to src/os/ unchanged; these functions forward to them (R1 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-10-06: R2a of docs/fork/PORT_PLAN.md, the process identity in src/os/unix.rs.
 // Modified by the local-resource-coordinator fork, 2026-10-06: R2b of docs/fork/PORT_PLAN.md, the process inspection in src/os/.
+// Modified by the local-resource-coordinator fork, 2026-10-06: R4 of docs/fork/PORT_PLAN.md, stdin_is_terminal and terminal_size in src/os/unix.rs.
 //! This module reads the machine capacity and the current machine load.
 //! It also holds the process functions that qex needs.
 //!
@@ -282,29 +283,10 @@ pub fn clock_text(epoch_secs: u64) -> String {
     crate::os::clock_text(epoch_secs)
 }
 
-/// Tests if the standard input is a terminal.
-///
-/// A command that reads a key needs a terminal. In a pipe or a script there is
-/// no key to read.
 pub fn stdin_is_terminal() -> bool {
-    unsafe { libc::isatty(libc::STDIN_FILENO) == 1 }
+    crate::os::stdin_is_terminal()
 }
 
-/// The size of the terminal that this command writes to, as `(rows, columns)`.
-///
-/// `None` when the output is not a terminal, or when the system does not
-/// give a size. A page that has no size writes every job and draws no frame.
 pub fn terminal_size() -> Option<(usize, usize)> {
-    let mut size: libc::winsize = unsafe { std::mem::zeroed() };
-    let ok = unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) };
-    if ok == 0 && size.ws_row > 0 {
-        let cols = if size.ws_col > 0 {
-            size.ws_col as usize
-        } else {
-            80
-        };
-        Some((size.ws_row as usize, cols))
-    } else {
-        None
-    }
+    crate::os::terminal_size()
 }
