@@ -4,6 +4,9 @@
 # rejects raw control characters in text files.
 # Modified by the local-resource-coordinator fork, 2026-10-02: clippy, the
 # end-to-end tests and the MSRV check build with --features test-fixtures.
+# Modified by the local-resource-coordinator fork, 2026-10-05: the Style job
+# runs the tests of the move checker, and the Move check job runs the base
+# revision's checker on refactor/ pull requests.
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -36,6 +39,8 @@ jobs:
         run: python3 .github/scripts/check-control-chars-test.py
       - name: No raw control characters in text files
         run: python3 .github/scripts/check-control-chars.py
+      - name: The tests of the move checker
+        run: python3 .github/scripts/check-moves-test.py
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
       - uses: Swatinem/rust-cache@v2
@@ -45,6 +50,59 @@ jobs:
         # The feature builds `testjob` and the e2e suite, which need it; without
         # it, clippy would skip them.
         run: cargo clippy --features test-fixtures --all-targets -- -D warnings
+
+  # The R-PRs of docs/fork/PORT_PLAN.md only move code. Their "not a move" lines
+  # are expected and explained in the PR, so only a checker error fails the job;
+  # the reviewer compares the job summary with those explanations.
+  moves:
+    name: Move check
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'refactor/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Check that the code only moves
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+        # The checker comes from the base revision. This job itself runs from the PR,
+        # so a PR could still change it; the summary then warns about .github/.
+        run: |
+          set +e
+          mb=$(git merge-base "$BASE" HEAD)
+          {
+            git show "$BASE:.github/scripts/check-moves.py" > "$RUNNER_TEMP/check-moves.py" \
+              && python3 "$RUNNER_TEMP/check-moves.py" "$mb" HEAD
+          } > moves.txt 2>&1
+          code=$?
+          cat moves.txt
+          {
+            if ! git diff --quiet "$mb" HEAD -- .github/; then
+              echo "**Warning: this PR changes .github/, which holds this job and the"
+              echo "checker. Read that diff before trusting this result.**"
+              echo
+            fi
+            echo "## Move check: exit $code"
+            echo "0: every changed function has a byte-identical copy; 1: some have none;"
+            echo "anything else: the checker failed. At 0 or 1, the PR must explain every"
+            echo "line listed below."
+            echo
+            # ASCII-only and HTML-escaped, so nothing in a path or line can end the block,
+            # add a line or reorder text.
+            echo '<pre>'
+            python3 -c '
+          import html, sys
+          sys.stdin.reconfigure(errors="replace")
+          text = "".join(c if " " <= c <= "~" or c == "\n" else "\\u{%04X}" % ord(c)
+                         for c in sys.stdin.read())
+          sys.stdout.write(html.escape(text))' < moves.txt
+            echo '</pre>'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$code" -le 1 ]
 
   test:
     name: Test on ${{ matrix.os }}

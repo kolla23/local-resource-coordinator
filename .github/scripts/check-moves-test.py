@@ -1,0 +1,420 @@
+#!/usr/bin/env python3
+"""Tests check-moves.py on throwaway git repositories: a base commit, a head commit, and the
+real script run between them. Usage: check-moves-test.py"""
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+CHECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check-moves.py")
+
+LINUX = '''#[cfg(target_os = "linux")]
+pub fn total() -> u64 {
+    field("MemTotal:")
+}
+'''
+MACOS = '''#[cfg(target_os = "macos")]
+pub fn total() -> u64 {
+    sysctl("hw.memsize")
+}
+'''
+FIELD = '''#[cfg(target_os = "linux")]
+fn field(key: &str) -> u64 {
+    key.len() as u64
+}
+'''
+TRICKY = '''pub fn tricky() -> usize {
+    // a } in a comment
+    /* and { in /* a nested */ block */
+    let s = "}{";
+    let r = r#"}"#;
+    let c = '}';
+    let l: &'static str = "{";
+    s.len() + r.len() + c.len_utf8() + l.len()
+}
+'''
+BASE_SYS = "/// Total memory.\n" + LINUX + "\n" + MACOS + "\n" + FIELD + "\npub fn keep() {}\n"
+HEAD_SYS = "pub fn total() -> u64 {\n    crate::os::total()\n}\n\npub fn keep() {}\n"
+TOTAL = "pub fn total() -> u64 {\n    %s(\"%s\")\n}\n"
+MULTI_CFG = '#[cfg(any(\n    target_os = "%s",\n    target_os = "freebsd"\n))]\npub fn f() {}\n'
+WHERE_IMPL = "impl %s\nwhere\n    %s: Sized,\n{\n%s}\n"
+GO = "    fn go(&self) -> u32 {\n        1\n    }\n"
+
+
+def run(base, head, args=None, config=(), attributes="", cwd="", chmod=(), env=None, index=()):
+    repo = tempfile.mkdtemp()
+    try:
+        def g(*a):
+            subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                           check=True, capture_output=True)
+        g("init", "-q")
+        g("config", "core.autocrlf", "false")
+        for key, value in config:
+            g("config", key, value)
+        with open(os.path.join(repo, ".git", "info", "attributes"), "w") as f:
+            f.write(attributes)
+        for files, msg in ((base, "base"), (head, "head")):
+            for name in list(files):
+                path = os.path.join(repo, name)
+                if files[name] is None:
+                    os.remove(path)
+                    continue
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                if isinstance(files[name], bytes):
+                    with open(path, "wb") as f:
+                        f.write(files[name])
+                    continue
+                with open(path, "w", newline="\n") as f:
+                    f.write(files[name])
+            g("add", "-A")
+            for name in chmod if msg == "head" else ():
+                g("update-index", "--chmod=+x", name)
+            for entry in index if msg == "head" else ():
+                g("update-index", "--add", "--cacheinfo", entry)
+            g("commit", "-q", "--allow-empty", "-m", msg)
+        args = ["HEAD~1", "HEAD"] if args is None else args
+        p = subprocess.run([sys.executable, CHECK, *args], cwd=os.path.join(repo, cwd),
+                           capture_output=True, text=True, env={**os.environ, **(env or {})})
+        return p.returncode, p.stdout + p.stderr
+    finally:
+        shutil.rmtree(repo, ignore_errors=True)
+
+
+CASES = [
+    # (name, base files, head files, want exit code, texts the output must hold)
+    ("cfg twins move to linux.rs and macos.rs; sys.rs forwards",
+     {"src/sys.rs": BASE_SYS},
+     {"src/sys.rs": HEAD_SYS, "src/os/linux.rs": "/// Total memory.\n" + LINUX + "\n" + FIELD,
+      "src/os/macos.rs": MACOS},
+     0, ['moved: src/sys.rs:3 total [#[cfg(target_os = "linux")]] -> src/os/linux.rs:3  identical',
+         'moved: src/sys.rs:8 total [#[cfg(target_os = "macos")]] -> src/os/macos.rs:2  identical',
+         "moved: src/sys.rs:13 field", "+    crate::os::total()"]),
+    ("a cfg swapped during the move",
+     {"src/a.rs": LINUX}, {"src/a.rs": None, "src/b.rs": LINUX.replace("linux", "macos")},
+     1, ["NOT A MOVE: src/a.rs:2 total"]),
+    ("an attribute added during the move",
+     {"src/a.rs": LINUX}, {"src/a.rs": None, "src/b.rs": "#[cfg(test)]\n" + LINUX},
+     1, ["NOT A MOVE: src/a.rs:2 total"]),
+    ("a comment above dropped during the move",
+     {"src/a.rs": "// SAFETY: one caller.\n" + LINUX},
+     {"src/a.rs": None, "src/b.rs": LINUX},
+     1, ["NOT A MOVE: src/a.rs:3 total"]),
+    ("a call that gains a path during the move is not a move, and its lines are listed",
+     {"src/sys.rs": FIELD + "pub fn total() -> u64 {\n    field(\"MemTotal:\")\n}\n"},
+     {"src/sys.rs": FIELD, "src/os/unix.rs": TOTAL % ("super::field", "MemTotal:")},
+     1, ["NOT A MOVE: src/sys.rs:5 total", 'src/os/unix.rs:2 +    super::field("MemTotal:")']),
+    ("a deleted function with an unchanged twin in another changed file",
+     {"src/a.rs": "fn helper() -> u8 {\n    1\n}\n", "src/b.rs": "fn helper() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": None, "src/b.rs": "fn helper() -> u8 {\n    1\n}\n\nfn other() {}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 helper"]),
+    ("a twin in the same file changed in place",
+     {"src/a.rs": "impl A {\n    fn f() -> u8 {\n        1\n    }\n}\n"
+                  "impl B {\n    fn f() -> u8 {\n        1\n    }\n}\n"},
+     {"src/a.rs": "impl A {\n    fn f() -> u8 {\n        1\n    }\n}\n"
+                  "impl B {\n    fn f() -> u8 {\n        2\n    }\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:7 f"]),
+    ("a twin in the same file deleted",
+     {"src/a.rs": "impl A {\n    fn f() -> u8 {\n        1\n    }\n}\n"
+                  "impl B {\n    fn f() -> u8 {\n        1\n    }\n}\n"},
+     {"src/a.rs": "impl A {\n    fn f() -> u8 {\n        1\n    }\n}\nimpl B {}\n"},
+     1, ["NOT A MOVE: src/a.rs:7 f"]),
+    ("a changed line that starts with -- is listed",
+     {"src/a.rs": 'pub const HELP: &str = r"\n--signal\n--other\n";\n'},
+     {"src/a.rs": 'pub const HELP: &str = r"\n--other\n";\n'},
+     0, ["1 lines are not part of a move", "src/a.rs:2 ---signal"]),
+    ("a line inserted inside a body",
+     {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": "pub fn f() -> u8 {\n    std::process::exit(3);\n    1\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("an attribute inserted above a function",
+     {"src/a.rs": "pub fn g() {}\n\npub fn f() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": "pub fn g() {}\n\n#[cfg(test)]\npub fn f() -> u8 {\n    1\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:3 f"]),
+    ("text added after a closing brace",
+     {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": "pub fn f() -> u8 {\n    1\n} fn g() {}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("a multi-line cfg moved unchanged",
+     {"src/a.rs": MULTI_CFG % "linux"}, {"src/a.rs": None, "src/b.rs": MULTI_CFG % "linux"},
+     0, ["moved: src/a.rs:5 f", "src/b.rs:5  identical"]),
+    ("a multi-line cfg swapped during the move",
+     {"src/a.rs": MULTI_CFG % "linux"}, {"src/a.rs": None, "src/b.rs": MULTI_CFG % "macos"},
+     1, ["NOT A MOVE: src/a.rs:5 f"]),
+    ("a multi-line cfg swapped in place",
+     {"src/a.rs": MULTI_CFG % "linux"}, {"src/a.rs": MULTI_CFG % "macos"},
+     1, ["NOT A MOVE: src/a.rs:5 f"]),
+    ("a /** */ doc changed during the move",
+     {"src/a.rs": "/**\n * Reads it.\n */\npub fn f() {}\n"},
+     {"src/a.rs": None, "src/b.rs": "/**\n * Writes it.\n */\npub fn f() {}\n"},
+     1, ["NOT A MOVE: src/a.rs:4 f"]),
+    ("a function hidden in a block comment opened above it",
+     {"src/a.rs": "pub fn g() {}\n\npub fn f() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": "pub fn g() {}\n/*\n\npub fn f() -> u8 {\n    1\n}\n*/\n"},
+     1, ["NOT A MOVE: src/a.rs:3 f"]),
+    ("line endings changed to CRLF in place",
+     {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": "pub fn f() -> u8 {\r\n    1\r\n}\r\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("line endings changed to CRLF during the move",
+     {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": None, "src/b.rs": "pub fn f() -> u8 {\r\n    1\r\n}\r\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("a visibility change is not a move",
+     {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
+     {"src/b.rs": "pub(crate) fn f() -> u8 {\n    1\n}\n", "src/a.rs": None},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("braces in comments, strings, raw strings and chars",
+     {"src/sys.rs": TRICKY + "\npub fn keep() {}\n"},
+     {"src/sys.rs": "pub fn keep() {}\n", "src/os/unix.rs": TRICKY},
+     0, ["moved: src/sys.rs:1 tricky -> src/os/unix.rs:1  identical",
+         "1 lines are not part of a move", "src/sys.rs:10 -"]),
+    ("a re-indented function is not a move",
+     {"src/a.rs": "mod inner {\n    pub fn f() -> u8 {\n        let x = 1;\n        x\n    }\n}\n"},
+     {"src/a.rs": "mod inner {}\n", "src/b.rs": "pub fn f() -> u8 {\n    let x = 1;\n    x\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:2 f"]),
+    ("a body changed during the move",
+     {"src/sys.rs": FIELD + "pub fn total() -> u64 {\n    field(\"MemTotal:\")\n}\n"},
+     {"src/sys.rs": FIELD, "src/os/linux.rs": TOTAL % ("field", "MemFree:")},
+     1, ["NOT A MOVE: src/sys.rs:5 total"]),
+    ("a change inside a moved string",
+     {"src/sys.rs": TRICKY},
+     {"src/sys.rs": None, "src/os/unix.rs": TRICKY.replace('"}{"', '"}{}"')},
+     1, ["NOT A MOVE: src/sys.rs:1 tricky"]),
+    ("a signature changed during the move",
+     {"src/a.rs": "pub fn f(x: u8) -> u8 {\n    x\n}\n"},
+     {"src/a.rs": None, "src/b.rs": "pub fn f(x: u16) -> u8 {\n    x\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("a body changed in place",
+     {"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
+     {"src/a.rs": "pub fn f() -> u8 {\n    2\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f", "src/a.rs:2 +    2"]),
+    ("unchanged functions are not listed",
+     {"src/a.rs": "pub fn f() {}\n\npub fn g() {}\n"},
+     {"src/a.rs": "pub fn f() {}\n\npub fn g() {}\n\npub fn h() {}\n"},
+     0, ["2 lines are not part of a move", "src/a.rs:5 +pub fn h() {}"]),
+    ("a whitespace-only change inside a string is listed",
+     {"src/a.rs": 'pub const S: &str = "a\n  \nb";\n'},
+     {"src/a.rs": 'pub const S: &str = "a\n    \nb";\n'},
+     0, ["src/a.rs:2 -  ", "src/a.rs:2 +    "]),
+    ("a nested function moved between cfg-gated modules in one file",
+     {"src/sys.rs": '#[cfg(target_os = "linux")]\nmod linux {\n    pub fn f() {}\n}\n'
+                    '#[cfg(target_os = "macos")]\nmod macos {\n}\n'},
+     {"src/sys.rs": '#[cfg(target_os = "linux")]\nmod linux {\n}\n'
+                    '#[cfg(target_os = "macos")]\nmod macos {\n    pub fn f() {}\n}\n'},
+     1, ["NOT A MOVE: src/sys.rs:3 f"]),
+    ("a top-level function moved into mod tests in one file",
+     {"src/a.rs": "pub fn f() {}\n\n#[cfg(test)]\nmod tests {\n}\n"},
+     {"src/a.rs": "#[cfg(test)]\nmod tests {\npub fn f() {}\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("a method moved from one impl to another",
+     {"src/a.rs": "impl A {\n    fn f() {}\n}\nimpl B {\n}\n"},
+     {"src/a.rs": "impl A {\n}\nimpl B {\n    fn f() {}\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:2 f"]),
+    ("a top-level function moved into an inline mod of another file",
+     {"src/a.rs": "pub fn f() {}\n"},
+     {"src/a.rs": None, "src/b.rs": "mod inner {\npub fn f() {}\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("a nested function unchanged while its file changes",
+     {"src/a.rs": "impl A {\n    fn f() {}\n}\n"},
+     {"src/a.rs": "impl A {\n    fn f() {}\n}\n\npub fn g() {}\n"},
+     0, ["2 lines are not part of a move", "src/a.rs:5 +pub fn g() {}"]),
+    ("a top-level function moved within its file",
+     {"src/a.rs": "pub fn f() {}\n\npub fn g() {\n    1;\n}\n"},
+     {"src/a.rs": "pub fn g() {\n    1;\n}\n\npub fn f() {}\n"},
+     0, ["identical (within the file)"]),
+    ("a method moved between where-clause impls in other files",
+     {"src/a.rs": WHERE_IMPL % ("A", "A", GO), "src/b.rs": WHERE_IMPL % ("B", "B", "")},
+     {"src/a.rs": WHERE_IMPL % ("A", "A", ""), "src/b.rs": WHERE_IMPL % ("B", "B", GO)},
+     1, ["NOT A MOVE: src/a.rs:5 go"]),
+    ("a method moved between where-clause impls in one file",
+     {"src/a.rs": WHERE_IMPL % ("A", "A", GO) + WHERE_IMPL % ("B", "B", "")},
+     {"src/a.rs": WHERE_IMPL % ("A", "A", "") + WHERE_IMPL % ("B", "B", GO)},
+     1, ["NOT A MOVE: src/a.rs:5 go"]),
+    ("a method moved between impls whose headers span lines",
+     {"src/a.rs": "impl<T> Tr\n    for A<T>\n{\n" + GO + "}\nimpl<T> Tr\n    for B<T>\n{\n}\n"},
+     {"src/a.rs": "impl<T> Tr\n    for A<T>\n{\n}\nimpl<T> Tr\n    for B<T>\n{\n" + GO + "}\n"},
+     1, ["NOT A MOVE: src/a.rs:4 go"]),
+    ("a method moved between impls whose headers hold [u8; 4]",
+     {"src/a.rs": "impl T for W<[u8; 4]> {\n" + GO + "}\nimpl T for V<[u16; 4]> {\n}\n"},
+     {"src/a.rs": "impl T for W<[u8; 4]> {\n}\nimpl T for V<[u16; 4]> {\n" + GO + "}\n"},
+     1, ["NOT A MOVE: src/a.rs:2 go"]),
+    ("a method moved between impls whose headers hold { 1 } generics",
+     {"src/a.rs": "impl Tr for A<{ 1 }> {\n" + GO + "}\nimpl Tr for B<{ 1 }> {\n}\n"},
+     {"src/a.rs": "impl Tr for A<{ 1 }> {\n}\nimpl Tr for B<{ 1 }> {\n" + GO + "}\n"},
+     1, ["NOT A MOVE: src/a.rs:2 go"]),
+    ("an impl header changed around an unchanged method",
+     {"src/a.rs": "impl Tr for A<{ 1 }> {\n" + GO + "}\n"},
+     {"src/a.rs": "impl Tr for B<{ 1 }> {\n" + GO + "}\n"},
+     1, ["NOT A MOVE: src/a.rs:2 go"]),
+    ("a function moved between mods whose braces sit on their own lines",
+     {"src/a.rs": "mod a\n{\n    pub fn f() {}\n}\nmod b\n{\n}\n"},
+     {"src/a.rs": "mod a\n{\n}\nmod b\n{\n    pub fn f() {}\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:3 f"]),
+    ("a visibility on its own line changed during the move",
+     {"src/a.rs": "pub(crate)\nfn f() {}\n"}, {"src/a.rs": None, "src/b.rs": "pub\nfn f() {}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("an extern ABI on its own line changed during the move",
+     {"src/a.rs": 'pub unsafe extern "C"\nfn f() {}\n'},
+     {"src/a.rs": None, "src/b.rs": 'pub unsafe extern "system"\nfn f() {}\n'},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("qualifiers on their own line moved unchanged",
+     {"src/a.rs": 'pub unsafe extern "C"\nfn f() {}\n'},
+     {"src/a.rs": None, "src/b.rs": 'pub unsafe extern "C"\nfn f() {}\n'},
+     0, ["moved: src/a.rs:1 f -> src/b.rs:1  identical", "0 lines are not part of a move"]),
+    ("one of two attributes on a line changed during the move",
+     {"src/a.rs": "#[inline] #[cfg(unix)]\nfn f() {}\n"},
+     {"src/a.rs": None, "src/b.rs": "#[inline(always)] #[cfg(unix)]\nfn f() {}\n"},
+     1, ["NOT A MOVE: src/a.rs:2 f"]),
+    ("a comment line that mixes comment kinds changed during the move",
+     {"src/a.rs": "/* a */ // b\nfn f() {}\n"},
+     {"src/a.rs": None, "src/b.rs": "/* a */ // c\nfn f() {}\n"},
+     1, ["NOT A MOVE: src/a.rs:2 f"]),
+    ("a where clause changed during the move",
+     {"src/a.rs": "fn f<T>(x: T) -> u8\nwhere\n    T: Copy,\n{\n    1\n}\n"},
+     {"src/a.rs": None, "src/b.rs": "fn f<T>(x: T) -> u8\nwhere\n    T: Clone,\n{\n    1\n}\n"},
+     1, ["NOT A MOVE: src/a.rs:1 f"]),
+    ("the attributes shown leave out comments and include the fn line's own",
+     {"src/a.rs": "/*\n  note\n*/\n#[cfg(unix)] // why\n#[inline] pub fn f() {}\n"},
+     {"src/a.rs": None,
+      "src/b.rs": "/*\n  note\n*/\n#[cfg(unix)] // why\n#[inline] pub fn f() {}\n"},
+     0, ["moved: src/a.rs:5 f [#[cfg(unix)] #[inline]] -> src/b.rs:5  identical"]),
+    ("a Cargo.toml change next to a real move is listed",
+     {"src/a.rs": "pub fn f() {}\n", "Cargo.toml": "[features]\nx = []\n"},
+     {"src/a.rs": None, "src/b.rs": "pub fn f() {}\n",
+      "Cargo.toml": '[features]\nx = []\ndefault = ["x"]\n'},
+     0, ["moved: src/a.rs:1 f -> src/b.rs:1  identical", "1 lines are not part of a move",
+         'Cargo.toml:3 +default = ["x"]']),
+    ("a brace inside a raw C string",
+     {"src/a.rs": 'pub fn f() {\n    let _ = cr#"x"}"#;\n}\npub fn g() {}\n'},
+     {"src/a.rs": None,
+      "src/b.rs": 'pub fn f() {\n    let _ = cr#"x"}"#;\n}\npub fn g() { evil() }\n'},
+     1, ["moved: src/a.rs:1 f -> src/b.rs:1  identical", "NOT A MOVE: src/a.rs:4 g"]),
+    ("a file whose name is a glob gets only its own lines",
+     {"src/a.rs": "pub fn a() {}\nconst A: u8 = 1;\n", "src/[ab].rs": "const Z: u8 = 1;\n"},
+     {"src/a.rs": "pub fn a() {}\nconst A: u8 = 2;\n", "src/[ab].rs": "const Z: u8 = 2;\n"},
+     0, ["4 lines are not part of a move", "src/[ab].rs:1 +const Z: u8 = 2;",
+         "src/a.rs:2 +const A: u8 = 2;"]),
+] + [
+    (f"a copy left behind with {what} while the original moves is listed",
+     {"src/a.rs": before}, {"src/a.rs": after, "src/b.rs": before},
+     0, ["moved: src/a.rs:", f"src/a.rs:1 +{after.split(chr(10))[0]}",
+         f"{after.count(chr(10))} lines are not part of a move"])
+    for what, before, after in (
+        ("a deleted line", "pub fn f(x: u8) -> u8 {\n    assert!(x < 9);\n    x\n}\n",
+         "pub fn f(x: u8) -> u8 {\n    x\n}\n"),
+        ("its cfg dropped", '#[cfg(target_os = "linux")]\npub fn f() -> u8 {\n    1\n}\n',
+         "pub fn f() -> u8 {\n    1\n}\n"),
+        ("its pub(crate) line dropped", "pub(crate)\nfn f() -> u8 {\n    1\n}\n",
+         "fn f() -> u8 {\n    1\n}\n"),
+        ("its SAFETY comment dropped", "// SAFETY: one caller.\npub fn f() -> u8 {\n    1\n}\n",
+         "pub fn f() -> u8 {\n    1\n}\n"))
+] + [
+    ("a final newline removed is listed",
+     {"src/a.rs": "pub const A: u8 = 1;\n"}, {"src/a.rs": "pub const A: u8 = 1;"},
+     0, ["2 lines are not part of a move",
+         "src/a.rs:1 +pub const A: u8 = 1;  (no newline at end of file)"]),
+    ("a change in a file that is not UTF-8 is listed",
+     {"data.bin": b"a\xff\n"}, {"data.bin": b"a\xfe\n"},
+     0, ["2 lines are not part of a move", "data.bin:1 -a\\u{DCFF}", "data.bin:1 +a\\u{DCFE}"]),
+]
+
+
+def main():
+    failed = 0
+    for name, base, head, want, texts in CASES:
+        rc, out = run(base, head)
+        ok = rc == want and all(t in out for t in texts)
+        failed += not ok
+        print(f"{'ok  ' if ok else 'FAIL'} {name}")
+        if not ok:
+            print(f"     exit {rc}, want {want}; output:")
+            print("\n".join("     " + r for r in out.splitlines()))
+    rc, out = run({"a.rs": "fn f() {}\n"}, {"a.rs": "fn f() {}\n"}, args=[])
+    ok = rc == 2 and "usage" in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} no arguments is a usage error")
+    rc, out = run({"src/a.rs": "pub fn f() {}\n", "tests/t.rs": "fn t() {}\n"},
+                  {"src/a.rs": "pub fn f() {}\nstatic X: u8 = 1;\n",
+                   "tests/t.rs": "fn t() {\n    evil()\n}\n"}, cwd="src")
+    ok = rc == 1 and "NOT A MOVE: tests/t.rs:1 t" in out and "src/a.rs:2 +static X" in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} run from a subfolder, it still checks the whole repository")
+    if not ok:
+        print("\n".join("     " + r for r in out.splitlines()))
+    secret = ({"a.rs": "struct A;\nfn f() {\n    1;\n}\nconst SECRET: u8 = 1;\n"},
+              {"a.rs": "struct A2;\nfn f() {\n    1;\n}\nconst SECRET: u8 = 2;\n"})
+    for name, kw in (("diff.interHunkContext in git config",
+                      {"config": [("diff.interHunkContext", "5")]}),
+                     ("GIT_DIFF_OPTS in the environment",
+                      {"env": {"GIT_DIFF_OPTS": "--unified=3"}})):
+        rc, out = run(*secret, **kw)
+        ok = rc == 0 and "4 lines are not part of a move" in out \
+            and "a.rs:5 +const SECRET: u8 = 2;" in out and "moved:" not in out
+        failed += not ok
+        print(f"{'ok  ' if ok else 'FAIL'} {name} hides nothing")
+        if not ok:
+            print("\n".join("     " + r for r in out.splitlines()))
+    rc, out = run({"a.rs": "fn f() {}\n"}, {"a.rs": "fn f() {}\n"}, args=["no-such-rev", "HEAD"])
+    ok = rc == 3 and "failed" in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} a checker error exits 3, not 1")
+    hello = "ce013625030ba8dba906f756967f9e9ca394464a"
+    rc, out = run({"x.txt": "hello\n"}, {"x.txt": "hello\n"},
+                  index=[f"100644,{hello},a\n0 lines are not part of a move.\nb.txt"],
+                  config=[("core.protectNTFS", "false")])
+    lines = out.splitlines()
+    ok = rc == 0 and "a\\u{000A}0 lines are not part of a move.\\u{000A}b.txt:1 +hello" \
+        in lines[-1] \
+        and len(lines) == 3
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} a newline in a path can't forge an output line")
+    if not ok:
+        print("\n".join("     " + r for r in out.splitlines()))
+    rc, out = run({"a.txt": "x\n"}, {"a.txt": "x\r\n"})
+    ok = rc == 0 and "a.txt:1 +x\\u{000D}" in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} a control character in a line is shown escaped")
+    for name, char in (("a line separator", "\u2028"), ("a bidi override", "\u202e"),
+                       ("a C1 next-line control", "\u0085")):
+        rc, out = run({"a.txt": "x\n"}, {"a.txt": f"x{char}moved: fake\n".encode()})
+        ok = rc == 0 and f"a.txt:1 +x\\u{{{ord(char):04X}}}moved: fake" in out \
+            and out.isascii()
+        failed += not ok
+        print(f"{'ok  ' if ok else 'FAIL'} {name} in a line is shown escaped, ASCII only")
+        if not ok:
+            print("\n".join("     " + ascii(r) for r in out.splitlines()))
+    rc, out = run({"a.rs": "fn f() {}\n"}, {"a.rs": "fn f() {}\n"},
+                  index=["160000," + "1" * 40 + ",sub"])
+    ok = rc == 0 and "sub: submodule " + "0" * 40 + " -> " + "1" * 40 in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} a submodule change is listed")
+    if not ok:
+        print("\n".join("     " + r for r in out.splitlines()))
+    rc, out = run({"src/a.rs": "pub fn f() {}\n", "run.sh": "echo\n"},
+                  {"src/a.rs": "pub fn f() {}\n", "run.sh": "echo\n"}, chmod=["run.sh"])
+    ok = rc == 0 and "run.sh: mode 100644 -> 100755" in out \
+        and "1 lines are not part of a move" in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} a file mode change is listed")
+    if not ok:
+        print("\n".join("     " + r for r in out.splitlines()))
+    for name, config, attributes in (
+            ("an external diff tool in git config", [("diff.external", "true")], ""),
+            ("a textconv driver for .rs", [("diff.rs.textconv", "echo")], "*.rs diff=rs\n"),
+            ("the -diff attribute on .rs", [], "*.rs -diff\n"),
+            ("the binary attribute on .rs", [], "*.rs binary\n")):
+        rc, out = run({"src/a.rs": "pub fn f() -> u8 {\n    1\n}\n"},
+                      {"src/a.rs": "pub fn f() -> u8 {\n    2\n}\n"},
+                      config=config, attributes=attributes)
+        ok = rc == 1 and "NOT A MOVE: src/a.rs:1 f" in out and "src/a.rs:2 +    2" in out
+        failed += not ok
+        print(f"{'ok  ' if ok else 'FAIL'} {name} hides nothing")
+        if not ok:
+            print("\n".join("     " + r for r in out.splitlines()))
+    print(f"\n{failed} failed")
+    sys.exit(1 if failed else 0)
+
+
+if __name__ == "__main__":
+    main()
