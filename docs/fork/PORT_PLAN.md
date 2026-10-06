@@ -32,7 +32,7 @@ Every step is its own PR, planned at about 400 changed lines (not counting logs 
 
 **Evidence in every R-PR description:**
 1. **Tests unchanged.** No assertion in `tests/` or in a unit test changes. A unit test may only move with its code; `git diff --color-moved` shows that.
-2. **Code only moves.** The move checker, `.github/scripts/check-moves.py` (added in R1 with its own test, reused by every R-PR), compares each moved function body before and after and reports it byte-identical apart from the call path. The PR lists and explains every line that is not a move.
+2. **Code only moves.** The move checker, `.github/scripts/check-moves.py` (added in R1 with its own test, reused by every R-PR), compares each moved function (its attributes, signature and body) before and after and reports it byte-identical, or byte-identical apart from the call path in its body, listing the lines where the paths differ. The PR lists and explains every line that is not a move.
 3. **Public surface unchanged.** The help text for every subcommand and `qex schema <name>` for each of `schema::NAMES` (job, status, pipeline, event) give identical output before and after.
 4. **Full Linux checks in WSL2:** fmt, clippy, unit tests, the e2e suite twice (to catch flakes), release build, MSRV; and CI passes.
 5. **macOS CI started by hand** on every PR that moves a `cfg(target_os = "macos")` branch. If it was not run, the PR says macOS is "not evaluated".

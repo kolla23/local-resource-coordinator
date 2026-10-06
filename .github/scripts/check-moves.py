@@ -30,6 +30,11 @@ outside .rs files, file mode changes and submodule changes never are. Changed
 lines come from comparing the stored blobs, not from `git diff`. Exits 1 when a
 function has no copy, 2 on a usage error, 3 when the checker itself fails.
 
+Known blind spots (#48): an attribute separated from its function by a blank line
+is not part of the item; call paths are also stripped in `$crate::` inside a
+macro_rules! body and in code after the closing brace on its line; a `{` inside
+generics in a signature is taken as the body's opening brace.
+
 The authoritative result is the CI run, which uses a clean git config; local
 runs are a convenience."""
 CALL_PATH = re.compile(r"(?<![\w:])(?:(?:crate|super|self|sys)::|os::(?:\w+::)?)+")
