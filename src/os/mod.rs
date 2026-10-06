@@ -1,5 +1,5 @@
-//! The platform code behind `sys`: one file per platform, and `unix` for the code that is
-//! the same on every Unix. `sys` keeps the signatures and forwards here.
+//! The platform code behind `sys`: one file per platform, and `unix` for the code that has
+//! one copy for Linux and macOS. `sys` keeps the signatures and forwards here.
 
 mod unix;
 pub use unix::{boot_time_secs, clock_text, near_stamp_text, rfc3339, stamp_text};

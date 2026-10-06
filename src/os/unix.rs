@@ -1,4 +1,5 @@
-//! The boot time and the local-time text of `sys`, the same on every Unix.
+//! The boot time and the local-time text of `sys`: one copy for Linux and macOS, with the
+//! platform-specific parts inside `boot_time_secs`.
 
 /// Gives the moment when this machine started, in seconds after the Unix epoch.
 ///
