@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of a pruned history (R3 of docs/fork/PORT_PLAN.md).
 //! This module keeps a short record of every job that qex accepted.
 //!
 //! The record of a job is the interface for an agent. When that record is gone,
@@ -355,6 +356,28 @@ mod tests {
         assert!(lookup(old_id).is_none(), "the old line must go away");
         assert!(lookup(new_id).is_some(), "the young line must stay");
 
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The rewrite of a pruned history is a new file, so it is 0600 whatever the old file
+    /// had; pinned as it is today (R3 of docs/fork/PORT_PLAN.md).
+    #[test]
+    fn a_pruned_history_is_rewritten_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = env_lock();
+        let (dir, _env) = temp_state("prunemode");
+
+        let mut old = spec(uuid::Uuid::new_v4(), "old");
+        old.submitted_at = crate::sys::now_secs() - 3 * 86400;
+        record_submit(&old);
+        record_submit(&spec(uuid::Uuid::new_v4(), "new"));
+        let file = path().unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        prune(&crate::config::Config::default());
+
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
         std::fs::remove_dir_all(&dir).ok();
     }
 
