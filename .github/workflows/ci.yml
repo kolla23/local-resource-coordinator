@@ -91,10 +91,15 @@ jobs:
             echo "anything else: the checker failed. At 0 or 1, the PR must explain every"
             echo "line listed below."
             echo
-            # Escaped, so nothing in a path or line can end the block or hide text.
+            # ASCII-only and HTML-escaped, so nothing in a path or line can end the block,
+            # add a line or reorder text.
             echo '<pre>'
-            python3 -c 'import html, sys; sys.stdout.write(html.escape(sys.stdin.read()))' \
-              < moves.txt
+            python3 -c '
+          import html, sys
+          sys.stdin.reconfigure(errors="replace")
+          text = "".join(c if " " <= c <= "~" or c == "\n" else "\\u{%04X}" % ord(c)
+                         for c in sys.stdin.read())
+          sys.stdout.write(html.escape(text))' < moves.txt
             echo '</pre>'
           } >> "$GITHUB_STEP_SUMMARY"
           [ "$code" -le 1 ]

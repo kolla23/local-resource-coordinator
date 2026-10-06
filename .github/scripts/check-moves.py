@@ -239,8 +239,9 @@ def shown(row):
 
 
 def clean(text):
-    """Paths and lines come from the PR; a raw newline or CR in them could forge output lines."""
-    return "".join(c if c == "\t" or " " <= c != "\x7f" else f"\\x{ord(c):02x}" for c in text)
+    """Paths and lines come from the PR; any character outside printable ASCII (a newline, a
+    line separator, a bidi override) could forge or reorder what a reviewer sees."""
+    return "".join(c if " " <= c <= "~" else f"\\u{{{ord(c):04X}}}" for c in text)
 
 
 def main():

@@ -316,7 +316,7 @@ CASES = [
          "src/a.rs:1 +pub const A: u8 = 1;  (no newline at end of file)"]),
     ("a change in a file that is not UTF-8 is listed",
      {"data.bin": b"a\xff\n"}, {"data.bin": b"a\xfe\n"},
-     0, ["2 lines are not part of a move", "data.bin:1 -a\\udcff", "data.bin:1 +a\\udcfe"]),
+     0, ["2 lines are not part of a move", "data.bin:1 -a\\u{DCFF}", "data.bin:1 +a\\u{DCFE}"]),
 ]
 
 
@@ -364,16 +364,26 @@ def main():
                   index=[f"100644,{hello},a\n0 lines are not part of a move.\nb.txt"],
                   config=[("core.protectNTFS", "false")])
     lines = out.splitlines()
-    ok = rc == 0 and "a\\x0a0 lines are not part of a move.\\x0ab.txt:1 +hello" in lines[-1] \
+    ok = rc == 0 and "a\\u{000A}0 lines are not part of a move.\\u{000A}b.txt:1 +hello" \
+        in lines[-1] \
         and len(lines) == 3
     failed += not ok
     print(f"{'ok  ' if ok else 'FAIL'} a newline in a path can't forge an output line")
     if not ok:
         print("\n".join("     " + r for r in out.splitlines()))
     rc, out = run({"a.txt": "x\n"}, {"a.txt": "x\r\n"})
-    ok = rc == 0 and "a.txt:1 +x\\x0d" in out
+    ok = rc == 0 and "a.txt:1 +x\\u{000D}" in out
     failed += not ok
     print(f"{'ok  ' if ok else 'FAIL'} a control character in a line is shown escaped")
+    for name, char in (("a line separator", "\u2028"), ("a bidi override", "\u202e"),
+                       ("a C1 next-line control", "\u0085")):
+        rc, out = run({"a.txt": "x\n"}, {"a.txt": f"x{char}moved: fake\n".encode()})
+        ok = rc == 0 and f"a.txt:1 +x\\u{{{ord(char):04X}}}moved: fake" in out \
+            and out.isascii()
+        failed += not ok
+        print(f"{'ok  ' if ok else 'FAIL'} {name} in a line is shown escaped, ASCII only")
+        if not ok:
+            print("\n".join("     " + ascii(r) for r in out.splitlines()))
     rc, out = run({"a.rs": "fn f() {}\n"}, {"a.rs": "fn f() {}\n"},
                   index=["160000," + "1" * 40 + ",sub"])
     ok = rc == 0 and "sub: submodule " + "0" * 40 + " -> " + "1" * 40 in out
