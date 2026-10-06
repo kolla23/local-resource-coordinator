@@ -57,6 +57,7 @@ Every step is its own PR, planned at about 400 changed lines (not counting logs 
   - R2 moves code without touching callers, so it cannot answer this by itself. Its PR description therefore also lists every pid or process-group field and use in the core types of `sched` and `daemon`, with where each is used. That gives the owner an early answer.
   - R7 and R8 confirm it, because they change `daemon`, `lifecycle` and `supervisor`.
   - If either step meets the trigger, work stops and goes back to the owner.
+  - **R2a's answer (2026-10-06, the listing is in R2a's PR description):** tripwire partly met: daemon's core types and the job record hold pids; pids are portable, but the process-group convention is Unix-specific and is decided in ADR 2; R7/R8 confirm per PORT_PLAN. The owner decided to continue R2 as a pure move.
 - **Not in these PRs:** the `compile_error!` and the 37 `#[cfg(unix)]` module gates in `main.rs` stay until the Windows backend exists.
 
 ## ADRs
