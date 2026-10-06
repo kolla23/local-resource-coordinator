@@ -5,7 +5,8 @@
 # Modified by the local-resource-coordinator fork, 2026-10-02: clippy, the
 # end-to-end tests and the MSRV check build with --features test-fixtures.
 # Modified by the local-resource-coordinator fork, 2026-10-05: the Style job
-# runs the tests of the move checker.
+# runs the tests of the move checker, and the Move check job runs the checker
+# on refactor/ pull requests.
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -49,6 +50,40 @@ jobs:
         # The feature builds `testjob` and the e2e suite, which need it; without
         # it, clippy would skip them.
         run: cargo clippy --features test-fixtures --all-targets -- -D warnings
+
+  # The R-PRs of docs/fork/PORT_PLAN.md only move code. Their "not a move" lines
+  # are expected and explained in the PR, so only a checker error fails the job;
+  # the reviewer compares the job summary with those explanations.
+  moves:
+    name: Move check
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'refactor/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Check that the code only moves
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
+        run: |
+          set +e
+          python3 .github/scripts/check-moves.py "$(git merge-base "$BASE" HEAD)" HEAD \
+            > moves.txt 2>&1
+          code=$?
+          cat moves.txt
+          {
+            echo "## Move check: exit $code"
+            echo "0: every function moved; 1: some are not moves and the PR must explain"
+            echo "them; anything else: the checker failed."
+            echo '````'
+            cat moves.txt
+            echo '````'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$code" -le 1 ]
 
   test:
     name: Test on ${{ matrix.os }}

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Checks that a refactor only moves Rust functions (docs/fork/PORT_PLAN.md, "Code only moves").
 Tests: check-moves-test.py"""
+import difflib
 import os
 import re
 import subprocess
 import sys
+import traceback
 
 USAGE = """usage: check-moves.py <base> [<head>]
 (from anywhere in the repository; <head> defaults to HEAD)
@@ -23,27 +25,26 @@ move, only the call path may differ: a leading crate::, super::, self::, sys::,
 os:: or os::<name>:: on a path in the body's code (not in the signature, a
 string, a comment or a use statement, not after another ::). Prints each move,
 then every changed line that is not part of a move, in every changed file: lines
-outside .rs files and file mode changes never are. Exits 1 when a function has
-no copy, 2 on a usage error."""
+outside .rs files, file mode changes and submodule changes never are. Changed
+lines come from comparing the stored blobs, not from `git diff`. Exits 1 when a
+function has no copy, 2 on a usage error, 3 when the checker itself fails.
+
+The authoritative result is the CI run, which uses a clean git config; local
+runs are a convenience."""
 CALL_PATH = re.compile(r"(?<![\w:])(?:(?:crate|super|self|sys)::|os::(?:\w+::)?)+")
 FN = re.compile(r"\bfn\s+([A-Za-z_]\w*)")
 QUALIFIERS = re.compile(
     r"(?<!\w)(?:(?:pub(?:\s*\([^()]*\))?|const|async|unsafe|safe|extern|default)\s+)*\Z")
 USE = re.compile(r"\buse\b")
-HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.M)
 
 
 def git(*args):
     r = subprocess.run(["git", *args], capture_output=True)
     if r.returncode != 0:
-        sys.exit(f"check-moves: `git {' '.join(args)}` failed: "
-                 f"{r.stderr.decode('utf-8', 'replace').strip()}")
+        print(f"check-moves: `git {' '.join(args)}` failed: "
+              f"{r.stderr.decode('utf-8', 'replace').strip()}", file=sys.stderr)
+        sys.exit(3)
     return r.stdout.decode("utf-8", "surrogateescape")
-
-
-def show(rev, path):
-    r = subprocess.run(["git", "cat-file", "blob", f"{rev}:{path}"], capture_output=True)
-    return r.stdout.decode("utf-8", "surrogateescape") if r.returncode == 0 else None
 
 
 def mask(text, strings=True):
@@ -227,20 +228,29 @@ def same(a, b, ignore_paths):
     return a["item"] == b["item"]
 
 
-def diff_lines(base, head, path):
-    removed, added, o, n, o_left, n_left = {}, {}, 0, 0, 0, 0
-    rows = git("--literal-pathspecs", "diff", "-U0", "--text", "--no-color", "--no-renames",
-               "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", base, head, "--",
-               path).split("\n")
-    for row in rows:
-        if o_left == 0 and n_left == 0 and (h := HUNK.match(row)):
-            o, n = int(h[1]), int(h[3])
-            o_left, n_left = int(h[2] or 1), int(h[4] or 1)
-        elif o_left and row.startswith("-"):
-            removed[o], o, o_left = row[1:], o + 1, o_left - 1
-        elif n_left and row.startswith("+"):
-            added[n], n, n_left = row[1:], n + 1, n_left - 1
+def blob(sha, mode):
+    return None if mode in ("000000", "160000") else git("cat-file", "blob", sha)
+
+
+def diff_lines(a, b):
+    """Computed here, not parsed from `git diff`, whose output git config and the environment
+    can reshape."""
+    x, y = rows(a), rows(b)
+    removed, added = {}, {}
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, x, y, False).get_opcodes():
+        if tag != "equal":
+            removed.update((i + 1, shown(x[i])) for i in range(i1, i2))
+            added.update((j + 1, shown(y[j])) for j in range(j1, j2))
     return removed, added
+
+
+def rows(text):
+    parts = [] if text is None else text.split("\n")
+    return [p + "\n" for p in parts[:-1]] + [p for p in parts[-1:] if p]
+
+
+def shown(row):
+    return row[:-1] if row.endswith("\n") else row + "  (no newline at end of file)"
 
 
 def main():
@@ -252,10 +262,11 @@ def main():
     sys.stdout.reconfigure(errors="backslashreplace")
     raw = git("diff", "--raw", "-z", "--no-renames", "--no-abbrev", "--ignore-submodules=none",
               base, head).split("\0")
-    modes = {f: meta.split()[:2] for meta, f in zip(raw[0::2], raw[1::2]) if f}
-    files, rs = list(modes), [f for f in modes if f.endswith(".rs")]
-    old = [(f, fn) for f in rs if (t := show(base, f)) is not None for fn in functions(t)]
-    new = [(f, g) for f in rs if (t := show(head, f)) is not None for g in functions(t)]
+    meta = {f: m.lstrip(":").split()[:4] for m, f in zip(raw[0::2], raw[1::2]) if f}
+    texts = {f: (blob(sa, ma), blob(sb, mb)) for f, (ma, mb, sa, sb) in meta.items()}
+    files, rs = list(meta), [f for f in meta if f.endswith(".rs")]
+    old = [(f, fn) for f in rs if (t := texts[f][0]) is not None for fn in functions(t)]
+    new = [(f, g) for f in rs if (t := texts[f][1]) is not None for g in functions(t)]
     pairs, claimed = {}, set()
     for kind in ("in place", "identical", "identical apart from call paths"):
         for i, (f, fn) in enumerate(old):
@@ -271,7 +282,7 @@ def main():
                     claimed.add(j)
                     break
 
-    diffs = {f: diff_lines(base, head, f) for f in files}
+    diffs = {f: diff_lines(*texts[f]) for f in files}
     for i, (j, kind) in sorted(pairs.items()):
         (f, fn), (g_file, g) = old[i], new[j]
         if kind == "in place" and not any(n in diffs[f][0] for n in fn["lines"]):
@@ -288,9 +299,11 @@ def main():
     rest = []
     for f in files:
         removed, added = diffs[f]
-        before, after = modes[f]
-        if "000000" not in (before[1:], after) and before[1:] != after:
-            rest.append(f"  {f}: mode {before[1:]} -> {after}")
+        before, after, sa, sb = meta[f]
+        if "000000" not in (before, after) and before != after:
+            rest.append(f"  {f}: mode {before} -> {after}")
+        if "160000" in (before, after) and sa != sb:
+            rest.append(f"  {f}: submodule {sa} -> {sb}")
         rest += [f"  {f}:{o} -{t}" for o, t in removed.items() if (f, o) not in moved_old]
         rest += [f"  {f}:{n} +{t}" for n, t in added.items() if (f, n) not in moved_new]
     print(f"\n{len(rest)} changed lines are not part of a move" + (":" if rest else "."))
@@ -300,4 +313,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        traceback.print_exc()
+        sys.exit(3)

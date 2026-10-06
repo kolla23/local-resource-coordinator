@@ -42,7 +42,7 @@ WHERE_IMPL = "impl %s\nwhere\n    %s: Sized,\n{\n%s}\n"
 GO = "    fn go(&self) -> u32 {\n        1\n    }\n"
 
 
-def run(base, head, args=None, config=(), attributes="", cwd="", chmod=()):
+def run(base, head, args=None, config=(), attributes="", cwd="", chmod=(), env=None, index=()):
     repo = tempfile.mkdtemp()
     try:
         def g(*a):
@@ -70,10 +70,12 @@ def run(base, head, args=None, config=(), attributes="", cwd="", chmod=()):
             g("add", "-A")
             for name in chmod if msg == "head" else ():
                 g("update-index", "--chmod=+x", name)
+            for entry in index if msg == "head" else ():
+                g("update-index", "--add", "--cacheinfo", entry)
             g("commit", "-q", "--allow-empty", "-m", msg)
         args = ["HEAD~1", "HEAD"] if args is None else args
         p = subprocess.run([sys.executable, CHECK, *args], cwd=os.path.join(repo, cwd),
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env={**os.environ, **(env or {})})
         return p.returncode, p.stdout + p.stderr
     finally:
         shutil.rmtree(repo, ignore_errors=True)
@@ -324,6 +326,9 @@ CASES = [
      {"src/a.rs": "pub fn a() {}\nconst A: u8 = 1;\n", "src/[ab].rs": "const Z: u8 = 1;\n"},
      {"src/a.rs": "pub fn a() {}\nconst A: u8 = 2;\n", "src/[ab].rs": "const Z: u8 = 2;\n"},
      0, ["4 changed lines", "src/[ab].rs:1 +const Z: u8 = 2;", "src/a.rs:2 +const A: u8 = 2;"]),
+    ("a final newline removed is listed",
+     {"src/a.rs": "pub const A: u8 = 1;\n"}, {"src/a.rs": "pub const A: u8 = 1;"},
+     0, ["2 changed lines", "src/a.rs:1 +pub const A: u8 = 1;  (no newline at end of file)"]),
     ("a change in a file that is not UTF-8 is listed",
      {"data.bin": b"a\xff\n"}, {"data.bin": b"a\xfe\n"},
      0, ["2 changed lines", "data.bin:1 -a\\udcff", "data.bin:1 +a\\udcfe"]),
@@ -350,6 +355,30 @@ def main():
     ok = rc == 1 and "NOT A MOVE: tests/t.rs:1 t" in out and "src/a.rs:2 +static X" in out
     failed += not ok
     print(f"{'ok  ' if ok else 'FAIL'} run from a subfolder, it still checks the whole repository")
+    if not ok:
+        print("\n".join("     " + r for r in out.splitlines()))
+    secret = ({"a.rs": "struct A;\nfn f() {\n    1;\n}\nconst SECRET: u8 = 1;\n"},
+              {"a.rs": "struct A2;\nfn f() {\n    1;\n}\nconst SECRET: u8 = 2;\n"})
+    for name, kw in (("diff.interHunkContext in git config",
+                      {"config": [("diff.interHunkContext", "5")]}),
+                     ("GIT_DIFF_OPTS in the environment",
+                      {"env": {"GIT_DIFF_OPTS": "--unified=3"}})):
+        rc, out = run(*secret, **kw)
+        ok = rc == 0 and "4 changed lines" in out and "a.rs:5 +const SECRET: u8 = 2;" in out \
+            and "moved:" not in out
+        failed += not ok
+        print(f"{'ok  ' if ok else 'FAIL'} {name} hides nothing")
+        if not ok:
+            print("\n".join("     " + r for r in out.splitlines()))
+    rc, out = run({"a.rs": "fn f() {}\n"}, {"a.rs": "fn f() {}\n"}, args=["no-such-rev", "HEAD"])
+    ok = rc == 3 and "failed" in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} a checker error exits 3, not 1")
+    rc, out = run({"a.rs": "fn f() {}\n"}, {"a.rs": "fn f() {}\n"},
+                  index=["160000," + "1" * 40 + ",sub"])
+    ok = rc == 0 and "sub: submodule " + "0" * 40 + " -> " + "1" * 40 in out
+    failed += not ok
+    print(f"{'ok  ' if ok else 'FAIL'} a submodule change is listed")
     if not ok:
         print("\n".join("     " + r for r in out.splitlines()))
     rc, out = run({"src/a.rs": "pub fn f() {}\n", "run.sh": "echo\n"},
