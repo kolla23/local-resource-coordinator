@@ -1,4 +1,6 @@
-//! The macOS versions of the memory functions of `sys`.
+//! The macOS versions of the memory and process-inspection functions of `sys`.
+
+use crate::sys::ProcessInfo;
 
 #[cfg(target_os = "macos")]
 pub fn total_memory() -> u64 {
@@ -81,4 +83,63 @@ fn vm_available() -> Option<u64> {
         + stats.speculative_count as u64;
 
     Some(usable * page_size)
+}
+
+#[cfg(target_os = "macos")]
+pub fn process_info(pid: i32) -> Option<ProcessInfo> {
+    if pid <= 0 {
+        return None;
+    }
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let rc = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if rc != size {
+        return None;
+    }
+    let info = unsafe { info.assume_init() };
+    let name = unsafe { std::ffi::CStr::from_ptr(info.pbi_comm.as_ptr()) }
+        .to_string_lossy()
+        .into_owned();
+    // `NODEV` says that the process has no controlling terminal.
+    let terminal = info.e_tdev != u32::MAX;
+
+    let mut paths = std::mem::MaybeUninit::<libc::proc_vnodepathinfo>::uninit();
+    let paths_size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
+    let rc = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            paths.as_mut_ptr().cast(),
+            paths_size,
+        )
+    };
+    let cwd = if rc == paths_size {
+        let paths = unsafe { paths.assume_init() };
+        // libc declares the path as a two-dimensional array of bytes.
+        let path = unsafe {
+            std::ffi::CStr::from_ptr(paths.pvi_cdir.vip_path.as_ptr().cast::<libc::c_char>())
+        }
+        .to_string_lossy()
+        .into_owned();
+        (!path.is_empty()).then_some(path)
+    } else {
+        None
+    };
+
+    Some(ProcessInfo {
+        ppid: info.pbi_ppid as i32,
+        start: Some(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec),
+        name,
+        cwd,
+        terminal,
+    })
 }

@@ -1,5 +1,9 @@
-//! The boot time, the local-time text and the process identity of `sys`: one copy for Linux
-//! and macOS, with the platform-specific parts inside the functions.
+//! The Unix code of `sys` (boot time, local time, process identity and inspection), with the
+//! platform-specific parts inside the functions or behind their own `cfg`.
+
+use super::process_info;
+#[cfg(not(target_os = "linux"))]
+use crate::sys::GroupUsage;
 
 /// Gives the moment when this machine started, in seconds after the Unix epoch.
 ///
@@ -275,4 +279,108 @@ pub fn pid_namespace() -> Option<String> {
     {
         None
     }
+}
+
+/// Gives the chain of processes above this process, from its parent up to
+/// the first process of the machine.
+///
+/// `qex submit` records this chain on the job, and `qex abort` reads it. The
+/// walk records EVERY process, and the `context` module decides where the
+/// session ends when it compares two chains, so a change to that rule reads
+/// the records that exist.
+pub fn submitter_chain() -> Vec<crate::job::Ancestor> {
+    chain_from(unsafe { libc::getppid() })
+}
+
+/// Gives the chain of processes from `pid` upward, `pid` included.
+///
+/// The coordinator uses this walk for the process at the other end of a
+/// socket, so the numbers are the numbers of the machine of the coordinator,
+/// whatever pid namespace the caller lives in.
+pub fn chain_from(mut pid: i32) -> Vec<crate::job::Ancestor> {
+    let mut out = Vec::new();
+    // A limit, so a strange process table cannot make an endless loop.
+    for _ in 0..64 {
+        if pid <= 0 {
+            break;
+        }
+        let Some(info) = process_info(pid) else {
+            break;
+        };
+        out.push(crate::job::Ancestor {
+            pid,
+            ppid: info.ppid,
+            start: info.start,
+            // The name of a process is text that the process chose. See
+            // `job::safe_name`.
+            name: crate::job::safe_name(&info.name),
+            cwd: info.cwd,
+            terminal: info.terminal,
+        });
+        pid = info.ppid;
+    }
+    out
+}
+
+/// Gives the program file of a process, when the system says.
+pub fn process_exe(pid: i32) -> Option<std::path::PathBuf> {
+    if pid <= 0 {
+        return None;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_link(format!("/proc/{pid}/exe")).ok()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        let rc = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+        if rc <= 0 {
+            return None;
+        }
+        buf.truncate(rc as usize);
+        Some(std::path::PathBuf::from(
+            String::from_utf8_lossy(&buf).into_owned(),
+        ))
+    }
+}
+
+/// Measures the processes of one process group.
+///
+/// macOS has no `/proc`, so this version reads the output of `ps`.
+#[cfg(not(target_os = "linux"))]
+pub fn group_usage(pgid: i32) -> GroupUsage {
+    let mut out = GroupUsage::default();
+    let Ok(result) = std::process::Command::new("ps")
+        .args(["-A", "-o", "pgid=,rss=,time="])
+        .output()
+    else {
+        return out;
+    };
+
+    for line in String::from_utf8_lossy(&result.stdout).lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 3 {
+            continue;
+        }
+        if fields[0].parse::<i32>() != Ok(pgid) {
+            continue;
+        }
+        // `ps` gives the memory in kilobytes.
+        out.rss += fields[1].parse::<u64>().unwrap_or(0) * 1024;
+        out.cpu_secs += parse_ps_time(fields[2]);
+        out.processes += 1;
+    }
+    out
+}
+
+/// Reads a time from `ps`, in the form `MM:SS.ss` or `HH:MM:SS`.
+#[cfg(not(target_os = "linux"))]
+fn parse_ps_time(text: &str) -> f64 {
+    let parts: Vec<&str> = text.split(':').collect();
+    let mut seconds = 0.0;
+    for part in &parts {
+        seconds = seconds * 60.0 + part.parse::<f64>().unwrap_or(0.0);
+    }
+    seconds
 }

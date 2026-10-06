@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-05: the memory and clock bodies moved to src/os/ unchanged; these functions forward to them (R1 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-10-06: R2a of docs/fork/PORT_PLAN.md, the process identity in src/os/unix.rs.
+// Modified by the local-resource-coordinator fork, 2026-10-06: R2b of docs/fork/PORT_PLAN.md, the process inspection in src/os/.
 //! This module reads the machine capacity and the current machine load.
 //! It also holds the process functions that qex needs.
 //!
@@ -76,138 +77,16 @@ pub struct ProcessInfo {
     pub terminal: bool,
 }
 
-/// Reads the parent, the start time, the name, the directory and the terminal
-/// of one process. Gives `None` when the process does not exist or when the
-/// system refuses to say.
-#[cfg(target_os = "linux")]
 pub fn process_info(pid: i32) -> Option<ProcessInfo> {
-    if pid <= 0 {
-        return None;
-    }
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // The command name is in parentheses and can hold spaces and `)`. The
-    // stable fields start after the LAST `)`.
-    let open = stat.find('(')?;
-    let close = stat.rfind(')')?;
-    let name = stat.get(open + 1..close)?.to_string();
-    let fields: Vec<&str> = stat[close + 1..].split_whitespace().collect();
-    // After the name: state, ppid, pgrp, session, tty_nr, ... and the start
-    // time is the 20th of them.
-    let ppid = fields.get(1)?.parse().ok()?;
-    let tty: i64 = fields.get(4)?.parse().ok()?;
-    let start = fields.get(19).and_then(|f| f.parse().ok());
-    // The directory of a process of another user is refused. That is not a
-    // fault: the chain then names the process with no directory.
-    let cwd = std::fs::read_link(format!("/proc/{pid}/cwd"))
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned());
-    Some(ProcessInfo {
-        ppid,
-        start,
-        name,
-        cwd,
-        terminal: tty != 0,
-    })
+    crate::os::process_info(pid)
 }
 
-#[cfg(target_os = "macos")]
-pub fn process_info(pid: i32) -> Option<ProcessInfo> {
-    if pid <= 0 {
-        return None;
-    }
-    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
-    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-    let rc = unsafe {
-        libc::proc_pidinfo(
-            pid,
-            libc::PROC_PIDTBSDINFO,
-            0,
-            info.as_mut_ptr().cast(),
-            size,
-        )
-    };
-    if rc != size {
-        return None;
-    }
-    let info = unsafe { info.assume_init() };
-    let name = unsafe { std::ffi::CStr::from_ptr(info.pbi_comm.as_ptr()) }
-        .to_string_lossy()
-        .into_owned();
-    // `NODEV` says that the process has no controlling terminal.
-    let terminal = info.e_tdev != u32::MAX;
-
-    let mut paths = std::mem::MaybeUninit::<libc::proc_vnodepathinfo>::uninit();
-    let paths_size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
-    let rc = unsafe {
-        libc::proc_pidinfo(
-            pid,
-            libc::PROC_PIDVNODEPATHINFO,
-            0,
-            paths.as_mut_ptr().cast(),
-            paths_size,
-        )
-    };
-    let cwd = if rc == paths_size {
-        let paths = unsafe { paths.assume_init() };
-        // libc declares the path as a two-dimensional array of bytes.
-        let path = unsafe {
-            std::ffi::CStr::from_ptr(paths.pvi_cdir.vip_path.as_ptr().cast::<libc::c_char>())
-        }
-        .to_string_lossy()
-        .into_owned();
-        (!path.is_empty()).then_some(path)
-    } else {
-        None
-    };
-
-    Some(ProcessInfo {
-        ppid: info.pbi_ppid as i32,
-        start: Some(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec),
-        name,
-        cwd,
-        terminal,
-    })
-}
-
-/// Gives the chain of processes above this process, from its parent up to
-/// the first process of the machine.
-///
-/// `qex submit` records this chain on the job, and `qex abort` reads it. The
-/// walk records EVERY process, and the `context` module decides where the
-/// session ends when it compares two chains, so a change to that rule reads
-/// the records that exist.
 pub fn submitter_chain() -> Vec<crate::job::Ancestor> {
-    chain_from(unsafe { libc::getppid() })
+    crate::os::submitter_chain()
 }
 
-/// Gives the chain of processes from `pid` upward, `pid` included.
-///
-/// The coordinator uses this walk for the process at the other end of a
-/// socket, so the numbers are the numbers of the machine of the coordinator,
-/// whatever pid namespace the caller lives in.
-pub fn chain_from(mut pid: i32) -> Vec<crate::job::Ancestor> {
-    let mut out = Vec::new();
-    // A limit, so a strange process table cannot make an endless loop.
-    for _ in 0..64 {
-        if pid <= 0 {
-            break;
-        }
-        let Some(info) = process_info(pid) else {
-            break;
-        };
-        out.push(crate::job::Ancestor {
-            pid,
-            ppid: info.ppid,
-            start: info.start,
-            // The name of a process is text that the process chose. See
-            // `job::safe_name`.
-            name: crate::job::safe_name(&info.name),
-            cwd: info.cwd,
-            terminal: info.terminal,
-        });
-        pid = info.ppid;
-    }
-    out
+pub fn chain_from(pid: i32) -> Vec<crate::job::Ancestor> {
+    crate::os::chain_from(pid)
 }
 
 /// Gives the process id at the other end of a socket, as THIS machine
@@ -259,27 +138,8 @@ pub fn peer_pid(stream: &std::os::unix::net::UnixStream) -> Option<i32> {
     (pid > 0).then_some(pid)
 }
 
-/// Gives the program file of a process, when the system says.
 pub fn process_exe(pid: i32) -> Option<std::path::PathBuf> {
-    if pid <= 0 {
-        return None;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::fs::read_link(format!("/proc/{pid}/exe")).ok()
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
-        let rc = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
-        if rc <= 0 {
-            return None;
-        }
-        buf.truncate(rc as usize);
-        Some(std::path::PathBuf::from(
-            String::from_utf8_lossy(&buf).into_owned(),
-        ))
-    }
+    crate::os::process_exe(pid)
 }
 
 /// Gives the number of seconds after the Unix epoch.
@@ -402,97 +262,8 @@ pub struct GroupUsage {
     pub processes: usize,
 }
 
-/// Measures the processes of one process group.
-///
-/// This function compares the process group id, which is a number. It does not
-/// read a command line, so it cannot match a command that holds the word `qex`.
-/// That fault is the reason for this program.
-#[cfg(target_os = "linux")]
 pub fn group_usage(pgid: i32) -> GroupUsage {
-    let mut out = GroupUsage::default();
-    let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
-    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
-
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return out;
-    };
-
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if name.parse::<i32>().is_err() {
-            continue;
-        }
-
-        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
-            continue;
-        };
-        // The command of a process can hold a space or a bracket, and it is
-        // inside brackets. Read the fields after the last bracket.
-        let Some(rest) = stat.rsplit_once(") ") else {
-            continue;
-        };
-        let fields: Vec<&str> = rest.1.split_whitespace().collect();
-        // After the command, field 1 is the state and field 3 is the group.
-        if fields.len() < 22 {
-            continue;
-        }
-        let Ok(group) = fields[2].parse::<i32>() else {
-            continue;
-        };
-        if group != pgid {
-            continue;
-        }
-
-        let utime: f64 = fields[11].parse().unwrap_or(0.0);
-        let stime: f64 = fields[12].parse().unwrap_or(0.0);
-        let rss_pages: u64 = fields[21].parse().unwrap_or(0);
-
-        out.cpu_secs += (utime + stime) / ticks;
-        out.rss += rss_pages * page;
-        out.processes += 1;
-    }
-    out
-}
-
-/// Measures the processes of one process group.
-///
-/// macOS has no `/proc`, so this version reads the output of `ps`.
-#[cfg(not(target_os = "linux"))]
-pub fn group_usage(pgid: i32) -> GroupUsage {
-    let mut out = GroupUsage::default();
-    let Ok(result) = std::process::Command::new("ps")
-        .args(["-A", "-o", "pgid=,rss=,time="])
-        .output()
-    else {
-        return out;
-    };
-
-    for line in String::from_utf8_lossy(&result.stdout).lines() {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if fields.len() < 3 {
-            continue;
-        }
-        if fields[0].parse::<i32>() != Ok(pgid) {
-            continue;
-        }
-        // `ps` gives the memory in kilobytes.
-        out.rss += fields[1].parse::<u64>().unwrap_or(0) * 1024;
-        out.cpu_secs += parse_ps_time(fields[2]);
-        out.processes += 1;
-    }
-    out
-}
-
-/// Reads a time from `ps`, in the form `MM:SS.ss` or `HH:MM:SS`.
-#[cfg(not(target_os = "linux"))]
-fn parse_ps_time(text: &str) -> f64 {
-    let parts: Vec<&str> = text.split(':').collect();
-    let mut seconds = 0.0;
-    for part in &parts {
-        seconds = seconds * 60.0 + part.parse::<f64>().unwrap_or(0.0);
-    }
-    seconds
+    crate::os::group_usage(pgid)
 }
 
 pub fn stamp_text(epoch_secs: u64) -> String {
