@@ -13,6 +13,7 @@ An independently maintained fork of qex (Apache-2.0). It is a local coordinator 
 - Lint: `cargo clippy --features test-fixtures --all-targets -- -D warnings`
 - Unit tests: `cargo test --bins`
 - End-to-end tests: `cargo test --features test-fixtures --test e2e -- --test-threads=2` (about 6 minutes). The feature builds `testjob`, the portable job some tests run; without it `--test e2e` stops with an error and a plain `cargo test` skips the suite.
+- Fast check while working: `cargo test --features test-fixtures --test e2e a_job_that_succeeds_gives_the_exit_code_zero` (in WSL2; about 4 s once built, measured 2026-10-09).
 - Release build: `cargo build --release --locked`
 - MSRV check: `cargo +1.85 check --features test-fixtures --all-targets --locked`
 - The upstream baseline, with logs: `docs/baseline/run-baseline-linux.sh <clone> <log-dir>` (it checks out upstream v0.33.0, which has no `test-fixtures` feature, so it keeps the upstream commands)
