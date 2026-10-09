@@ -1,0 +1,40 @@
+name: Pull request body
+
+# Checks the body's Size line, checkboxes, "Found, not done" links, Fixes keywords and size; drafts and body edits too.
+# A pull request that changes `.github/` can turn its own check green: read such diffs yourself.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-body-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  body:
+    name: Pull request body follows the rules
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # The whole history, so the size count can reach the base commit.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      # Test the check first: a broken check that accepts every body would look like a pass.
+      - run: .github/scripts/check-pr-body-test.sh
+      - name: The body follows the rules
+        # The body is read now, not from the event, so a re-run sees a fixed body. It goes in on
+        # stdin, never into a command's text: a person outside this project can write it.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json body --jq .body \
+            | .github/scripts/check-pr-body.sh "$BASE_SHA" "$HEAD_SHA"

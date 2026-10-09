@@ -19,5 +19,18 @@
       "Bash(git push upstream *)",
       "Bash(git push origin main*)"
     ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/rust-checks.sh\"",
+            "timeout": 45
+          }
+        ]
+      }
+    ]
   }
 }
