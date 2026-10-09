@@ -27,7 +27,7 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/rust-checks.sh\"",
-            "timeout": 22
+            "timeout": 45
           }
         ]
       }
