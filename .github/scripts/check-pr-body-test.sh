@@ -93,6 +93,63 @@ expect "a linguist-generated path is not counted" 0 "$gen" "$good"
 expect "a rename with a one-line edit counts as small" 0 "$moved" "$good" "$big"
 expect "a missing head argument is a usage error" 2 "" "$good"
 
+# Bug 1 (audit item 2): a `*` bullet used to vanish with the bold markers, so `*` items and `* [x]` boxes went unseen.
+expect "a * Found item with no issue number fails" 1 "$small" \
+    "${good/- Flaky timer in the e2e suite: #14/* flaky timer, no issue filed}"
+expect "a * Found item with its #N passes" 0 "$small" \
+    "${good/- Flaky timer in the e2e suite: #14/* Flaky timer in the e2e suite: #14}"
+expect "* [x] checkboxes are the checkbox list" 0 "$small" "${good//- \[/* \[}"
+expect "a * Found item that is only a bold None passes" 0 "$small" \
+    "${good/- Flaky timer in the e2e suite: #14/* **None**}"
+expect "a bold item text with its #N passes" 0 "$small" \
+    "${good/- Flaky timer in the e2e suite: #14/- **Flaky timer**: #14}"
+bold_found="${good/"## Found, not done"/"**Found, not done**"}"
+expect "a bold-only Found, not done heading starts the section (its item has no #N)" 1 "$small" "${bold_found/: #14/}"
+expect "a * bullet before the Size line passes" 0 "$small" "${good/Size: normal/* Size: normal}"
+
+# Bug 2 (audit item 6): "none" was a prefix test.
+expect "a Found item starting with the word Nonexistent and no #N fails" 1 "$small" \
+    "${good/- Flaky timer in the e2e suite: #14/- Nonexistent config path crashes the loader}"
+expect "a Found item None. passes" 0 "$small" "${good/- Flaky timer in the e2e suite: #14/- None.}"
+expect "a Found item none in lowercase passes" 0 "$small" "${good/- Flaky timer in the e2e suite: #14/- none}"
+expect "a Found item None of the tests cover the timeout, no #N, fails" 1 "$small" \
+    "${good/- Flaky timer in the e2e suite: #14/- None of the tests cover the timeout}"
+
+# Bug 3 (audit item 8): a one-line section, and bold headings after it.
+one_line="## Summary
+Size: normal — one script and its test
+
+**Found, not done:** none
+
+**Acceptance criteria**
+- [x] tests pass
+
+Fixes #12
+"
+expect "a one-line Found, not done: none followed by bold sections passes" 0 "$small" "$one_line"
+expect "a one-line Found, not done naming an item with no #N fails" 1 "$small" \
+    "${one_line/:\*\* none/:** flaky timer, no issue filed}"
+expect "a one-line Found, not done naming an item with its #N passes" 0 "$small" \
+    "${one_line/:\*\* none/:** flaky timer: #14}"
+expect "a one-line Found, not done that closes an issue fails" 1 "$small" \
+    "${one_line/:\*\* none/:** Fixes #14}"
+expect "a Found, not done list under a bold heading ends at the next bold heading" 0 "$small" \
+    "${one_line/:\*\* none/**
+- Flaky timer in the e2e suite: #14}"
+expect "a Found, not done list ends at the next # heading" 0 "$small" "$good
+## Verification
+- [x] tests pass
+"
+expect "a Found item after a blank line is still checked" 1 "$small" "$good
+- another item with no issue number
+"
+spaced_found="${good/"## Found, not done"/"## Found, not done   "}"
+expect "a Found, not done heading with trailing spaces starts the section (its item has no #N)" 1 "$small" "${spaced_found/: #14/}"
+expect "a Found, not done heading with trailing spaces keeps its list" 0 "$small" "$spaced_found"
+colon_outside="${one_line/"**Acceptance criteria**"/"**Acceptance criteria**:"}"
+expect "a Found, not done list ends at a bold heading with the colon outside the stars" 0 "$small"     "${colon_outside/":** none"/"**
+- Flaky timer in the e2e suite: #14"}"
+
 fake="$(mktemp -d)"
 trap 'rm -rf "$repo" "$fake"' EXIT
 printf '#!/bin/sh\necho "git version 2.39.5"\n' >"$fake/git"

@@ -26,6 +26,12 @@ ref='(https://github\.com/[^/[:space:]]+/[^/[:space:]]+/issues/[0-9]+|([[:alnum:
 keyword_re="(^|[^[:alnum:]_])${closing}${ref}"
 size_re='^[-[:space:]>]*Size:[[:space:]]*(small|normal|big-risky)[[:space:]]*(—|–|-|:)[[:space:]]*[^[:space:]]'
 item_re='^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+(.*)$'
+# A `* ` bullet is never an italic marker, so it becomes `- ` before the bold/italic strip below.
+bullet_re='^([[:space:]]*)\*([[:space:]].*)$'
+# A line that is only bold text is a heading written in bold: it ends a Found, not done section like `#` does.
+bold_heading_re='^[[:space:]]*\*\*[^*]+\*\*:?[[:space:]]*$'
+found_re='^[#[:space:]]*found,[[:space:]]+not[[:space:]]+done[[:space:]]*:?[[:space:]]*(.*)$'
+none_re='^[[:space:]]*none[[:space:]]*[.!]?[[:space:]]*$'
 
 has_size=0
 has_box=0
@@ -33,6 +39,11 @@ in_found=0
 found_seen=0
 declare -A closed=()
 while IFS= read -r raw; do
+    if [[ "$raw" =~ $bullet_re ]]; then
+        raw="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}"
+    fi
+    bold_heading=0
+    [[ "$raw" =~ $bold_heading_re ]] && bold_heading=1
     line="${raw//\*/}"
     line="${line//\`/}"
     lc="${line,,}"
@@ -42,12 +53,22 @@ while IFS= read -r raw; do
     if [[ "$line" =~ ^[[:space:]]*[-*+][[:space:]]+\[[[:space:]xX]\] ]]; then
         has_box=1
     fi
-    if [[ "$lc" =~ ^[#[:space:]]*found,[[:space:]]+not[[:space:]]+done ]]; then
-        in_found=1
+    # The section's header; text after the colon is a one-line section, checked as its only item.
+    found_line=0
+    item=""
+    if [[ "$lc" =~ $found_re ]]; then
         found_seen=1
-        continue
+        n=${#BASH_REMATCH[1]}
+        if [ "$n" -eq 0 ]; then
+            in_found=1
+            continue
+        fi
+        in_found=0
+        found_line=1
+        item="${line:${#line}-n}"
     fi
     [[ "$line" =~ ^# ]] && in_found=0
+    [ "$bold_heading" -eq 1 ] && in_found=0
 
     rest="$lc"
     while [[ "$rest" =~ $keyword_re ]]; do
@@ -57,16 +78,17 @@ while IFS= read -r raw; do
             issue="${BASH_REMATCH[1]}#${BASH_REMATCH[2]}"
         fi
         closed[$issue]=$(( ${closed[$issue]:-0} + 1 ))
-        if [ "$in_found" -eq 1 ]; then
+        if [ "$in_found" -eq 1 ] || [ "$found_line" -eq 1 ]; then
             problems+=("\"Found, not done\" closes $issue when this PR merges: link it as plain #N, without Fixes/Closes/Resolves.")
         fi
     done
 
     if [ "$in_found" -eq 1 ] && [[ "$line" =~ $item_re ]]; then
+        found_line=1
         item="${BASH_REMATCH[2]}"
-        if [[ ! "${item,,}" =~ ^none ]] && [[ ! "$item" =~ (^|[^[:alnum:]_/\&])#[0-9]+ ]]; then
-            problems+=("\"Found, not done\" item has no plain #N issue link: $item")
-        fi
+    fi
+    if [ "$found_line" -eq 1 ] && [[ ! "${item,,}" =~ $none_re ]] && [[ ! "$item" =~ (^|[^[:alnum:]_/\&])#[0-9]+ ]]; then
+        problems+=("\"Found, not done\" item has no plain #N issue link: $item")
     fi
 done <<<"$body"
 

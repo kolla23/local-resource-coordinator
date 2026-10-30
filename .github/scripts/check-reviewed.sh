@@ -10,9 +10,9 @@
 #     Reviewed at <full 40-character head commit id>: no real issues
 #
 # This test passes only when the last such line names the head commit and its
-# verdict starts with "no real issues". A push after the review gives a new
-# head commit, so the test fails until the line names it. Bold and backticks
-# are allowed around the line and the id.
+# verdict is the words "no real issues" alone (any case; a final "." or "!"). A
+# push after the review gives a new head commit, so the test fails until the
+# line names it. Bold and backticks are allowed around the line and the id.
 #
 # Usage: check-reviewed.sh <head commit> < body
 #
@@ -60,9 +60,10 @@ if [ "$sha" != "$head_lc" ]; then
     echo "A push came after the review: review the new head commit."
     bad=1
 fi
-# The verdict must START with the words: "2 real issues; earlier rounds found
-# no real issues" holds them too, and it is not a clean review.
-if [[ "${verdict,,}" != "no real issues"* ]]; then
+# The verdict must be the words alone: "2 real issues; no real issues after the
+# fix" and "no real issues, except 2" hold them too, and neither is a clean review.
+verdict_re='^no real issues[[:space:]]*[.!]?[[:space:]]*$'
+if [[ ! "${verdict,,}" =~ $verdict_re ]]; then
     echo "the last review did not end clean: $verdict"
     bad=1
 fi

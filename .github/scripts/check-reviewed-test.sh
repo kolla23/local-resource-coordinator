@@ -47,6 +47,11 @@ expect "a line in bold and backticks passes" 0 "**\`Reviewed at $head: no real i
 expect "an upper-case commit id passes" 0 "Reviewed at ${head^^}: no real issues"
 expect "a CRLF body passes" 0 "$(printf 'Text\r\nReviewed at %s: no real issues\r\n' "$head")"
 expect "a line inside other text does not count" 1 "We were Reviewed at $head: no real issues"
+expect "a verdict with words after no real issues fails" 1 "Reviewed at $head: no real issues, except 2"
+expect "a verdict no real issues so far fails" 1 "Reviewed at $head: no real issues so far"
+expect "a verdict with a round note in brackets fails" 1 "Reviewed at $head: no real issues (round 3)"
+expect "a verdict No real issues. with a full stop passes" 0 "Reviewed at $head: No real issues."
+expect "a verdict with trailing spaces passes" 0 "Reviewed at $head: no real issues   "
 
 printf 'x' | "$check" >/dev/null 2>&1
 if [ "$?" = 2 ]; then echo "ok   a missing head commit is a usage error"; else echo "FAIL a missing head commit is a usage error"; fail=1; fi
