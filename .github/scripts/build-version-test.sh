@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Modified by the local-resource-coordinator fork, 2026-10-31: cd ... || exit 1 (shellcheck SC2164)
 #
 # Tests what `build.rs` makes a binary report.
 #
@@ -100,7 +101,7 @@ reports() {
 stranger="$work/stranger"
 mkdir -p "$stranger"
 (
-    cd "$stranger"
+    cd "$stranger" || exit 1
     git init -q -b main .
     git config user.email t@example.com
     git config user.name Test
@@ -130,7 +131,7 @@ echo "== A checkout of qex =="
 own="$work/own"
 copy_package "$own" "0.0.0-dev"
 (
-    cd "$own"
+    cd "$own" || exit 1
     git init -q -b main .
     git config user.email t@example.com
     git config user.name Test
@@ -168,7 +169,7 @@ git -C "$own" checkout -q -- src/main.rs
 release="$work/release"
 copy_package "$release" "0.8.0"
 (
-    cd "$release"
+    cd "$release" || exit 1
     git init -q -b main .
     git config user.email t@example.com
     git config user.name Test
