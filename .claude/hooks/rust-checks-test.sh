@@ -60,6 +60,7 @@ check "the clippy output reaches Claude on stderr" "$(grep -q 'zq_fake_clippy_li
 check "the stderr names the clippy step" "$(grep -q 'cargo clippy' "$tmp/err" && echo yes)" yes
 reset
 
+reset
 printf '\nA non-.rs change.\n' >> "$tmp/repo/README.md"
 printf 'scratch\n' > "$tmp/repo/src/scratch_untracked.txt"
 (cd "$tmp/repo" && printf '{"stop_hook_active": false}' | PATH="$tmp/bin:$PATH" bash "$hook" 2>/dev/null)
