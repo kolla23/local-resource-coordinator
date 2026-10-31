@@ -12,13 +12,13 @@ BENCH=${1:?bench dir}
 OUT=${2:?out dir}
 ARMS=${3:-P S}
 TEMP_ROOT=${4:-}
-HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd) || exit 1
 RUNNER="$HERE/target/release/parallel-workload.exe"
 mkdir -p "$OUT" || exit 1
-# CDPATH= keeps cd from printing a matched directory into the captured value.
-OUT=$(CDPATH= cd -- "$OUT" && pwd -W) || exit 1
+# CDPATH='' keeps cd from printing a matched directory into the captured value.
+OUT=$(CDPATH='' cd -- "$OUT" && pwd -W) || exit 1
 if [ -n "$TEMP_ROOT" ]; then
-  mkdir -p "$TEMP_ROOT" && TEMP_ROOT=$(CDPATH= cd -- "$TEMP_ROOT" && pwd -W) || exit 1
+  mkdir -p "$TEMP_ROOT" && TEMP_ROOT=$(CDPATH='' cd -- "$TEMP_ROOT" && pwd -W) || exit 1
 fi
 # Whichever cargo this shell finds, as a Windows path for cmd.exe.
 CARGO=$(command -v cargo) || { echo "cargo not found on PATH" >&2; exit 1; }

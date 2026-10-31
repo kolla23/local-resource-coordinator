@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Modified by the local-resource-coordinator fork, 2026-10-31: cd ... || exit 1 (shellcheck SC2164)
 #
 # Tests the rules that give the version number, and the driver that feeds them.
 #
@@ -195,7 +196,7 @@ repo="$work/repo"
 mkdir -p "$repo"
 export QEX_TEST_REPO="$repo"
 (
-    cd "$repo"
+    cd "$repo" || exit 1
     git init -q -b main .
     git config user.email t@example.com
     git config user.name Test
@@ -264,7 +265,7 @@ echo "== The driver, before the first release =="
 first="$work/first"
 mkdir -p "$first"
 (
-    cd "$first"
+    cd "$first" || exit 1
     git init -q -b main .
     git config user.email t@example.com
     git config user.name Test
