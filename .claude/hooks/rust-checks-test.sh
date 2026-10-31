@@ -68,5 +68,24 @@ check "a non-.rs change exits 0" "$?" 0
 check "a non-.rs change does not call cargo" "$([ -e "$tmp/calls" ] && echo called || echo none)" none
 reset
 
+for manifest in Cargo.toml Cargo.lock clippy.toml; do
+  reset
+  printf '\n# scratch\n' >> "$tmp/repo/$manifest"
+  (cd "$tmp/repo" && printf '{"stop_hook_active": false}' | PATH="$tmp/bin:$PATH" bash "$hook" 2>/dev/null)
+  check "a $manifest change calls cargo" "$([ -e "$tmp/calls" ] && echo called || echo none)" called
+done
+
+reset
+mkdir -p "$tmp/repo/experiments/scratch"
+printf '[package]\n' > "$tmp/repo/experiments/scratch/Cargo.toml"
+(cd "$tmp/repo" && printf '{"stop_hook_active": false}' | PATH="$tmp/bin:$PATH" bash "$hook" 2>/dev/null)
+check "a Cargo.toml under experiments/ does not call cargo" "$([ -e "$tmp/calls" ] && echo called || echo none)" none
+
+reset
+printf '\n# scratch\n' >> "$tmp/repo/experiments/parallel-workload/Cargo.toml"
+(cd "$tmp/repo" && printf '{"stop_hook_active": false}' | PATH="$tmp/bin:$PATH" bash "$hook" 2>/dev/null)
+check "an edited Cargo.toml under experiments/ does not call cargo" "$([ -e "$tmp/calls" ] && echo called || echo none)" none
+reset
+
 echo "$failed failed"
 [ "$failed" -eq 0 ]
