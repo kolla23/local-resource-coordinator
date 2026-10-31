@@ -103,6 +103,7 @@ key1=$(target_key "$tmp/repo")
 # shellcheck disable=SC2016 # the hook's literal WSL script text, not an expansion here.
 check "on Windows the WSL cargo gets a target dir under ~/.cache/lrc-stop-hook" \
   "$(grep -qF 'CARGO_TARGET_DIR="$HOME/.cache/lrc-stop-hook/$1"' "$tmp/wsl-args" && echo yes)" yes
+check "the same worktree keeps its target dir" "$([ -n "$key1" ] && [ "$key1" = "$(target_key "$tmp/repo")" ] && echo yes)" yes
 key2=$(target_key "$tmp/repo2")
 check "two worktrees get different target dirs" "$([ -n "$key1" ] && [ "$key1" != "$key2" ] && echo yes)" yes
 reset
