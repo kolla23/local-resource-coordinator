@@ -12,7 +12,11 @@ cargo_run() {
   case $(uname -s) in
     Linux|Darwin) cargo "$@" ;;
     # --exec skips WSL's default shell, which would re-split the arguments; the toolchain is in Ubuntu.
-    *) MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu --cd "$(pwd -W)" --exec bash -lc 'cargo "$@"' cargo "$@" ;;
+    # The target sits on WSL's own disk, one per worktree: on /mnt/c the checks ran 2-10x slower (#76).
+    *) key=$(pwd | sha1sum | cut -c1-16)
+       # shellcheck disable=SC2016 # $HOME and $1 expand in WSL's bash, not here.
+       MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu --cd "$(pwd -W)" --exec bash -lc \
+         'export CARGO_TARGET_DIR="$HOME/.cache/lrc-stop-hook/$1"; shift; cargo "$@"' bash "$key" "$@" ;;
   esac
 }
 

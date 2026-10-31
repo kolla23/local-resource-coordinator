@@ -87,5 +87,26 @@ printf '\n# scratch\n' >> "$tmp/repo/experiments/parallel-workload/Cargo.toml"
 check "an edited Cargo.toml under experiments/ does not call cargo" "$([ -e "$tmp/calls" ] && echo called || echo none)" none
 reset
 
+# The Windows branch, on any host: a fake uname takes it, and a fake wsl.exe records its arguments.
+mkdir -p "$tmp/bin-win"
+printf '#!/bin/sh\necho MINGW64_NT-10.0\n' > "$tmp/bin-win/uname"
+printf '#!/bin/sh\nprintf "%%s\\n" "$@" > "%s/wsl-args"\nexit 0\n' "$tmp" > "$tmp/bin-win/wsl.exe"
+chmod +x "$tmp/bin-win/uname" "$tmp/bin-win/wsl.exe"
+git clone -q --local "$root" "$tmp/repo2" || exit 2
+target_key() {
+  printf 'fn scratch_win() {}\n' > "$1/src/scratch_win.rs"
+  rm -f "$tmp/wsl-args"
+  (cd "$1" && printf '{"stop_hook_active": false}' | PATH="$tmp/bin-win:$PATH" bash "$hook" 2>/dev/null)
+  grep -Ex '[0-9a-f]{16}' "$tmp/wsl-args"
+}
+key1=$(target_key "$tmp/repo")
+# shellcheck disable=SC2016 # the hook's literal WSL script text, not an expansion here.
+check "on Windows the WSL cargo gets a target dir under ~/.cache/lrc-stop-hook" \
+  "$(grep -qF 'CARGO_TARGET_DIR="$HOME/.cache/lrc-stop-hook/$1"' "$tmp/wsl-args" && echo yes)" yes
+check "the same worktree keeps its target dir" "$([ -n "$key1" ] && [ "$key1" = "$(target_key "$tmp/repo")" ] && echo yes)" yes
+key2=$(target_key "$tmp/repo2")
+check "two worktrees get different target dirs" "$([ -n "$key1" ] && [ "$key1" != "$key2" ] && echo yes)" yes
+reset
+
 echo "$failed failed"
 [ "$failed" -eq 0 ]
