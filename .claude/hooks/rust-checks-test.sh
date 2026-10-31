@@ -37,5 +37,36 @@ printf 'fn  untracked( ) {   }\n' > "$tmp/repo/src/scratch_untracked.rs"
 (cd "$tmp/repo" && printf '{}' | PATH="$tmp/bin:$PATH" bash "$hook" 2>/dev/null)
 check "an untracked .rs file counts as a change" "$([ -e "$tmp/calls" ] && echo called || echo none)" called
 
+reset() {
+  git -C "$tmp/repo" checkout -q -- . && git -C "$tmp/repo" clean -fdq && rm -f "$tmp/calls"
+}
+mkdir -p "$tmp/bin-clippy"
+for fake in cargo wsl.exe; do
+  cat > "$tmp/bin-clippy/$fake" <<'EOF'
+#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = clippy ]; then echo zq_fake_clippy_lint; exit 1; fi
+done
+exit 0
+EOF
+  chmod +x "$tmp/bin-clippy/$fake"
+done
+
+reset
+printf 'fn scratch_clippy() {}\n' > "$tmp/repo/src/scratch_clippy.rs"
+(cd "$tmp/repo" && printf '{"stop_hook_active": false}' | PATH="$tmp/bin-clippy:$PATH" bash "$hook" 2>"$tmp/err")
+check "a clippy failure exits 2" "$?" 2
+check "the clippy output reaches Claude on stderr" "$(grep -q 'zq_fake_clippy_lint' "$tmp/err" && echo yes)" yes
+check "the stderr names the clippy step" "$(grep -q 'cargo clippy' "$tmp/err" && echo yes)" yes
+reset
+
+reset
+printf '\nA non-.rs change.\n' >> "$tmp/repo/README.md"
+printf 'scratch\n' > "$tmp/repo/src/scratch_untracked.txt"
+(cd "$tmp/repo" && printf '{"stop_hook_active": false}' | PATH="$tmp/bin:$PATH" bash "$hook" 2>/dev/null)
+check "a non-.rs change exits 0" "$?" 0
+check "a non-.rs change does not call cargo" "$([ -e "$tmp/calls" ] && echo called || echo none)" none
+reset
+
 echo "$failed failed"
 [ "$failed" -eq 0 ]
