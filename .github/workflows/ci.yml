@@ -7,6 +7,8 @@
 # Modified by the local-resource-coordinator fork, 2026-10-05: the Style job
 # runs the tests of the move checker, and the Move check job runs the base
 # revision's checker on refactor/ pull requests.
+# Modified by the local-resource-coordinator fork, 2026-10-31: the Style job
+# runs the Stop hook's test and shellcheck.
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -41,11 +43,17 @@ jobs:
         run: python3 .github/scripts/check-control-chars.py
       - name: The tests of the move checker
         run: python3 .github/scripts/check-moves-test.py
+      - name: The shell scripts pass shellcheck
+        run: |
+          shellcheck --version
+          git ls-files -z '*.sh' | xargs -0 -t shellcheck
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
       - uses: Swatinem/rust-cache@v2
       - name: The layout of the code
         run: cargo fmt --all --check
+      - name: The tests of the Stop hook
+        run: bash .claude/hooks/rust-checks-test.sh
       - name: The advice of clippy
         # The feature builds `testjob` and the e2e suite, which need it; without
         # it, clippy would skip them.
