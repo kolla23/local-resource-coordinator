@@ -1,0 +1,22 @@
+[package]
+name = "named-pipe-probe"
+version = "0.1.0"
+edition = "2024"
+description = "Decision-gate experiment for ADR 1: named-pipe ownership, server identity, connect errors and pid-file locks on Windows. Not part of qex."
+license = "Apache-2.0"
+publish = false
+
+# Standalone: not a member of the qex package at the repository root.
+[workspace]
+
+[dependencies.windows-sys]
+version = "=0.61.2"
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+]

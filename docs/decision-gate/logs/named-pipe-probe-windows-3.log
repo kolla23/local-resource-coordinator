@@ -1,0 +1,32 @@
+named-pipe-probe: decision-gate experiment for ADR 1; not part of qex
+date_utc: 2026-11-01T06:09:55Z
+commit: 35e2bf1ef0ce06e36c0438b2caa41804f479a419
+src/main.rs git blob: 36084eed5402b259e77a5af8486be7494d328ee2  working copy: 36084eed5402b259e77a5af8486be7494d328ee2
+probe source tree clean vs commit: yes
+Microsoft Windows [Version 10.0.26200.9711]
+rustc 1.98.1 (48a229cea 2026-09-01)
+windows-sys: 0.61.2
+TokenElevation: 0  integrity level: S-1-16-8192
+pipe names: \\.\pipe\lrc-probe-47292-1793513395742-<check>
+[P1a] FIRST_PIPE_INSTANCE vs a name another same-user process created first | call=CreateNamedPipeW(PIPE_ACCESS_DUPLEX+FILE_FLAG_FIRST_PIPE_INSTANCE) | got=squatter_create=ok flagged_create=err:5 | expected=err:5 (ERROR_ACCESS_DENIED) | PASS
+[P1b] control: the identical call without the flag | call=CreateNamedPipeW(PIPE_ACCESS_DUPLEX) | got=create=ok | expected=ok (the hazard D2 closes) | PASS
+[P1c] cross-user squatter | call=squatter under runas /user:<second account> | got=not run | expected=O2 not run (owner decision 2026-10-31); PORT_PLAN acceptance check step 4 | NOT EVALUATED
+[P1d] squatter at its instance limit (nMaxInstances 1, connected) | call=CreateNamedPipeW(PIPE_ACCESS_DUPLEX+FILE_FLAG_FIRST_PIPE_INSTANCE nMaxInstances=1) | got=squatter_create=ok client_open=ok squatter_connect=err:535 flagged_create=err:231 | expected=recorded: 5 or 231 (ERROR_PIPE_BUSY) | RECORDED
+[P2a] server identity from a client handle | call=GetNamedPipeServerProcessId+OpenProcess+OpenProcessToken+GetTokenInformation(TokenUser) | got=server_pid=47292 probe_pid=47292 server_user=S-1-5-21-X-X-X-1001 client_user=S-1-5-21-X-X-X-1001 | expected=pid = the server pid; SID = the client's own TokenUser SID | PASS
+[P2b] pipe owner through the client handle | call=GetSecurityInfo(client handle, OWNER_SECURITY_INFORMATION) | got=owner=S-1-5-21-X-X-X-1001 type=SE_FILE_OBJECT server_token_owner=S-1-5-21-X-X-X-1001 server_token_user=S-1-5-21-X-X-X-1001 owner_is_user=yes | expected=owner SID = the server token's TokenOwner SID | PASS
+[P2c] pipe owner, server elevated | call=the probe run elevated (owner step O1 (i)) | got=TokenElevation=0 | expected=NOT EVALUATED unless O1 ran | NOT EVALUATED
+[P2d] client pid on the server side (D7 attribution) | call=GetNamedPipeClientProcessId(server handle) | got=server_connect=err:535 client_pid=60508 client_process=60508 | expected=client_pid = the client process pid | PASS
+[P2e] elevated server, non-elevated client (O1 (ii)) | call=pair-server and pair-client | got=see the O1 pair files | expected=NOT EVALUATED unless O1 ran; there RECORDED per call | NOT EVALUATED
+[P2f] non-elevated server, elevated client (O1 (iii)) | call=pair-server and pair-client | got=see the O1 pair files | expected=NOT EVALUATED unless O1 ran; there RECORDED per call | NOT EVALUATED
+[P4a] no pipe | call=CreateFileW(OPEN_EXISTING)+WaitNamedPipeW(500) | got=open=err:2 wait=err:2 wait_ms=0 | expected=open err:2 (ERROR_FILE_NOT_FOUND); wait returns zero at once (under 100 ms) | PASS
+[P4b] all instances busy | call=CreateFileW+WaitNamedPipeW(500) | got=client1_open=ok server_connect=err:535 client2_open=err:231 client2_wait=err:121 wait_ms=512 | expected=client2 open err:231 (ERROR_PIPE_BUSY); wait err:121 (ERROR_SEM_TIMEOUT) after ~500 ms | PASS
+[P4c] window with no pending instance (client 1 closed, server not yet disconnected) | call=CreateFileW; then CreateNamedPipeW(second instance)+ConnectNamedPipe | got=client1_close=ok client2_open=err:231 second_create=ok client2_open_after=ok open_ms=0 server_connect=ok | expected=recorded: the raw code (231 expected); client 2 then connects at once | RECORDED
+[P4d] client connects before ConnectNamedPipe is called | call=ConnectNamedPipe after the client's CreateFileW | got=client_open=ok server_connect=err:535 server_write=ok client_read=ok data=x | expected=connect err:535 (ERROR_PIPE_CONNECTED); the client is served | PASS
+[P4e] server killed, no client connected | call=TerminateProcess(server); CreateFileW; WaitNamedPipeW(500); flagged CreateNamedPipeW | got=server_create=ok open=err:2 wait=err:2 wait_ms=0 relaunch_create=ok | expected=open err:2; wait returns zero at once (under 100 ms); the new flagged create ok | PASS
+[P4f] server killed while client 1 holds a connected handle | call=TerminateProcess(server); flagged CreateNamedPipeW; CreateFileW; ReadFile; WriteFile; retry after close | got=server_create=ok client1_open=ok server_connect=err:535 relaunch_create=ok client2_open=ok client1_read=err:109 client1_write=err:232 client1_close=ok retry_create=ok | expected=recorded: each raw code (109 or 233 for client 1 expected; the retry ok) | RECORDED
+[P6a] lock past EOF leaves the content readable, in production's order | call=LockFileEx(EXCLUSIVE+FAIL_IMMEDIATELY, 0xFFFFFFFFFFFFFFF0, 1)+SetFilePointerEx+SetEndOfFile+WriteFile; reader ReadFile | got=holder_open=ok holder_lock=ok truncate_write=ok reader_open=ok reader_read=ok content=38692 holder_pid=38692 | expected=the holder's writes succeed under its own lock; the reader reads the holder pid, no leftover digit | PASS
+[P6b] control: a lock over the content blocks reads | call=holder LockFileEx([0, len)); reader ReadFile (full sharing) | got=holder_lock=ok reader_read=err:33 | expected=the reader's ReadFile fails (33 ERROR_LOCK_VIOLATION expected; code on got) | PASS
+[P6c] a second exclusive try fails at once | call=LockFileEx(EXCLUSIVE+FAIL_IMMEDIATELY) on the same range from another process | got=reader_open=ok lock=err:33 ms=0 | expected=fails at once (under 50 ms); code on got (33 expected) | PASS
+[P6d] lock released when the holder is killed | call=TerminateProcess(holder); reader LockFileEx every 10 ms | got=lock=ok ms_until_success=0 | expected=succeeds; ms printed | PASS
+[P6e] delete while another process holds the lock (holder share=all) | call=DeleteFileW; GetFileInformationByHandleEx(FileStandardInfo); CreateFileW(CREATE_NEW) | got=holder_open=ok lock=ok delete=ok stdinfo=ok delete_pending=1 number_of_links=0 create_new=ok | expected=recorded (32 ERROR_SHARING_VIOLATION expected without FILE_SHARE_DELETE) | RECORDED
+[P6e] delete while another process holds the lock (holder share=nodelete) | call=DeleteFileW; GetFileInformationByHandleEx(FileStandardInfo); CreateFileW(CREATE_NEW) | got=holder_open=ok lock=ok delete=err:32 stdinfo=ok delete_pending=0 number_of_links=1 create_new=err:80 | expected=recorded (32 ERROR_SHARING_VIOLATION expected without FILE_SHARE_DELETE) | RECORDED
