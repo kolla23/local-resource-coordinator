@@ -8,6 +8,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: nine tests pin the mode of each path qex makes: the state-directory census, the first start, four directories whose last writer is one call, the pruned history, the tail file and the TMPDIR socket directory (R3 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-10-06: the census and first-start tests expect owner-only modes; a test for coordinator files left wide by an earlier version.
 // Modified by the local-resource-coordinator fork, 2026-11-01: the long-path test sets a long XDG_STATE_HOME, which qex reads, and checks that the socket moved to TMPDIR (issue #54).
+// Modified by the local-resource-coordinator fork, 2026-11-01: the e2e suite passes as root and in a container with a slow reaper: stop_coordinator waits for the reaper, the abort test blocks the write with a directory, the memory-hint test keeps out the ambient environment (issue #84).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -627,6 +628,11 @@ impl Harness {
     /// that this function gives received the signal, and the function looked
     /// again after it.
     fn stop_holders(&self, signal: i32, limit: Duration) -> Holders {
+        self.stop_holders_noting(signal, limit, &mut Vec::new())
+    }
+
+    /// `stop_holders`, which also adds each pid that it signalled to `sent_to`.
+    fn stop_holders_noting(&self, signal: i32, limit: Duration, sent_to: &mut Vec<i32>) -> Holders {
         let deadline = Instant::now() + limit;
         let mut sent = false;
         loop {
@@ -639,6 +645,7 @@ impl Harness {
                     libc::kill(*pid, signal);
                 }
             }
+            sent_to.extend(&found.pids);
             sent = true;
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -646,7 +653,8 @@ impl Harness {
 
     /// Stops the coordinator of this test in the middle of the test.
     fn stop_coordinator(&self) {
-        let stayed = self.stop_holders(libc::SIGKILL, STOP_LIMIT);
+        let mut sent_to = Vec::new();
+        let stayed = self.stop_holders_noting(libc::SIGKILL, STOP_LIMIT, &mut sent_to);
         assert!(
             stayed.pids.is_empty(),
             "{}",
@@ -657,6 +665,26 @@ impl Harness {
                 panic!("{}", self.blind_message(reason, &seen));
             }
         }
+        // qex counts a zombie supervisor as alive, and a slow reaper (issue #84) keeps one.
+        // A zombie child of this test waits for the test, so the wait leaves it out.
+        let me = std::process::id() as i32;
+        sent_to.retain(|&pid| Self::parent_in_proc(pid) != Some(me));
+        let deadline = Instant::now() + STOP_LIMIT;
+        while sent_to.iter().any(|&pid| !Self::reaped(pid)) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Says whether a process is gone, and not a zombie either.
+    fn reaped(pid: i32) -> bool {
+        (unsafe { libc::kill(pid, 0) }) != 0
+    }
+
+    /// Gives the parent of a process from `/proc/<pid>/stat`, the field after the state.
+    fn parent_in_proc(pid: i32) -> Option<i32> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let (_, after) = stat.rsplit_once(')')?;
+        after.split_whitespace().nth(1)?.parse().ok()
     }
 
     /// Waits until no coordinator of this test accepts a connection.
@@ -4167,10 +4195,11 @@ fn a_recovered_job_without_a_supervisor_does_not_stay_running() {
         libc::kill(supervisor, libc::SIGKILL);
     }
     let deadline = Instant::now() + Duration::from_secs(30);
-    while !Harness::stopped(coordinator) || !Harness::stopped(supervisor) {
+    // qex counts a zombie supervisor as alive (issue #84), so wait for the reaper too.
+    while !Harness::stopped(coordinator) || !Harness::reaped(supervisor) {
         assert!(
             Instant::now() < deadline,
-            "the coordinator and the supervisor did not stop"
+            "the coordinator and the supervisor did not stop, or the reaper did not collect it"
         );
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -15397,7 +15426,12 @@ fn qex_makes_no_cgroup_for_a_job() {
 /// and leave every other program free.
 #[test]
 fn no_hint_in_the_environment_of_a_job_carries_memory() {
-    let h = Harness::new("nomemhint", "[peers]\nenabled = false\n");
+    // With the default `all`, an ambient NODE_OPTIONS or GOMEMLIMIT reached the job (issue #84).
+    // `minimal` keeps it out, and qex's own hints still reach the job: GOMAXPROCS is one.
+    let h = Harness::new(
+        "nomemhint",
+        "[peers]\nenabled = false\n[submit]\nenv_capture = \"minimal\"\n",
+    );
     let id = h.submit(&[
         "submit",
         "--cpu",
@@ -19576,8 +19610,6 @@ fn a_coordinator_that_dies_during_an_abort_leaves_every_cancel_on_the_disk() {
 /// and gives the exit code 1.
 #[test]
 fn an_abort_does_not_count_a_cancel_that_did_not_reach_the_disk() {
-    use std::os::unix::fs::PermissionsExt;
-
     let h = Harness::new("abortunwritable", ABORT_CONFIG);
     h.ok(&["pause", "queue"]);
     let fine = h.submit(&["submit", "--cpu", "1", "--mem", "64MB", "--", "true"]);
@@ -19593,10 +19625,14 @@ fn an_abort_does_not_count_a_cancel_that_did_not_reach_the_disk() {
         "true",
     ]);
     let dir = h.job_dir(&unwritable);
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Root writes past a mode of 0 (issue #84), but nobody can rename a file over a directory.
+    let saved = dir.join("status.json.saved");
+    std::fs::rename(dir.join("status.json"), &saved).unwrap();
+    std::fs::create_dir_all(dir.join("status.json/in-the-way")).unwrap();
 
     let out = h.qex_within(&["abort", "--all", "--json"], Duration::from_secs(60));
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::remove_dir_all(dir.join("status.json")).unwrap();
+    std::fs::rename(&saved, dir.join("status.json")).unwrap();
     let report: serde_json::Value =
         serde_json::from_slice(&out.stdout).expect("the abort output is not valid JSON");
     assert_eq!(
