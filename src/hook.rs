@@ -212,11 +212,10 @@ fn fire_with(origin: Origin, cfg: &Config, dir: &Path, status: &JobStatus) {
 ///
 /// The `.mode` below is belt AND braces, and only a unit test that calls `note`
 /// reaches it. [`run`] opens the same file with the same mode before it starts
-/// the hook, so whenever that open worked, the file already exists and
-/// `create` does nothing. This call makes the file only when THAT open failed.
-/// The mode stays: the two places that make this file must not disagree, and a
-/// reader who sees one of them must find the same rule in the other. Both also
-/// call `make_private` on every open, which narrows a file that already exists.
+/// the hook, so this call makes the file only when THAT open failed. Both places
+/// keep the mode and call `make_private`, which narrows a file that exists: the
+/// two places that make this file must not disagree, and a reader who sees one
+/// of them must find the same rule in the other.
 fn note(dir: &Path, text: &str) {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;

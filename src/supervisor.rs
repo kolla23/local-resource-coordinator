@@ -1027,8 +1027,7 @@ fn drain_copies(
     false
 }
 
-/// Makes or opens a file that the other users of the machine cannot read, also
-/// one that existed with a wider mode.
+/// Makes a file that the other users cannot read, and narrows one that existed.
 ///
 /// The output of a job frequently holds a token or a password, in the same way
 /// as its environment.
