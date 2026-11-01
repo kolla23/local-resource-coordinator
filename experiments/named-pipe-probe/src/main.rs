@@ -264,11 +264,11 @@ fn create_pipe(name: &str, max: u32, first: bool, sd: *mut c_void) -> Result<HAN
     }
 }
 
-fn open_pipe(name: &str) -> Result<HANDLE, u32> {
+fn open_pipe(name: &str, access: u32) -> Result<HANDLE, u32> {
     let h = unsafe {
         CreateFileW(
             wide(name).as_ptr(),
-            GENERIC_READ | GENERIC_WRITE,
+            access,
             0,
             ptr::null(),
             OPEN_EXISTING,
@@ -389,7 +389,8 @@ fn exec(hs: &mut Vec<usize>, line: &str) -> String {
                 hs,
                 create_pipe(a[1], a[2].parse().unwrap(), a[3] == "1", ptr::null_mut()),
             ),
-            "open" => keep(hs, open_pipe(a[1])),
+            "open" => keep(hs, open_pipe(a[1], GENERIC_READ | GENERIC_WRITE)),
+            "openr" => keep(hs, open_pipe(a[1], GENERIC_READ)),
             "connect" => done(ConnectNamedPipe(hd(hs, a[1]), ptr::null_mut()) != 0),
             "disconnect" => done(DisconnectNamedPipe(hd(hs, a[1])) != 0),
             "close" => done(CloseHandle(hd(hs, a[1])) != 0),
@@ -923,15 +924,28 @@ fn pair(args: &[String], server: bool) {
         }
     } else {
         let t = Instant::now();
+        // Retry only while the server is not up yet (2) or busy (231).
         let opened = loop {
             let r = me.cmd(&format!("open {name}"));
-            if st(&r) == "ok" || t.elapsed() > Duration::from_secs(60) {
+            let waiting = matches!(st(&r).as_str(), "err:2" | "err:231");
+            if !waiting || t.elapsed() > Duration::from_secs(60) {
                 break r;
             }
             thread::sleep(Duration::from_millis(100));
         };
-        let h = kv(&opened, "h").to_string();
-        let (sid, owner) = if st(&opened) == "ok" {
+        // A refused read+write open is retried read-only: the default DACL grants Everyone read.
+        let read_only = if st(&opened) == "ok" {
+            "not-tried".to_string()
+        } else {
+            me.cmd(&format!("openr {name}"))
+        };
+        let usable = if st(&opened) == "ok" {
+            &opened
+        } else {
+            &read_only
+        };
+        let h = kv(usable, "h").to_string();
+        let (sid, owner) = if st(usable) == "ok" {
             (
                 me.cmd(&format!("serverid {h}")),
                 me.cmd(&format!("owner {h}")),
@@ -943,11 +957,16 @@ fn pair(args: &[String], server: bool) {
         check(
             id,
             "pair-client side: server identity and pipe owner",
-            "CreateFileW+GetNamedPipeServerProcessId+OpenProcess+OpenProcessToken+GetTokenInformation+GetSecurityInfo",
+            "CreateFileW(GENERIC_READ+GENERIC_WRITE; then GENERIC_READ if refused)+GetNamedPipeServerProcessId+OpenProcess+OpenProcessToken+GetTokenInformation+GetSecurityInfo",
             &format!(
-                "elevated={} open={} serverid={} step={} server_pid={} server_user={} server_owner={} server_elevated={} same_user={} pipe_owner_call={} pipe_owner={} type={}",
+                "elevated={} open={} read_only_open={} serverid={} step={} server_pid={} server_user={} server_owner={} server_elevated={} same_user={} pipe_owner_call={} pipe_owner={} type={}",
                 el as u8,
                 st(&opened),
+                if read_only == "not-tried" {
+                    read_only.clone()
+                } else {
+                    st(&read_only)
+                },
                 st(&sid),
                 kv(&sid, "step"),
                 kv(&sid, "pid"),
