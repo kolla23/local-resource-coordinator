@@ -84,12 +84,8 @@ rules_next() {
 
 echo "== A tool that is missing =="
 
-# Without jq the stub of `gh` gives empty answers, and without git the driver
-# finds no history. A run then reports failed version rules instead of the
-# missing tool, so the script must stop first and name the tool. The inner run
-# gets a PATH that holds every program of the outer PATH except the one tool.
-#
-# `without <tool>` makes that directory and prints its path.
+# Without jq or git a run must stop and name the tool, not report failed rules.
+# `without <tool>` prints a directory of every program on the PATH but <tool>.
 without() {
     local dir="$work/without-$1" entry
     mkdir -p "$dir"
