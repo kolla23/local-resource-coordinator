@@ -14,9 +14,15 @@ cargo_run() {
     # --exec skips WSL's default shell, which would re-split the arguments; the toolchain is in Ubuntu.
     # The target sits on WSL's own disk, one per worktree: on /mnt/c the checks ran 2-10x slower (#76).
     *) key=$(pwd | sha1sum | cut -c1-16)
+       # Each target records its worktree's path; a target whose worktree is gone is removed (#78).
        # shellcheck disable=SC2016 # $HOME and $1 expand in WSL's bash, not here.
        MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu --cd "$(pwd -W)" --exec bash -lc \
-         'export CARGO_TARGET_DIR="$HOME/.cache/lrc-stop-hook/$1"; shift; cargo "$@"' bash "$key" "$@" ;;
+         'export CARGO_TARGET_DIR="$HOME/.cache/lrc-stop-hook/$1"; shift
+          mkdir -p "$CARGO_TARGET_DIR" && printf "%s\n" "$PWD" > "$CARGO_TARGET_DIR/path"
+          for d in "${CARGO_TARGET_DIR%/*}"/*/; do
+            [ -f "$d/path" ] && IFS= read -r p < "$d/path" && [ -n "$p" ] && [ ! -d "$p" ] && rm -rf "$d"
+          done
+          cargo "$@"' bash "$key" "$@" ;;
   esac
 }
 
