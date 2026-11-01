@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the hook.log that `note` makes, and the doc of `note` says so (R3 of docs/fork/PORT_PLAN.md).
+// Modified by the local-resource-coordinator fork, 2026-11-01: run and note set 0600 on a hook.log that exists, with a unit test; a test comment no longer says run opened no file (issue #56).
 //! This module runs the command that qex starts when a job stops.
 //!
 //! The hook is a property of the machine and of the person at it, and not a
@@ -209,12 +210,13 @@ fn fire_with(origin: Origin, cfg: &Config, dir: &Path, status: &JobStatus) {
 
 /// Adds one line to the log of the hook.
 ///
-/// The mode below is belt AND braces, and only a unit test that calls `note`
+/// The `.mode` below is belt AND braces, and only a unit test that calls `note`
 /// reaches it. [`run`] opens the same file with the same mode before it starts
 /// the hook, so whenever that open worked, the file already exists and
 /// `create` does nothing. This call makes the file only when THAT open failed.
 /// The mode stays: the two places that make this file must not disagree, and a
-/// reader who sees one of them must find the same rule in the other.
+/// reader who sees one of them must find the same rule in the other. Both also
+/// call `make_private` on every open, which narrows a file that already exists.
 fn note(dir: &Path, text: &str) {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
@@ -225,6 +227,7 @@ fn note(dir: &Path, text: &str) {
         .mode(0o600)
         .open(dir.join(LOG_FILE))
     {
+        crate::paths::make_private(&f);
         // A newline before the text.
         //
         // qex cuts a log that is too large at the size limit, which is
@@ -369,6 +372,7 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
         .truncate(true)
         .mode(0o600)
         .open(dir.join(LOG_FILE))?;
+    crate::paths::make_private(&out);
 
     // THE HOOK NEVER RECEIVES THE FILE. It writes into a pipe, and qex copies
     // from that pipe to the file and STOPS AT THE CAP.
@@ -962,8 +966,8 @@ mod tests {
             );
         }
 
-        // A hook that DID NOT START. `run` opened no file, so `note` makes
-        // `hook.log` itself, and it must give the same mode. This path holds
+        // A hook that DID NOT START. `run` opened `hook.log` before the start
+        // failed, and `note` adds the verdict; the mode must hold. This path holds
         // the name of the program that failed, which can name a directory of
         // the owner.
         let dir = temp("mode2");
@@ -988,6 +992,20 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(mode, 0o600, "note made hook.log with the mode {mode:o}");
+    }
+
+    /// Only a unit test reaches this: `run` opens and narrows the same file before `note`.
+    #[test]
+    fn note_narrows_a_hook_log_that_exists_wide() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = temp("note-wide");
+        let log = dir.join(LOG_FILE);
+        std::fs::write(&log, b"").unwrap();
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644)).unwrap();
+        note(&dir, "a line");
+        let mode = std::fs::metadata(&log).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "note left hook.log with the mode {mode:o}");
     }
 
     /// The hook gets no standard input.
