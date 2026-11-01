@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Modified by the local-resource-coordinator fork, 2026-10-31: cd ... || exit 1 (shellcheck SC2164)
+# Modified by the local-resource-coordinator fork, 2026-10-31: cd ... || exit 1 (shellcheck SC2164); 2026-11-01: stop when jq or git is missing (#74)
 #
 # Tests the rules that give the version number, and the driver that feeds them.
 #
@@ -25,6 +25,15 @@
 # Usage: test.sh
 
 set -uo pipefail
+
+# Without one of these, every test of the driver fails and the run looks like a
+# fault in the rules. Stop first, and name the tool (#74).
+for tool in jq git; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "test.sh needs $tool, and $tool is not on the PATH." >&2
+        exit 2
+    fi
+done
 
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
