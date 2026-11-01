@@ -26,6 +26,14 @@ lines 400 >"$repo/package-lock.json"
 lock="$(commit lock)"
 g checkout -q "$small"
 lines 500 >"$repo/src.txt"
+lines 400 >"$repo/go.sum"
+gosum="$(commit gosum)"
+g checkout -q "$small"
+lines 500 >"$repo/src.txt"
+lines 400 >"$repo/npm-shrinkwrap.json"
+shrinkwrap="$(commit shrinkwrap)"
+g checkout -q "$small"
+lines 500 >"$repo/src.txt"
 lines 400 >"$repo/build.log"
 log="$(commit log)"
 g checkout -q "$small"
@@ -149,6 +157,25 @@ expect "a Found, not done heading with trailing spaces keeps its list" 0 "$small
 colon_outside="${one_line/"**Acceptance criteria**"/"**Acceptance criteria**:"}"
 expect "a Found, not done list ends at a bold heading with the colon outside the stars" 0 "$small"     "${colon_outside/":** none"/"**
 - Flaky timer in the e2e suite: #14"}"
+
+# Issue #67: the size override was matched on the raw body, so bold markers hid it.
+expect "over 800 counted lines with a partly bold owner's OK passes" 0 "$big" "$good
+**Owner OK** for size: one generated schema"
+expect "over 800 counted lines with a backticked owner's OK passes" 0 "$big" "$good
+\`Owner OK\` for size: one generated schema"
+
+# Issue #68: Fixes #N and Fixes <this repo's issue URL> are one issue (the workflow sets GITHUB_REPOSITORY).
+export GITHUB_REPOSITORY=Owner/Repo
+expect "Fixes #N and Fixes with this repo's issue URL fails" 1 "$small" \
+    "${good/Fixes #12/Fixes #12, Fixes https://github.com/owner/repo/issues/12}"
+expect "Fixes #N and Fixes owner/repo#N for this repo fails" 1 "$small" \
+    "${good/Fixes #12/Fixes #12, Fixes Owner/Repo#12}"
+expect "Fixes #N and Fixes another repo's issue URL with the same number passes" 0 "$small" \
+    "${good/Fixes #12/Fixes #12, Fixes https://github.com/other/repo/issues/12}"
+
+# Issue #69: npm-shrinkwrap.json and go.sum are lockfiles.
+expect "a go.sum past 800 raw lines, under 800 counted, passes" 0 "$gosum" "$good"
+expect "an npm-shrinkwrap.json past 800 raw lines, under 800 counted, passes" 0 "$shrinkwrap" "$good"
 
 fake="$(mktemp -d)"
 trap 'rm -rf "$repo" "$fake"' EXIT

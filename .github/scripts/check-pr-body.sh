@@ -38,6 +38,9 @@ has_box=0
 in_found=0
 found_seen=0
 declare -A closed=()
+# owner/repo of this PR (set by GitHub Actions); lower-case, as the body is matched lower-cased.
+own_repo="${GITHUB_REPOSITORY-}"
+own_repo="${own_repo,,}"
 while IFS= read -r raw; do
     if [[ "$raw" =~ $bullet_re ]]; then
         raw="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}"
@@ -76,6 +79,10 @@ while IFS= read -r raw; do
         rest="${rest#*"${BASH_REMATCH[0]}"}"
         if [[ "$issue" =~ ^https://github\.com/([^/]+/[^/]+)/issues/([0-9]+)$ ]]; then
             issue="${BASH_REMATCH[1]}#${BASH_REMATCH[2]}"
+        fi
+        # This repository's own issues are one key whichever form names them.
+        if [ -n "$own_repo" ] && [ "${issue%#*}" = "$own_repo" ]; then
+            issue="#${issue##*#}"
         fi
         closed[$issue]=$(( ${closed[$issue]:-0} + 1 ))
         if [ "$in_found" -eq 1 ] || [ "$found_line" -eq 1 ]; then
@@ -120,7 +127,8 @@ while IFS= read -r -d '' rec; do
     fi
     [ "$added" = "-" ] && continue
     case "${path##*/}" in
-        *.log | *.lock | package-lock.json | pnpm-lock.yaml) continue ;;
+        *.log | *.lock | package-lock.json | npm-shrinkwrap.json | pnpm-lock.yaml \
+            | go.sum) continue ;;
     esac
     generated="$(git check-attr --source "$head" linguist-generated -- "$path")"
     case "${generated##*: }" in
@@ -129,7 +137,10 @@ while IFS= read -r -d '' rec; do
     size=$(( size + added + deleted ))
 done <"$numstat"
 
-if [ "$size" -gt 800 ] && [[ ! "${body,,}" == *"owner ok for size"* ]]; then
+# Read like the other checks: without bold markers and backticks.
+plain="${body//\*/}"
+plain="${plain//\`/}"
+if [ "$size" -gt 800 ] && [[ ! "${plain,,}" == *"owner ok for size"* ]]; then
     problems+=("$size changed lines (past 800) and no \"Owner OK for size\" in the body.")
 fi
 
