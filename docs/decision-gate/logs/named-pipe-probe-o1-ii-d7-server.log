@@ -1,0 +1,11 @@
+named-pipe-probe: decision-gate experiment for ADR 1; not part of qex
+date_utc: 2026-11-01T06:31:22Z
+commit: b74723a2e266176a61529507e95ea179a5f6f5bb
+src/main.rs git blob: 5adcfbbcbee1010606b06b1107897081f55fc7ea  working copy: 5adcfbbcbee1010606b06b1107897081f55fc7ea
+probe source tree clean vs commit: yes
+Microsoft Windows [Version 10.0.26200.9711]
+rustc 1.98.1 (48a229cea 2026-09-01)
+windows-sys: 0.61.2
+TokenElevation: 1  integrity level: S-1-16-12288
+pipe names: \\.\pipe\lrc-probe-58300-1793514682949-<check>
+[P2e] pair-server side: create, connect and client attribution | call=CreateNamedPipeW(+FIRST_PIPE_INSTANCE)+ConnectNamedPipe+GetNamedPipeClientProcessId | got=elevated=1 descriptor=d7 create=ok connect=ok clientpid=ok client_pid=80452 | expected=recorded | RECORDED
