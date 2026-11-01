@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Modified by the local-resource-coordinator fork, 2026-10-31: cd ... || exit 1 (shellcheck SC2164)
+# Modified by the local-resource-coordinator fork, 2026-10-31: cd ... || exit 1 (shellcheck SC2164); 2026-11-01: stop when jq or git is missing (#74)
 #
 # Tests the rules that give the version number, and the driver that feeds them.
 #
@@ -26,11 +26,21 @@
 
 set -uo pipefail
 
+# Without one of these, every test of the driver fails and the run looks like a
+# fault in the rules. Stop first, and name the tool (#74).
+for tool in jq git; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "test.sh needs $tool, and $tool is not on the PATH." >&2
+        exit 2
+    fi
+done
+
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
 rules="$here/version-rules.sh"
 driver="$here/compute-version.sh"
 
+outer_path="$PATH"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -71,6 +81,32 @@ rules_next() {
     out="$(printf '%s\0' "$@" | "$rules" next "$previous" "")"
     check "$name" "$expected" "$(value_of "$field" "$out")"
 }
+
+echo "== A tool that is missing =="
+
+# Without jq or git a run must stop and name the tool, not report failed rules.
+# `without <tool>` prints a directory of every program on the PATH but <tool>.
+without() {
+    local dir="$work/without-$1" entry
+    mkdir -p "$dir"
+    IFS=: read -ra entries <<<"$outer_path"
+    for entry in "${entries[@]}"; do
+        [ -d "$entry" ] && ln -s "$entry"/* "$dir"/ 2>/dev/null
+    done
+    rm -f "$dir/$1"
+    echo "$dir"
+}
+# The inner run skips this block, so a script that fails to stop cannot call
+# itself again and again.
+if [ -z "${COMPUTE_VERSION_TEST_INNER:-}" ]; then
+    for tool in jq git; do
+        dir="$(without "$tool")"
+        message="$(COMPUTE_VERSION_TEST_INNER=1 PATH="$dir" "$BASH" "$here/test.sh" 2>&1)"
+        check "without $tool it stops with status 2" "2" "$?"
+        check "without $tool it names the tool and runs no test" \
+            "test.sh needs $tool, and $tool is not on the PATH." "$message"
+    done
+fi
 
 echo "== The rules =="
 
