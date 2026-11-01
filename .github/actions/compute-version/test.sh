@@ -31,6 +31,7 @@ root="$(cd "$here/../../.." && pwd)"
 rules="$here/version-rules.sh"
 driver="$here/compute-version.sh"
 
+outer_path="$PATH"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -71,6 +72,36 @@ rules_next() {
     out="$(printf '%s\0' "$@" | "$rules" next "$previous" "")"
     check "$name" "$expected" "$(value_of "$field" "$out")"
 }
+
+echo "== A tool that is missing =="
+
+# Without jq the stub of `gh` gives empty answers, and without git the driver
+# finds no history. A run then reports failed version rules instead of the
+# missing tool, so the script must stop first and name the tool. The inner run
+# gets a PATH that holds every program of the outer PATH except the one tool.
+#
+# `without <tool>` makes that directory and prints its path.
+without() {
+    local dir="$work/without-$1" entry
+    mkdir -p "$dir"
+    IFS=: read -ra entries <<<"$outer_path"
+    for entry in "${entries[@]}"; do
+        [ -d "$entry" ] && ln -s "$entry"/* "$dir"/ 2>/dev/null
+    done
+    rm -f "$dir/$1"
+    echo "$dir"
+}
+# The inner run skips this block, so a script that fails to stop cannot call
+# itself again and again.
+if [ -z "${COMPUTE_VERSION_TEST_INNER:-}" ]; then
+    for tool in jq git; do
+        dir="$(without "$tool")"
+        message="$(COMPUTE_VERSION_TEST_INNER=1 PATH="$dir" "$BASH" "$here/test.sh" 2>&1)"
+        check "without $tool it stops with status 2" "2" "$?"
+        check "without $tool it names the tool and runs no test" \
+            "test.sh needs $tool, and $tool is not on the PATH." "$message"
+    done
+fi
 
 echo "== The rules =="
 
