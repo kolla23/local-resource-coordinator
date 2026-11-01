@@ -1,4 +1,4 @@
-// Modified by the local-resource-coordinator fork, 2026-11-01: the follower sets 0600 on a log file that exists (issue #56).
+// Modified by the local-resource-coordinator fork, 2026-11-01: the follower sets 0600 on a log file that exists (issue #56) and refuses a symlinked one.
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -2777,6 +2777,8 @@ fn follow(dir: &std::path::Path, select: &crate::logsel::LogSelect) -> Result<i3
             .truncate(false)
             .write(true)
             .mode(0o600)
+            // A planted symlink fails the follow: nothing is made or changed through it.
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&path)?;
         crate::paths::make_private(&f);
 
