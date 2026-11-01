@@ -9,7 +9,7 @@ use std::sync::{Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs, ptr, thread};
 use windows_sys::Win32::Foundation::*;
-use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+use windows_sys::Win32::Security::Authorization::*;
 use windows_sys::Win32::Security::*;
 use windows_sys::Win32::Storage::FileSystem::*;
 use windows_sys::Win32::System::Pipes::*;
@@ -21,6 +21,8 @@ fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("squatter" | "server" | "client" | "holder" | "reader" | "deleter") => agent(),
+        Some("pair-server") => pair(&args[1..], true),
+        Some("pair-client") => pair(&args[1..], false),
         _ => run_all(&args),
     }
 }
@@ -121,6 +123,7 @@ fn run_all(args: &[String]) {
     set_out(arg(args, "--out"));
     header();
     p1();
+    p2();
     p4();
 }
 
@@ -396,9 +399,102 @@ fn exec(hs: &mut Vec<usize>, line: &str) -> String {
                     format!("err {code} ms={ms}")
                 }
             }
+            "whoami" => format!("ok pid={} {}", std::process::id(), token_sids(own_token())),
+            "serverid" => server_identity(hd(hs, a[1])),
+            "owner" => pipe_owner(hd(hs, a[1])),
+            "clientpid" => {
+                let mut pid = 0;
+                if GetNamedPipeClientProcessId(hd(hs, a[1]), &mut pid) != 0 {
+                    format!("ok pid={pid}")
+                } else {
+                    format!("err {}", last_err())
+                }
+            }
+            "createsd" => {
+                let mut sd = ptr::null_mut();
+                let sddl = wide(a[4]);
+                let made = ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl.as_ptr(),
+                    SDDL_REVISION_1,
+                    &mut sd,
+                    ptr::null_mut(),
+                );
+                if made == 0 {
+                    return format!("err {} step=ConvertStringSecurityDescriptor", last_err());
+                }
+                keep(
+                    hs,
+                    create_pipe(a[1], a[2].parse().unwrap(), a[3] == "1", sd),
+                )
+            }
             _ => "err unknown-command".into(),
         }
     }
+}
+
+fn token_sids(t: HANDLE) -> String {
+    let user = token_info(t, TokenUser)
+        .map(|b| sid_string(unsafe { (*b.as_ptr().cast::<TOKEN_USER>()).User.Sid }))
+        .unwrap_or_else(|c| format!("err:{c}"));
+    let owner = token_info(t, TokenOwner)
+        .map(|b| sid_string(unsafe { (*b.as_ptr().cast::<TOKEN_OWNER>()).Owner }))
+        .unwrap_or_else(|c| format!("err:{c}"));
+    format!(
+        "token_user={user} token_owner={owner} elevated={}",
+        elevated(t) as u8
+    )
+}
+
+/// Each step's raw code is kept, as the elevated pairings (P2e, P2f) record where the chain stops.
+fn server_identity(h: HANDLE) -> String {
+    let mut pid = 0u32;
+    if unsafe { GetNamedPipeServerProcessId(h, &mut pid) } == 0 {
+        return format!("err {} step=GetNamedPipeServerProcessId", last_err());
+    }
+    let p = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if p.is_null() {
+        return format!("err {} pid={pid} step=OpenProcess", last_err());
+    }
+    let mut t = ptr::null_mut();
+    let ok = unsafe { OpenProcessToken(p, TOKEN_QUERY, &mut t) };
+    let code = last_err();
+    unsafe { CloseHandle(p) };
+    if ok == 0 {
+        return format!("err {code} pid={pid} step=OpenProcessToken");
+    }
+    let s = format!("ok pid={pid} {}", token_sids(t));
+    unsafe { CloseHandle(t) };
+    s
+}
+
+/// GetSecurityInfo(OWNER) through a pipe handle; SE_FILE_OBJECT first, then SE_KERNEL_OBJECT.
+fn pipe_owner(h: HANDLE) -> String {
+    let mut tried = Vec::new();
+    for (ty, name) in [
+        (SE_FILE_OBJECT, "SE_FILE_OBJECT"),
+        (SE_KERNEL_OBJECT, "SE_KERNEL_OBJECT"),
+    ] {
+        let (mut owner, mut sd) = (ptr::null_mut(), ptr::null_mut());
+        let r = unsafe {
+            GetSecurityInfo(
+                h,
+                ty,
+                OWNER_SECURITY_INFORMATION,
+                &mut owner,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut sd,
+            )
+        };
+        if r == 0 {
+            let s = sid_string(owner);
+            unsafe { LocalFree(sd) };
+            return format!("ok owner={s} type={name} {}", tried.join(" "));
+        }
+        tried.push(format!("{name}=err:{r}"));
+    }
+    format!("err tried {}", tried.join(" "))
 }
 
 // ---------------------------------------------------------------- spawn-role
@@ -543,6 +639,217 @@ fn p1() {
         "recorded: 5 or 231 (ERROR_PIPE_BUSY)",
         Status::Recorded,
     );
+}
+
+// ---------------------------------------------------------------- P2: who the server is
+
+fn yes(b: bool) -> &'static str {
+    if b { "yes" } else { "no" }
+}
+
+fn p2() {
+    let mut me = Local::default();
+    let name = pipe_name("p2");
+    let server = me.cmd(&format!("create {name} 255 1"));
+    let mut client = Agent::spawn("client");
+    let opened = client.cmd(&format!("open {name}"));
+    let ch = kv(&opened, "h").to_string();
+    let id = client.cmd(&format!("serverid {ch}"));
+    let own = client.cmd("whoami");
+    let probe_pid = std::process::id().to_string();
+    check(
+        "P2a",
+        "server identity from a client handle",
+        "GetNamedPipeServerProcessId+OpenProcess+OpenProcessToken+GetTokenInformation(TokenUser)",
+        &format!(
+            "server_pid={} probe_pid={probe_pid} server_user={} client_user={}",
+            kv(&id, "pid"),
+            kv(&id, "token_user"),
+            kv(&own, "token_user")
+        ),
+        "pid = the server pid; SID = the client's own TokenUser SID",
+        verdict(
+            st(&id) == "ok"
+                && kv(&id, "pid") == probe_pid
+                && kv(&id, "token_user") == kv(&own, "token_user"),
+        ),
+    );
+    let owner = client.cmd(&format!("owner {ch}"));
+    let owner_got = format!(
+        "owner={} type={} server_token_owner={} server_token_user={} owner_is_user={}",
+        kv(&owner, "owner"),
+        kv(&owner, "type"),
+        kv(&id, "token_owner"),
+        kv(&id, "token_user"),
+        yes(kv(&owner, "owner") == kv(&id, "token_user"))
+    );
+    let owner_ok = st(&owner) == "ok" && kv(&owner, "owner") == kv(&id, "token_owner");
+    check(
+        "P2b",
+        "pipe owner through the client handle",
+        "GetSecurityInfo(client handle, OWNER_SECURITY_INFORMATION)",
+        &owner_got,
+        "owner SID = the server token's TokenOwner SID",
+        verdict(owner_ok),
+    );
+    if elevated(own_token()) {
+        check(
+            "P2c",
+            "pipe owner, server elevated: default descriptor",
+            "GetSecurityInfo(client handle, OWNER_SECURITY_INFORMATION)",
+            &owner_got,
+            "owner = the elevated token's TokenOwner SID",
+            verdict(owner_ok),
+        );
+        let mine = me.cmd("whoami");
+        let user = kv(&mine, "token_user");
+        let sddl = format!("O:{user}D:P(A;;GA;;;{user})(A;;GA;;;SY)(A;;GA;;;BA)");
+        let name = pipe_name("p2c");
+        let made = me.cmd(&format!("createsd {name} 255 1 {sddl}"));
+        let opened = client.cmd(&format!("open {name}"));
+        let owner = client.cmd(&format!("owner {}", kv(&opened, "h")));
+        check(
+            "P2c",
+            "pipe owner, server elevated: explicit O:<user> descriptor",
+            "ConvertStringSecurityDescriptorToSecurityDescriptorW+CreateNamedPipeW+GetSecurityInfo",
+            &format!(
+                "create={} open={} owner={} user={user}",
+                st(&made),
+                st(&opened),
+                kv(&owner, "owner")
+            ),
+            "owner = the O: SID",
+            verdict(st(&owner) == "ok" && kv(&owner, "owner") == user),
+        );
+    } else {
+        check(
+            "P2c",
+            "pipe owner, server elevated",
+            "the probe run elevated (owner step O1 (i))",
+            "TokenElevation=0",
+            "NOT EVALUATED unless O1 ran",
+            Status::NotEvaluated,
+        );
+    }
+    let sh = kv(&server, "h").to_string();
+    let connected = me.cmd(&format!("connect {sh}"));
+    let cp = me.cmd(&format!("clientpid {sh}"));
+    check(
+        "P2d",
+        "client pid on the server side (D7 attribution)",
+        "GetNamedPipeClientProcessId(server handle)",
+        &format!(
+            "server_connect={} client_pid={} client_process={}",
+            st(&connected),
+            kv(&cp, "pid"),
+            kv(&own, "pid")
+        ),
+        "client_pid = the client process pid",
+        verdict(st(&cp) == "ok" && kv(&cp, "pid") == kv(&own, "pid")),
+    );
+    for (id, pairing) in [
+        ("P2e", "elevated server, non-elevated client (O1 (ii))"),
+        ("P2f", "non-elevated server, elevated client (O1 (iii))"),
+    ] {
+        check(
+            id,
+            pairing,
+            "pair-server and pair-client",
+            "see the O1 pair files",
+            "NOT EVALUATED unless O1 ran; there RECORDED per call",
+            Status::NotEvaluated,
+        );
+    }
+}
+
+/// One side of an O1 pairing; the id follows the elevations (P2e: server elevated, client not).
+fn pair(args: &[String], server: bool) {
+    set_out(arg(args, "--out"));
+    header();
+    let name = format!(r"\\.\pipe\{}", arg(args, "--name").expect("--name"));
+    let el = elevated(own_token());
+    let id = if server == el { "P2e" } else { "P2f" };
+    let mut me = Local::default();
+    if server {
+        // Sized for the UAC prompt of the other side, not measured.
+        thread::spawn(|| {
+            thread::sleep(Duration::from_secs(120));
+            out("pair-server: no client within 120 s");
+            std::process::exit(1)
+        });
+        let made = me.cmd(&format!("create {name} 255 1"));
+        let h = kv(&made, "h").to_string();
+        let ok = st(&made) == "ok";
+        let connected = if ok {
+            me.cmd(&format!("connect {h}"))
+        } else {
+            "err not-created".into()
+        };
+        let cp = if ok {
+            me.cmd(&format!("clientpid {h}"))
+        } else {
+            "err not-created".into()
+        };
+        check(
+            id,
+            "pair-server side: create, connect and client attribution",
+            "CreateNamedPipeW(+FIRST_PIPE_INSTANCE)+ConnectNamedPipe+GetNamedPipeClientProcessId",
+            &format!(
+                "elevated={} create={} connect={} clientpid={} client_pid={}",
+                el as u8,
+                st(&made),
+                st(&connected),
+                st(&cp),
+                kv(&cp, "pid")
+            ),
+            "recorded",
+            Status::Recorded,
+        );
+        if ok {
+            me.cmd(&format!("read {h}"));
+        }
+    } else {
+        let t = Instant::now();
+        let opened = loop {
+            let r = me.cmd(&format!("open {name}"));
+            if st(&r) == "ok" || t.elapsed() > Duration::from_secs(60) {
+                break r;
+            }
+            thread::sleep(Duration::from_millis(100));
+        };
+        let h = kv(&opened, "h").to_string();
+        let (sid, owner) = if st(&opened) == "ok" {
+            (
+                me.cmd(&format!("serverid {h}")),
+                me.cmd(&format!("owner {h}")),
+            )
+        } else {
+            ("err not-open".into(), "err not-open".into())
+        };
+        let mine = me.cmd("whoami");
+        check(
+            id,
+            "pair-client side: server identity and pipe owner",
+            "CreateFileW+GetNamedPipeServerProcessId+OpenProcess+OpenProcessToken+GetTokenInformation+GetSecurityInfo",
+            &format!(
+                "elevated={} open={} serverid={} step={} server_pid={} server_user={} server_owner={} server_elevated={} same_user={} pipe_owner_call={} pipe_owner={} type={}",
+                el as u8,
+                st(&opened),
+                st(&sid),
+                kv(&sid, "step"),
+                kv(&sid, "pid"),
+                kv(&sid, "token_user"),
+                kv(&sid, "token_owner"),
+                kv(&sid, "elevated"),
+                yes(kv(&sid, "token_user") == kv(&mine, "token_user")),
+                st(&owner),
+                kv(&owner, "owner"),
+                kv(&owner, "type")
+            ),
+            "recorded",
+            Status::Recorded,
+        );
+    }
 }
 
 // ---------------------------------------------------------------- P4: busy, gone, killed
