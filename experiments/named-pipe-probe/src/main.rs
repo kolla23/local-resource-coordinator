@@ -2,12 +2,12 @@
 //! Usage: `named-pipe-probe [--out FILE]`; the other subcommands are its child roles.
 
 use std::ffi::c_void;
-use std::io::{BufRead, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::Command;
-use std::sync::{Mutex, OnceLock};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use std::{env, fs, ptr};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::{Mutex, OnceLock, mpsc};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{env, fs, ptr, thread};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows_sys::Win32::Security::*;
@@ -70,11 +70,58 @@ fn set_out(path: Option<String>) {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Status {
+    Pass,
+    Fail,
+    Recorded,
+    NotEvaluated,
+}
+
+fn verdict(ok: bool) -> Status {
+    if ok { Status::Pass } else { Status::Fail }
+}
+
+/// One line per check; the status is always the last token, for the acceptance greps.
+fn check(id: &str, name: &str, call: &str, got: &str, expected: &str, status: Status) {
+    let status = match status {
+        Status::Pass => "PASS",
+        Status::Fail => "FAIL",
+        Status::Recorded => "RECORDED",
+        Status::NotEvaluated => "NOT EVALUATED",
+    };
+    out(&format!(
+        "[{id}] {name} | call={call} | got={got} | expected={expected} | {status}"
+    ));
+}
+
+/// `ok` or `err:<code>` from an answer of `exec`.
+fn st(r: &str) -> String {
+    let mut w = r.split_whitespace();
+    match w.next() {
+        Some("ok") => "ok".into(),
+        Some("err") => format!("err:{}", w.next().unwrap_or("?")),
+        _ => format!("bad:{r}"),
+    }
+}
+
+fn kv<'a>(r: &'a str, key: &str) -> &'a str {
+    r.split_whitespace()
+        .find_map(|w| w.strip_prefix(key).and_then(|v| v.strip_prefix('=')))
+        .unwrap_or("")
+}
+
+fn ms(r: &str) -> u64 {
+    kv(r, "ms").parse().unwrap_or(u64::MAX)
+}
+
 // ---------------------------------------------------------------- header
 
 fn run_all(args: &[String]) {
     set_out(arg(args, "--out"));
     header();
+    p1();
+    p4();
 }
 
 fn header() {
@@ -352,4 +399,318 @@ fn exec(hs: &mut Vec<usize>, line: &str) -> String {
             _ => "err unknown-command".into(),
         }
     }
+}
+
+// ---------------------------------------------------------------- spawn-role
+
+/// A child process in one of the roles, driven one step at a time.
+struct Agent {
+    child: Child,
+    input: ChildStdin,
+    lines: mpsc::Receiver<String>,
+}
+
+impl Agent {
+    fn spawn(role: &str) -> Agent {
+        let mut child = Command::new(env::current_exe().unwrap())
+            .arg(role)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn a child role");
+        let input = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (tx, lines) = mpsc::channel();
+        thread::spawn(move || {
+            for l in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if tx.send(l).is_err() {
+                    break;
+                }
+            }
+        });
+        Agent {
+            child,
+            input,
+            lines,
+        }
+    }
+
+    /// A step with no answer in 10 s comes back as `err timeout`, so a hung call cannot stall the run.
+    fn cmd(&mut self, line: &str) -> String {
+        if writeln!(self.input, "{line}")
+            .and_then(|_| self.input.flush())
+            .is_err()
+        {
+            return "err dead".into();
+        }
+        self.lines
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap_or_else(|_| "err timeout".into())
+    }
+
+    /// TerminateProcess, then wait until the process and its handles are gone.
+    fn kill(&mut self) {
+        self.child.kill().ok();
+        self.child.wait().ok();
+    }
+}
+
+impl Drop for Agent {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
+/// The probe process itself, taking the same steps as a child.
+#[derive(Default)]
+struct Local(Vec<usize>);
+
+impl Local {
+    fn cmd(&mut self, line: &str) -> String {
+        exec(&mut self.0, line)
+    }
+
+    /// ConnectNamedPipe on another thread, as a listening server blocks in it.
+    fn listen(&self, h: &str) -> thread::JoinHandle<String> {
+        let h = hd(&self.0, h) as usize;
+        thread::spawn(move || unsafe {
+            if ConnectNamedPipe(h as HANDLE, ptr::null_mut()) != 0 {
+                "ok".into()
+            } else {
+                format!("err {}", GetLastError())
+            }
+        })
+    }
+}
+
+// ---------------------------------------------------------------- P1: who owns the name
+
+fn p1() {
+    let mut me = Local::default();
+    let name = pipe_name("p1");
+    let mut squatter = Agent::spawn("squatter");
+    let sq = squatter.cmd(&format!("create {name} 255 0"));
+    let flagged = me.cmd(&format!("create {name} 255 1"));
+    check(
+        "P1a",
+        "FIRST_PIPE_INSTANCE vs a name another same-user process created first",
+        "CreateNamedPipeW(PIPE_ACCESS_DUPLEX+FILE_FLAG_FIRST_PIPE_INSTANCE)",
+        &format!(
+            "squatter_create={} flagged_create={}",
+            st(&sq),
+            st(&flagged)
+        ),
+        "err:5 (ERROR_ACCESS_DENIED)",
+        verdict(st(&sq) == "ok" && st(&flagged) == "err:5"),
+    );
+    let plain = me.cmd(&format!("create {name} 255 0"));
+    check(
+        "P1b",
+        "control: the identical call without the flag",
+        "CreateNamedPipeW(PIPE_ACCESS_DUPLEX)",
+        &format!("create={}", st(&plain)),
+        "ok (the hazard D2 closes)",
+        verdict(st(&plain) == "ok"),
+    );
+    check(
+        "P1c",
+        "cross-user squatter",
+        "squatter under runas /user:<second account>",
+        "not run",
+        "O2 not run (owner decision 2026-10-31); PORT_PLAN acceptance check step 4",
+        Status::NotEvaluated,
+    );
+    drop(squatter);
+
+    let name = pipe_name("p1d");
+    let mut squatter = Agent::spawn("squatter");
+    let sq = squatter.cmd(&format!("create {name} 1 0"));
+    let mut client = Agent::spawn("client");
+    let opened = client.cmd(&format!("open {name}"));
+    let connected = squatter.cmd(&format!("connect {}", kv(&sq, "h")));
+    let flagged = me.cmd(&format!("create {name} 1 1"));
+    check(
+        "P1d",
+        "squatter at its instance limit (nMaxInstances 1, connected)",
+        "CreateNamedPipeW(PIPE_ACCESS_DUPLEX+FILE_FLAG_FIRST_PIPE_INSTANCE nMaxInstances=1)",
+        &format!(
+            "squatter_create={} client_open={} squatter_connect={} flagged_create={}",
+            st(&sq),
+            st(&opened),
+            st(&connected),
+            st(&flagged)
+        ),
+        "recorded: 5 or 231 (ERROR_PIPE_BUSY)",
+        Status::Recorded,
+    );
+}
+
+// ---------------------------------------------------------------- P4: busy, gone, killed
+
+fn p4() {
+    let mut me = Local::default();
+    let name = pipe_name("p4a");
+    let opened = me.cmd(&format!("open {name}"));
+    let waited = me.cmd(&format!("wait {name} 500"));
+    check(
+        "P4a",
+        "no pipe",
+        "CreateFileW(OPEN_EXISTING)+WaitNamedPipeW(500)",
+        &format!(
+            "open={} wait={} wait_ms={}",
+            st(&opened),
+            st(&waited),
+            ms(&waited)
+        ),
+        "open err:2 (ERROR_FILE_NOT_FOUND); wait returns zero at once (under 100 ms)",
+        verdict(st(&opened) == "err:2" && waited.starts_with("err") && ms(&waited) < 100),
+    );
+
+    let name = pipe_name("p4b");
+    let server = me.cmd(&format!("create {name} 255 1"));
+    let mut c1 = Agent::spawn("client");
+    let c1_open = c1.cmd(&format!("open {name}"));
+    let connected = me.cmd(&format!("connect {}", kv(&server, "h")));
+    let mut c2 = Agent::spawn("client");
+    let c2_open = c2.cmd(&format!("open {name}"));
+    let c2_wait = c2.cmd(&format!("wait {name} 500"));
+    check(
+        "P4b",
+        "all instances busy",
+        "CreateFileW+WaitNamedPipeW(500)",
+        &format!(
+            "client1_open={} server_connect={} client2_open={} client2_wait={} wait_ms={}",
+            st(&c1_open),
+            st(&connected),
+            st(&c2_open),
+            st(&c2_wait),
+            ms(&c2_wait)
+        ),
+        "client2 open err:231 (ERROR_PIPE_BUSY); wait err:121 (ERROR_SEM_TIMEOUT) after ~500 ms",
+        verdict(
+            st(&c1_open) == "ok"
+                && st(&c2_open) == "err:231"
+                && st(&c2_wait) == "err:121"
+                && (400..2000).contains(&ms(&c2_wait)),
+        ),
+    );
+
+    let c1_close = c1.cmd(&format!("close {}", kv(&c1_open, "h")));
+    let gap = c2.cmd(&format!("open {name}"));
+    let second = me.cmd(&format!("create {name} 255 0"));
+    let listening = (st(&second) == "ok").then(|| me.listen(kv(&second, "h")));
+    thread::sleep(Duration::from_millis(50));
+    let t = Instant::now();
+    let after = c2.cmd(&format!("open {name}"));
+    let open_ms = t.elapsed().as_millis();
+    let connect = listening.map_or("not run".into(), |j| st(&j.join().unwrap()));
+    check(
+        "P4c",
+        "window with no pending instance (client 1 closed, server not yet disconnected)",
+        "CreateFileW; then CreateNamedPipeW(second instance)+ConnectNamedPipe",
+        &format!(
+            "client1_close={} client2_open={} second_create={} client2_open_after={} open_ms={open_ms} server_connect={connect}",
+            st(&c1_close),
+            st(&gap),
+            st(&second),
+            st(&after)
+        ),
+        "recorded: the raw code (231 expected); client 2 then connects at once",
+        Status::Recorded,
+    );
+
+    let name = pipe_name("p4d");
+    let server = me.cmd(&format!("create {name} 255 1"));
+    let h = kv(&server, "h").to_string();
+    let mut c = Agent::spawn("client");
+    let opened = c.cmd(&format!("open {name}"));
+    let connected = me.cmd(&format!("connect {h}"));
+    let wrote = me.cmd(&format!("write {h} x"));
+    let read = c.cmd(&format!("read {}", kv(&opened, "h")));
+    check(
+        "P4d",
+        "client connects before ConnectNamedPipe is called",
+        "ConnectNamedPipe after the client's CreateFileW",
+        &format!(
+            "client_open={} server_connect={} server_write={} client_read={} data={}",
+            st(&opened),
+            st(&connected),
+            st(&wrote),
+            st(&read),
+            kv(&read, "data")
+        ),
+        "connect err:535 (ERROR_PIPE_CONNECTED); the client is served",
+        verdict(st(&opened) == "ok" && st(&connected) == "err:535" && kv(&read, "data") == "x"),
+    );
+
+    let name = pipe_name("p4e");
+    let mut srv = Agent::spawn("server");
+    let created = srv.cmd(&format!("create {name} 255 1"));
+    srv.kill();
+    let opened = me.cmd(&format!("open {name}"));
+    let waited = me.cmd(&format!("wait {name} 500"));
+    let relaunch = me.cmd(&format!("create {name} 255 1"));
+    check(
+        "P4e",
+        "server killed, no client connected",
+        "TerminateProcess(server); CreateFileW; WaitNamedPipeW(500); flagged CreateNamedPipeW",
+        &format!(
+            "server_create={} open={} wait={} wait_ms={} relaunch_create={}",
+            st(&created),
+            st(&opened),
+            st(&waited),
+            ms(&waited),
+            st(&relaunch)
+        ),
+        "open err:2; wait returns zero at once (under 100 ms); the new flagged create ok",
+        verdict(
+            st(&created) == "ok"
+                && st(&opened) == "err:2"
+                && waited.starts_with("err")
+                && ms(&waited) < 100
+                && st(&relaunch) == "ok",
+        ),
+    );
+
+    let name = pipe_name("p4f");
+    let mut srv = Agent::spawn("server");
+    let created = srv.cmd(&format!("create {name} 255 1"));
+    let mut c1 = Agent::spawn("client");
+    let c1_open = c1.cmd(&format!("open {name}"));
+    let connected = srv.cmd(&format!("connect {}", kv(&created, "h")));
+    srv.kill();
+    let relaunch = me.cmd(&format!("create {name} 255 1"));
+    let mut c2 = Agent::spawn("client");
+    let c2_open = c2.cmd(&format!("open {name}"));
+    let h1 = kv(&c1_open, "h").to_string();
+    let read = c1.cmd(&format!("read {h1}"));
+    let write = c1.cmd(&format!("write {h1} x"));
+    let c1_close = c1.cmd(&format!("close {h1}"));
+    // Undo what the first try made, so the retry sees only what client 1's close changed.
+    if st(&c2_open) == "ok" {
+        c2.cmd(&format!("close {}", kv(&c2_open, "h")));
+    }
+    if st(&relaunch) == "ok" {
+        me.cmd(&format!("close {}", kv(&relaunch, "h")));
+    }
+    let retry = me.cmd(&format!("create {name} 255 1"));
+    check(
+        "P4f",
+        "server killed while client 1 holds a connected handle",
+        "TerminateProcess(server); flagged CreateNamedPipeW; CreateFileW; ReadFile; WriteFile; retry after close",
+        &format!(
+            "server_create={} client1_open={} server_connect={} relaunch_create={} client2_open={} client1_read={} client1_write={} client1_close={} retry_create={}",
+            st(&created),
+            st(&c1_open),
+            st(&connected),
+            st(&relaunch),
+            st(&c2_open),
+            st(&read),
+            st(&write),
+            st(&c1_close),
+            st(&retry)
+        ),
+        "recorded: each raw code (109 or 233 for client 1 expected; the retry ok)",
+        Status::Recorded,
+    );
 }
