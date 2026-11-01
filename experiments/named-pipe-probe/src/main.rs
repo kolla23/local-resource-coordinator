@@ -12,6 +12,7 @@ use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Security::Authorization::*;
 use windows_sys::Win32::Security::*;
 use windows_sys::Win32::Storage::FileSystem::*;
+use windows_sys::Win32::System::IO::OVERLAPPED;
 use windows_sys::Win32::System::Pipes::*;
 use windows_sys::Win32::System::Threading::*;
 
@@ -125,6 +126,7 @@ fn run_all(args: &[String]) {
     p1();
     p2();
     p4();
+    p6();
 }
 
 fn header() {
@@ -205,8 +207,8 @@ fn exe_dir() -> PathBuf {
     env::current_exe().unwrap().parent().unwrap().to_path_buf()
 }
 
-/// Unique per run (pid and start time), so a crashed earlier run cannot collide.
-fn pipe_name(tag: &str) -> String {
+/// `lrc-probe-<pid>-<tick>`: unique per run, so a crashed earlier run cannot collide.
+fn run_id() -> String {
     static TICK: OnceLock<u128> = OnceLock::new();
     let tick = TICK.get_or_init(|| {
         SystemTime::now()
@@ -214,7 +216,11 @@ fn pipe_name(tag: &str) -> String {
             .unwrap()
             .as_millis()
     });
-    format!(r"\\.\pipe\lrc-probe-{}-{tick}-{tag}", std::process::id())
+    format!("lrc-probe-{}-{tick}", std::process::id())
+}
+
+fn pipe_name(tag: &str) -> String {
+    format!(r"\\.\pipe\{}-{tag}", run_id())
 }
 
 // ---------------------------------------------------------------- Win32 helpers
@@ -267,6 +273,25 @@ fn open_pipe(name: &str) -> Result<HANDLE, u32> {
             ptr::null(),
             OPEN_EXISTING,
             0,
+            ptr::null_mut(),
+        )
+    };
+    if h == INVALID_HANDLE_VALUE {
+        Err(last_err())
+    } else {
+        Ok(h)
+    }
+}
+
+fn open_file(path: &str, access: u32, share: u32, disp: u32) -> Result<HANDLE, u32> {
+    let h = unsafe {
+        CreateFileW(
+            wide(path).as_ptr(),
+            access,
+            share,
+            ptr::null(),
+            disp,
+            FILE_ATTRIBUTE_NORMAL,
             ptr::null_mut(),
         )
     };
@@ -397,6 +422,84 @@ fn exec(hs: &mut Vec<usize>, line: &str) -> String {
                     format!("ok ms={ms}")
                 } else {
                     format!("err {code} ms={ms}")
+                }
+            }
+            "fopen" => {
+                let access = match a[1] {
+                    "rw" => GENERIC_READ | GENERIC_WRITE,
+                    _ => GENERIC_READ,
+                };
+                let share = match a[2] {
+                    "all" => FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    _ => FILE_SHARE_READ | FILE_SHARE_WRITE,
+                };
+                let disp = if a[3] == "always" {
+                    OPEN_ALWAYS
+                } else {
+                    OPEN_EXISTING
+                };
+                keep(hs, open_file(&a[4..].join(" "), access, share, disp))
+            }
+            "createnew" => {
+                let all = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+                let access = GENERIC_READ | GENERIC_WRITE;
+                keep(hs, open_file(&a[1..].join(" "), access, all, CREATE_NEW))
+            }
+            "lock" => {
+                let (off, len): (u64, u64) = (a[2].parse().unwrap(), a[3].parse().unwrap());
+                let mut ov: OVERLAPPED = std::mem::zeroed();
+                ov.Anonymous.Anonymous.Offset = off as u32;
+                ov.Anonymous.Anonymous.OffsetHigh = (off >> 32) as u32;
+                let flags = LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY;
+                let t = Instant::now();
+                let h = hd(hs, a[1]);
+                let ok = LockFileEx(h, flags, 0, len as u32, (len >> 32) as u32, &mut ov) != 0;
+                let code = last_err();
+                let ms = t.elapsed().as_millis();
+                if ok {
+                    format!("ok ms={ms}")
+                } else {
+                    format!("err {code} ms={ms}")
+                }
+            }
+            "pidwrite" => {
+                let h = hd(hs, a[1]);
+                let text = std::process::id().to_string();
+                let mut n = 0;
+                if SetFilePointerEx(h, 0, ptr::null_mut(), FILE_BEGIN) == 0 {
+                    format!("err {} step=SetFilePointerEx", last_err())
+                } else if SetEndOfFile(h) == 0 {
+                    format!("err {} step=SetEndOfFile", last_err())
+                } else if WriteFile(h, text.as_ptr(), text.len() as u32, &mut n, ptr::null_mut())
+                    == 0
+                {
+                    format!("err {} step=WriteFile", last_err())
+                } else {
+                    "ok".into()
+                }
+            }
+            "readall" => {
+                let h = hd(hs, a[1]);
+                let (mut buf, mut n) = ([0u8; 64], 0u32);
+                SetFilePointerEx(h, 0, ptr::null_mut(), FILE_BEGIN);
+                if ReadFile(h, buf.as_mut_ptr(), 64, &mut n, ptr::null_mut()) != 0 {
+                    format!("ok data={}", String::from_utf8_lossy(&buf[..n as usize]))
+                } else {
+                    format!("err {}", last_err())
+                }
+            }
+            "delete" => done(DeleteFileW(wide(&a[1..].join(" ")).as_ptr()) != 0),
+            "stdinfo" => {
+                let mut info: FILE_STANDARD_INFO = std::mem::zeroed();
+                let size = size_of::<FILE_STANDARD_INFO>() as u32;
+                let p = (&mut info as *mut FILE_STANDARD_INFO).cast();
+                if GetFileInformationByHandleEx(hd(hs, a[1]), FileStandardInfo, p, size) != 0 {
+                    format!(
+                        "ok pending={} links={}",
+                        info.DeletePending as u8, info.NumberOfLinks
+                    )
+                } else {
+                    format!("err {}", last_err())
                 }
             }
             "whoami" => format!("ok pid={} {}", std::process::id(), token_sids(own_token())),
@@ -1020,4 +1123,127 @@ fn p4() {
         "recorded: each raw code (109 or 233 for client 1 expected; the retry ok)",
         Status::Recorded,
     );
+}
+
+// ---------------------------------------------------------------- P6: pid-file locks
+
+const PAST_EOF: &str = "18446744073709551600"; // 0xFFFFFFFF_FFFFFFF0
+
+fn p6() {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the root rule guards qex's tests; no test here"
+    )]
+    let base = env::temp_dir().join(run_id()).display().to_string();
+    let path = format!("{base}-pid");
+    fs::write(&path, "9999999999").unwrap();
+    let mut holder = Agent::spawn("holder");
+    let holder_pid = kv(&holder.cmd("pid"), "pid").to_string();
+    let opened = holder.cmd(&format!("fopen rw all always {path}"));
+    let h = kv(&opened, "h").to_string();
+    let locked = holder.cmd(&format!("lock {h} {PAST_EOF} 1"));
+    let wrote = holder.cmd(&format!("pidwrite {h}"));
+    let mut reader = Agent::spawn("reader");
+    let ropen = reader.cmd(&format!("fopen r all existing {path}"));
+    let r = kv(&ropen, "h").to_string();
+    let read = reader.cmd(&format!("readall {r}"));
+    check(
+        "P6a",
+        "lock past EOF leaves the content readable, in production's order",
+        "LockFileEx(EXCLUSIVE+FAIL_IMMEDIATELY, 0xFFFFFFFFFFFFFFF0, 1)+SetFilePointerEx+SetEndOfFile+WriteFile; reader ReadFile",
+        &format!(
+            "holder_open={} holder_lock={} truncate_write={} reader_open={} reader_read={} content={} holder_pid={holder_pid}",
+            st(&opened),
+            st(&locked),
+            st(&wrote),
+            st(&ropen),
+            st(&read),
+            kv(&read, "data")
+        ),
+        "the holder's writes succeed under its own lock; the reader reads the holder pid, no leftover digit",
+        verdict(st(&locked) == "ok" && st(&wrote) == "ok" && kv(&read, "data") == holder_pid),
+    );
+
+    let content = holder.cmd(&format!("lock {h} 0 {}", holder_pid.len()));
+    let blocked = reader.cmd(&format!("readall {r}"));
+    check(
+        "P6b",
+        "control: a lock over the content blocks reads",
+        "holder LockFileEx([0, len)); reader ReadFile (full sharing)",
+        &format!("holder_lock={} reader_read={}", st(&content), st(&blocked)),
+        "the reader's ReadFile fails (33 ERROR_LOCK_VIOLATION expected; code on got)",
+        verdict(st(&content) == "ok" && blocked.starts_with("err")),
+    );
+
+    let rw = reader.cmd(&format!("fopen rw all existing {path}"));
+    let r2 = kv(&rw, "h").to_string();
+    let second = reader.cmd(&format!("lock {r2} {PAST_EOF} 1"));
+    check(
+        "P6c",
+        "a second exclusive try fails at once",
+        "LockFileEx(EXCLUSIVE+FAIL_IMMEDIATELY) on the same range from another process",
+        &format!(
+            "reader_open={} lock={} ms={}",
+            st(&rw),
+            st(&second),
+            ms(&second)
+        ),
+        "fails at once (under 50 ms); code on got (33 expected)",
+        verdict(second.starts_with("err") && ms(&second) < 50),
+    );
+
+    holder.kill();
+    let t = Instant::now();
+    let after = loop {
+        let l = reader.cmd(&format!("lock {r2} {PAST_EOF} 1"));
+        if st(&l) == "ok" || t.elapsed() > Duration::from_secs(5) {
+            break l;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    check(
+        "P6d",
+        "lock released when the holder is killed",
+        "TerminateProcess(holder); reader LockFileEx every 10 ms",
+        &format!(
+            "lock={} ms_until_success={}",
+            st(&after),
+            t.elapsed().as_millis()
+        ),
+        "succeeds; ms printed",
+        verdict(st(&after) == "ok"),
+    );
+    drop(reader);
+    fs::remove_file(&path).ok();
+
+    for share in ["all", "nodelete"] {
+        let path = format!("{base}-e-{share}");
+        fs::write(&path, "1234").unwrap();
+        let mut holder = Agent::spawn("holder");
+        let opened = holder.cmd(&format!("fopen rw {share} always {path}"));
+        let h = kv(&opened, "h").to_string();
+        let locked = holder.cmd(&format!("lock {h} {PAST_EOF} 1"));
+        let deleted = Agent::spawn("deleter").cmd(&format!("delete {path}"));
+        let info = holder.cmd(&format!("stdinfo {h}"));
+        let created = Agent::spawn("reader").cmd(&format!("createnew {path}"));
+        check(
+            "P6e",
+            &format!("delete while another process holds the lock (holder share={share})"),
+            "DeleteFileW; GetFileInformationByHandleEx(FileStandardInfo); CreateFileW(CREATE_NEW)",
+            &format!(
+                "holder_open={} lock={} delete={} stdinfo={} delete_pending={} number_of_links={} create_new={}",
+                st(&opened),
+                st(&locked),
+                st(&deleted),
+                st(&info),
+                kv(&info, "pending"),
+                kv(&info, "links"),
+                st(&created)
+            ),
+            "recorded (32 ERROR_SHARING_VIOLATION expected without FILE_SHARE_DELETE)",
+            Status::Recorded,
+        );
+        drop(holder);
+        fs::remove_file(&path).ok();
+    }
 }
