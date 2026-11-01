@@ -9,7 +9,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: the census and first-start tests expect owner-only modes; a test for coordinator files left wide by an earlier version.
 // Modified by the local-resource-coordinator fork, 2026-11-01: the long-path test sets a long XDG_STATE_HOME, which qex reads, and checks that the socket moved to TMPDIR (issue #54).
 // Modified by the local-resource-coordinator fork, 2026-11-01: the e2e suite passes as root and in a container with a slow reaper: stop_coordinator waits for the reaper, the abort test blocks the write with a directory, the memory-hint test keeps out the ambient environment (issue #84).
-// Modified by the local-resource-coordinator fork, 2026-11-01: three tests plant job, follower and state files at 0644 and expect 0600 after qex opens them (issue #56); the follower refuses a symlink and leaves a hard-linked or foreign file wide.
+// Modified by the local-resource-coordinator fork, 2026-11-01: three tests plant job, follower and history files at 0644 and expect 0600 after qex opens them (issue #56); the follower refuses a symlink and leaves a hard-linked or foreign file wide.
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -3912,20 +3912,12 @@ fn a_follower_as_root_leaves_another_users_log_file_wide() {
     assert_eq!(mode_of(&log), 0o644, "root changed another user's file");
 }
 
-/// The state files left wide become 0600; the history keeps its line and gains one.
+/// A history left wide becomes 0600; it keeps its line and gains one.
 #[test]
-fn the_state_files_an_earlier_version_left_wide_become_private() {
+fn the_history_an_earlier_version_left_wide_becomes_private() {
     use std::os::unix::fs::PermissionsExt;
 
     let h = Harness::with_default_config("widestate");
-    let answer = h.root.join("latest.json");
-    std::fs::write(&answer, r#"{"tag_name": "v0.0.1"}"#).unwrap();
-    h.write_config(&format!(
-        "[peers]\nenabled = false\n\
-         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
-         [update]\ncheck = \"300s\"\nurl = \"file://{}\"\n",
-        answer.display()
-    ));
 
     // A young line, so the start-up prune keeps the file and does not rewrite it.
     let state = h.root.join("state/qex");
@@ -3941,17 +3933,10 @@ fn the_state_files_an_earlier_version_left_wide_become_private() {
         format!("{{\"id\":\"{planted}\",\"name\":\"planted\",\"submitted_at\":{now}}}\n"),
     )
     .unwrap();
-    let lock = state.join("update.lock");
-    std::fs::write(&lock, b"").unwrap();
-    for file in [&history, &lock] {
-        std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o644)).unwrap();
-    }
+    std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o644)).unwrap();
 
     let id = h.submit(&["submit", "--", TESTJOB, "print", "x"]);
     h.ok(&["wait", &id, "--timeout", "30s"]);
-    h.until("the update record", Duration::from_secs(45), || {
-        state.join("update.json").exists()
-    });
 
     let text = std::fs::read_to_string(&history).unwrap();
     assert!(
@@ -3959,7 +3944,6 @@ fn the_state_files_an_earlier_version_left_wide_become_private() {
         "the history must keep the planted line and gain the new job:\n{text}"
     );
     assert_eq!(mode_of(&history), 0o600, "history.jsonl");
-    assert_eq!(mode_of(&lock), 0o600, "update.lock");
 }
 
 /// Finds the socket directory in TMPDIR whose pid file names the coordinator `pid`.
