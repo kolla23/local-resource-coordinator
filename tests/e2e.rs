@@ -9,6 +9,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: the census and first-start tests expect owner-only modes; a test for coordinator files left wide by an earlier version.
 // Modified by the local-resource-coordinator fork, 2026-11-01: the long-path test sets a long XDG_STATE_HOME, which qex reads, and checks that the socket moved to TMPDIR (issue #54).
 // Modified by the local-resource-coordinator fork, 2026-11-01: the e2e suite passes as root and in a container with a slow reaper: stop_coordinator waits for the reaper, the abort test blocks the write with a directory, the memory-hint test keeps out the ambient environment (issue #84).
+// Modified by the local-resource-coordinator fork, 2026-11-01: three tests plant job, follower and history files at 0644 and expect 0600 after qex opens them (issue #56); the follower refuses a symlink and leaves a hard-linked or foreign file wide.
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -3265,8 +3266,8 @@ fn the_job_files_are_private() {
 ///
 /// The follower opens with `.create(true)` so it can start before the
 /// supervisor makes the file. Without `.mode(0o600)`, the file takes 0666
-/// and the umask. The supervisor then keeps that mode, because `.mode()`
-/// applies to a new file only. The output of a job holds a token as
+/// and the umask; the supervisor's `make_private` narrows it only when the
+/// job starts. The output of a job holds a token as
 /// frequently as its environment.
 ///
 /// A follower that starts AFTER the supervisor made the file does not
@@ -3679,6 +3680,270 @@ fn the_tail_file_of_a_long_log_is_private() {
     let mode = std::fs::metadata(&tail).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600, "the tail file must not take the umask");
     h.stop(&id);
+}
+
+/// Opening a file that exists keeps its mode, so qex also sets 0600 on each open job file.
+/// The hook prints the mode that `run` left, before `note` opens the file again.
+#[test]
+fn the_job_files_an_earlier_version_left_wide_become_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let h = Harness::new(
+        "widejob",
+        concat!(
+            "[peers]\nenabled = false\n",
+            "[system]\nreserve_mem = \"0\"\nmax_pressure = 100\n",
+            "[logs]\nmax_bytes = \"64KB\"\n",
+            "[hooks]\n",
+            r#"on_stop = ["sh", "-c", 'ls -l "$QEX_JOB_DIR/hook.log"']"#,
+            "\n",
+        ),
+    );
+    h.ok(&["pause", "queue"]);
+    let id = h.submit(&["submit", "--", "sh", "-c", "seq 1 500000; sleep 5"]);
+    let dir = h.job_dir(&id);
+    let names = [
+        "supervisor.log",
+        "stdout.log",
+        "stderr.log",
+        "stdout.log.tail",
+        "hook.log",
+    ];
+    for name in names {
+        std::fs::write(dir.join(name), b"").unwrap();
+        std::fs::set_permissions(dir.join(name), std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    h.ok(&["resume", "queue", "--all"]);
+
+    // The planted tail file is empty, so a byte in it means the supervisor opened it.
+    let tail = dir.join("stdout.log.tail");
+    h.until(
+        "the output passes the limit",
+        Duration::from_secs(60),
+        || std::fs::metadata(&tail).is_ok_and(|m| m.len() > 0),
+    );
+    for name in &names[..4] {
+        assert_eq!(mode_of(&dir.join(name)), 0o600, "{name}");
+    }
+
+    h.ok(&["wait", &id, "--timeout", "30s"]);
+    let log = dir.join("hook.log");
+    h.until("the verdict of the hook", Duration::from_secs(30), || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .contains("qex: the stop hook")
+    });
+    let text = std::fs::read_to_string(&log).unwrap();
+    let seen = text.lines().find(|line| line.contains("hook.log"));
+    assert!(
+        seen.is_some_and(|line| line.starts_with("-rw-------")),
+        "the hook must see hook.log at 0600 after `run` opened it:\n{text}"
+    );
+    assert_eq!(mode_of(&log), 0o600);
+}
+
+/// A follower that opens a log file left wide narrows it while the job still waits.
+#[test]
+fn a_follower_narrows_a_wide_log_file_of_a_waiting_job() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let h = Harness::with_default_config("followwide");
+    h.ok(&["pause", "queue"]);
+    let id = h.submit(&["submit", "--", "echo", "secret"]);
+    let logs = [
+        h.job_dir(&id).join("stdout.log"),
+        h.job_dir(&id).join("stderr.log"),
+    ];
+    for log in &logs {
+        std::fs::write(log, b"").unwrap();
+        std::fs::set_permissions(log, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+
+    let mut cmd = h.command(&["logs", &id, "--follow"]);
+    cmd.stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let mut child = cmd.spawn().expect("qex logs --follow did not start");
+
+    // The queue is paused, so no supervisor has opened these files.
+    h.until(
+        "the follower narrows the log files",
+        Duration::from_secs(15),
+        || logs.iter().all(|log| mode_of(log) == 0o600),
+    );
+    for log in &logs {
+        assert_eq!(mode_of(log), 0o600, "{}", log.display());
+    }
+
+    h.ok(&["resume", "queue", "--all"]);
+    h.ok(&["wait", &id, "--timeout", "30s"]);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        match child.try_wait().unwrap() {
+            Some(_) => break,
+            None if Instant::now() >= deadline => {
+                child.kill().ok();
+                panic!("the follower did not stop after the job");
+            }
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
+}
+
+/// Starts `qex logs <id> --follow --stdout` and returns once it has printed `line`,
+/// which it reads only after it opened the file and set its mode.
+fn follow_until(h: &Harness, id: &str, line: &str) -> std::process::Child {
+    use std::io::BufRead;
+
+    let mut cmd = h.command(&["logs", id, "--follow", "--stdout"]);
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let mut child = cmd.spawn().expect("qex logs --follow did not start");
+    let out = child.stdout.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for got in std::io::BufReader::new(out).lines().map_while(Result::ok) {
+            tx.send(got).ok();
+        }
+    });
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(left) {
+            Ok(got) if got == line => return child,
+            Ok(_) => {}
+            Err(_) => {
+                child.kill().ok();
+                panic!("the follower did not print {line:?}");
+            }
+        }
+    }
+}
+
+/// A `stdout.log` planted as a symlink fails the follow and leaves its target as it was.
+#[test]
+fn a_follower_refuses_a_symlinked_log_file() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let h = Harness::with_default_config("followlink");
+    h.ok(&["pause", "queue"]);
+    let id = h.submit(&["submit", "--", "echo", "secret"]);
+    let target = h.root.join("outside.txt");
+    std::fs::write(&target, b"keep\n").unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let log = h.job_dir(&id).join("stdout.log");
+    std::fs::remove_file(&log).ok();
+    std::os::unix::fs::symlink(&target, &log).unwrap();
+
+    let mut cmd = h.command(&["logs", &id, "--follow", "--stdout"]);
+    cmd.stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let mut child = cmd.spawn().expect("qex logs --follow did not start");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let status = loop {
+        match child.try_wait().unwrap() {
+            Some(status) => break Some(status),
+            None if Instant::now() >= deadline => {
+                child.kill().ok();
+                child.wait().ok();
+                break None;
+            }
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    };
+
+    assert_eq!(
+        mode_of(&target),
+        0o644,
+        "the follower changed the symlink's target"
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"keep\n");
+    let status = status.expect("the follower kept following a symlinked log file");
+    assert!(
+        !status.success(),
+        "the follower accepted a symlinked log file"
+    );
+}
+
+/// A log file with a second hard link keeps its mode: the link may name a file outside.
+#[test]
+fn a_follower_leaves_a_hard_linked_log_file_wide() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let h = Harness::with_default_config("followhard");
+    h.ok(&["pause", "queue"]);
+    let id = h.submit(&["submit", "--", "echo", "secret"]);
+    let other = h.root.join("other.txt");
+    std::fs::write(&other, b"linked\n").unwrap();
+    std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let log = h.job_dir(&id).join("stdout.log");
+    std::fs::remove_file(&log).ok();
+    std::fs::hard_link(&other, &log).unwrap();
+
+    let mut child = follow_until(&h, &id, "linked");
+    child.kill().ok();
+    child.wait().ok();
+    assert_eq!(
+        mode_of(&other),
+        0o644,
+        "the follower changed a hard-linked file"
+    );
+}
+
+/// Run as root, the follower leaves a log file that another user owns as it was.
+#[test]
+fn a_follower_as_root_leaves_another_users_log_file_wide() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Only root can plant a file that another user owns; CI runs as a normal user.
+    if unsafe { libc::geteuid() } != 0 {
+        return;
+    }
+    let h = Harness::with_default_config("followowner");
+    h.ok(&["pause", "queue"]);
+    let id = h.submit(&["submit", "--", "echo", "secret"]);
+    let log = h.job_dir(&id).join("stdout.log");
+    std::fs::write(&log, b"theirs\n").unwrap();
+    std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::os::unix::fs::chown(&log, Some(65534), Some(65534)).unwrap();
+
+    let mut child = follow_until(&h, &id, "theirs");
+    child.kill().ok();
+    child.wait().ok();
+    assert_eq!(mode_of(&log), 0o644, "root changed another user's file");
+}
+
+/// A history left wide becomes 0600; it keeps its line and gains one.
+#[test]
+fn the_history_an_earlier_version_left_wide_becomes_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let h = Harness::with_default_config("widestate");
+
+    // A young line, so the start-up prune keeps the file and does not rewrite it.
+    let state = h.root.join("state/qex");
+    std::fs::create_dir_all(&state).unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let planted = uuid::Uuid::new_v4().to_string();
+    let history = state.join("history.jsonl");
+    std::fs::write(
+        &history,
+        format!("{{\"id\":\"{planted}\",\"name\":\"planted\",\"submitted_at\":{now}}}\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let id = h.submit(&["submit", "--", TESTJOB, "print", "x"]);
+    h.ok(&["wait", &id, "--timeout", "30s"]);
+
+    let text = std::fs::read_to_string(&history).unwrap();
+    assert!(
+        text.contains(&planted) && text.contains(&id),
+        "the history must keep the planted line and gain the new job:\n{text}"
+    );
+    assert_eq!(mode_of(&history), 0o600, "history.jsonl");
 }
 
 /// Finds the socket directory in TMPDIR whose pid file names the coordinator `pid`.

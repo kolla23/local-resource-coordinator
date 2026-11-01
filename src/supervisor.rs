@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-11-01: supervisor.log and the job's output files are set to 0600 when they exist (issue #56).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -34,6 +35,7 @@ pub fn spawn(id: uuid::Uuid) -> Result<i32> {
         .mode(0o600)
         .open(&log_path)
         .with_context(|| format!("opening {}", log_path.display()))?;
+    paths::make_private(&log_file);
     let log_err = log_file
         .try_clone()
         .context("copying the log file handle")?;
@@ -1025,13 +1027,13 @@ fn drain_copies(
     false
 }
 
-/// Makes a file that the other users of the machine cannot read.
+/// Makes a file that the other users cannot read, and narrows one that existed.
 ///
 /// The output of a job frequently holds a token or a password, in the same way
 /// as its environment.
 fn create_private(path: &std::path::Path, append: bool) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
-    std::fs::OpenOptions::new()
+    let file = std::fs::OpenOptions::new()
         .write(true)
         // The limit on the output reads this file to count the lines that it
         // removes. Without this permission, the count of a second attempt is
@@ -1041,7 +1043,9 @@ fn create_private(path: &std::path::Path, append: bool) -> std::io::Result<std::
         .truncate(!append)
         .append(append)
         .mode(0o600)
-        .open(path)
+        .open(path)?;
+    paths::make_private(&file);
+    Ok(file)
 }
 
 /// No side won the race between the job and the timer.

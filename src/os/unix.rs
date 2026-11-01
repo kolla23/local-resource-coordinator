@@ -411,7 +411,13 @@ pub fn ensure_dir(path: &std::path::Path, mode: u32) -> Result<()> {
 /// Sets 0600 on an open file, also one that existed with a wider mode. Best effort:
 /// each such file lies in a 0700 directory, and a refused change must not stop qex.
 pub fn make_private(file: &std::fs::File) {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    // Only a regular file with one link that this user owns: a link planted in
+    // someone else's state folder must not move the change to a file outside it.
+    let Ok(meta) = file.metadata() else { return };
+    if !meta.is_file() || meta.nlink() != 1 || meta.uid() != unsafe { libc::geteuid() } {
+        return;
+    }
     file.set_permissions(std::fs::Permissions::from_mode(0o600))
         .ok();
 }

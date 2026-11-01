@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-01: the follower sets 0600 on a log file that exists (issue #56) and refuses a symlinked one.
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -2766,11 +2767,8 @@ fn follow(dir: &std::path::Path, select: &crate::logsel::LogSelect) -> Result<i3
 
     for (name, file) in &streams {
         let path = dir.join(file);
-        // The supervisor can make this file after the command starts.
-        // `.mode` applies only when this command makes the file. Without it
-        // the file takes 0666 and the umask, the supervisor keeps that mode
-        // (it cannot change an existing file), and every user of the machine
-        // can read the output.
+        // The supervisor can make this file after the command starts. `.mode`
+        // applies only to a new file, so `make_private` also narrows one that exists.
         let mut f = std::fs::OpenOptions::new()
             .read(true)
             .create(true)
@@ -2779,7 +2777,10 @@ fn follow(dir: &std::path::Path, select: &crate::logsel::LogSelect) -> Result<i3
             .truncate(false)
             .write(true)
             .mode(0o600)
+            // A planted symlink fails the follow: nothing is made or changed through it.
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&path)?;
+        crate::paths::make_private(&f);
 
         // Read what the job already wrote, and show the last lines of it.
         let mut existing = Vec::new();
