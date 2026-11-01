@@ -880,7 +880,16 @@ fn pair(args: &[String], server: bool) {
             out("pair-server: no client within 120 s");
             std::process::exit(1)
         });
-        let made = me.cmd(&format!("create {name} 255 1"));
+        // `--sd d7`: D7's descriptor (owner and full access for the user, SYSTEM, Administrators).
+        let d7 = arg(args, "--sd").as_deref() == Some("d7");
+        let made = if d7 {
+            let mine = me.cmd("whoami");
+            let user = kv(&mine, "token_user");
+            let sddl = format!("O:{user}D:P(A;;GA;;;{user})(A;;GA;;;SY)(A;;GA;;;BA)");
+            me.cmd(&format!("createsd {name} 255 1 {sddl}"))
+        } else {
+            me.cmd(&format!("create {name} 255 1"))
+        };
         let h = kv(&made, "h").to_string();
         let ok = st(&made) == "ok";
         let connected = if ok {
@@ -898,8 +907,9 @@ fn pair(args: &[String], server: bool) {
             "pair-server side: create, connect and client attribution",
             "CreateNamedPipeW(+FIRST_PIPE_INSTANCE)+ConnectNamedPipe+GetNamedPipeClientProcessId",
             &format!(
-                "elevated={} create={} connect={} clientpid={} client_pid={}",
+                "elevated={} descriptor={} create={} connect={} clientpid={} client_pid={}",
                 el as u8,
+                if d7 { "d7" } else { "default" },
                 st(&made),
                 st(&connected),
                 st(&cp),
