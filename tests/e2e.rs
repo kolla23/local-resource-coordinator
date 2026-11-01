@@ -7393,53 +7393,44 @@ fn du_reports_the_space_that_qex_holds() {
 }
 
 /// A deep directory must not stop qex. The socket path must fit in `sun_path`,
-/// and a test harness gives a long path.
+/// and a test harness gives a long path. The socket follows the state directory.
 #[test]
 fn a_long_runtime_directory_still_works() {
-    let long = std::env::temp_dir()
-        .join(format!("qex-long-{}", std::process::id()))
+    let mut h = Harness::with_default_config("longpath");
+    let long = h
+        .root
         .join("a-directory-with-a-very-long-name")
         .join("another-directory-with-a-long-name")
         .join("and-one-more-to-pass-the-limit-of-sun-path");
-
-    let h = Harness::with_default_config("longpath");
     std::fs::create_dir_all(&long).unwrap();
+    h.extra_env.push((
+        "XDG_STATE_HOME".to_string(),
+        long.to_string_lossy().into_owned(),
+    ));
 
     let out = h
         .command(&["submit", "--", "echo", "long-path-ok"])
-        .env("XDG_RUNTIME_DIR", &long)
         .output()
         .unwrap();
 
     assert!(
         out.status.success(),
-        "qex failed with a long runtime directory: {}",
+        "qex failed with a long state directory: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     let wait = h
         .command(&["wait", &id, "--timeout", "30s"])
-        .env("XDG_RUNTIME_DIR", &long)
         .output()
         .unwrap();
     assert_eq!(wait.status.code(), Some(0));
 
-    // Stop the coordinator of this test.
-    let info = h
-        .command(&["info", "--json"])
-        .env("XDG_RUNTIME_DIR", &long)
-        .output()
-        .unwrap();
+    let info = h.command(&["info", "--json"]).output().unwrap();
     let pid = serde_json::from_slice::<serde_json::Value>(&info.stdout)
         .ok()
         .and_then(|v| v["pid"].as_i64());
-    if let Some(pid) = pid {
-        unsafe {
-            libc::kill(pid as i32, libc::SIGKILL);
-        }
-    }
-    std::fs::remove_dir_all(long.ancestors().nth(3).unwrap()).ok();
+    h.stop_coordinator();
     // Only a path too long for `sun_path` moves the socket to TMPDIR.
     let dir = pid.and_then(tmpdir_socket_dir);
     assert!(dir.is_some(), "the long path never reached the socket code");
