@@ -108,5 +108,25 @@ key2=$(target_key "$tmp/repo2")
 check "two worktrees get different target dirs" "$([ -n "$key1" ] && [ "$key1" != "$key2" ] && echo yes)" yes
 reset
 
+# The hook's own WSL script, run here: this wsl.exe drops its options and runs what follows --exec.
+mkdir -p "$tmp/bin-wslrun" "$tmp/home/.cache/lrc-stop-hook"
+cp "$tmp/bin-win/uname" "$tmp/bin/cargo" "$tmp/bin-wslrun/"
+# shellcheck disable=SC2016 # the fake's own "$1" and "$@", expanded when it runs.
+printf '#!/bin/sh\nwhile [ "$1" != --exec ]; do shift; done\nshift\nexec "$@"\n' > "$tmp/bin-wslrun/wsl.exe"
+chmod +x "$tmp/bin-wslrun/wsl.exe"
+cache="$tmp/home/.cache/lrc-stop-hook"
+mkdir -p "$cache/gone" "$cache/alive" "$cache/unrecorded" "$tmp/alive-worktree"
+printf '%s\n' "$tmp/removed-worktree" > "$cache/gone/path"
+printf '%s\n' "$tmp/alive-worktree" > "$cache/alive/path"
+printf 'fn scratch_prune() {}\n' > "$tmp/repo/src/scratch_prune.rs"
+(cd "$tmp/repo" && printf '{"stop_hook_active": false}' | HOME="$tmp/home" PATH="$tmp/bin-wslrun:$PATH" bash "$hook" 2>/dev/null)
+check "the WSL run exits 0 when cargo passes" "$?" 0
+check "the worktree's target dir records the worktree path" \
+  "$(grep -lxF "$(cd "$tmp/repo" && pwd)" "$cache"/*/path 2>/dev/null | wc -l | tr -d ' ')" 1
+check "a target dir whose worktree is gone is removed" "$([ -e "$cache/gone" ] && echo kept || echo removed)" removed
+check "a target dir whose worktree exists is kept" "$([ -e "$cache/alive" ] && echo kept || echo removed)" kept
+check "a target dir with no recorded path is kept" "$([ -e "$cache/unrecorded" ] && echo kept || echo removed)" kept
+reset
+
 echo "$failed failed"
 [ "$failed" -eq 0 ]
