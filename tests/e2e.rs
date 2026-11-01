@@ -7,6 +7,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-03: two more tests run `testjob`: the record dated before the boot (std `set_modified` in place of `touch`) and the job that starts again (`count`/`if-count-below`/`spin` in place of `sh -c`).
 // Modified by the local-resource-coordinator fork, 2026-10-06: nine tests pin the mode of each path qex makes: the state-directory census, the first start, four directories whose last writer is one call, the pruned history, the tail file and the TMPDIR socket directory (R3 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-10-06: the census and first-start tests expect owner-only modes; a test for coordinator files left wide by an earlier version.
+// Modified by the local-resource-coordinator fork, 2026-11-01: the long-path test sets a long XDG_STATE_HOME, which qex reads, and checks that the socket moved to TMPDIR (issue #54).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -3652,6 +3653,23 @@ fn the_tail_file_of_a_long_log_is_private() {
     h.stop(&id);
 }
 
+/// Finds the socket directory in TMPDIR whose pid file names the coordinator `pid`.
+fn tmpdir_socket_dir(pid: i64) -> Option<PathBuf> {
+    let prefix = format!("qex-{}-", unsafe { libc::getuid() });
+    let pid = pid.to_string();
+    std::fs::read_dir(std::env::temp_dir())
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&prefix)
+                && std::fs::read_to_string(p.join("pid")).ok().as_deref() == Some(pid.as_str())
+        })
+}
+
 /// A state directory too deep for `sun_path` moves the socket to a directory in TMPDIR;
 /// that directory is shared with other users, so its modes matter most.
 #[test]
@@ -3680,23 +3698,8 @@ fn the_socket_directory_in_tmpdir_is_private() {
     let out = cmd.output().unwrap();
     assert!(out.status.success(), "qex info: {out:?}");
     let info: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let pid = info["pid"]
-        .as_i64()
-        .expect("info gives the pid")
-        .to_string();
-    let prefix = format!("qex-{}-", unsafe { libc::getuid() });
-    let dir = std::fs::read_dir(std::env::temp_dir())
-        .unwrap()
-        .flatten()
-        .map(|e| e.path())
-        .find(|p| {
-            p.file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with(&prefix)
-                && std::fs::read_to_string(p.join("pid")).ok().as_deref() == Some(pid.as_str())
-        })
-        .expect("the socket directory of this coordinator in TMPDIR");
+    let pid = info["pid"].as_i64().expect("info gives the pid");
+    let dir = tmpdir_socket_dir(pid).expect("the socket directory of this coordinator in TMPDIR");
     let socket = dir.join("s");
 
     let meta = |p: &Path| std::fs::symlink_metadata(p).unwrap();
@@ -7428,14 +7431,19 @@ fn a_long_runtime_directory_still_works() {
         .env("XDG_RUNTIME_DIR", &long)
         .output()
         .unwrap();
-    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&info.stdout) {
-        if let Some(pid) = v["pid"].as_i64() {
-            unsafe {
-                libc::kill(pid as i32, libc::SIGKILL);
-            }
+    let pid = serde_json::from_slice::<serde_json::Value>(&info.stdout)
+        .ok()
+        .and_then(|v| v["pid"].as_i64());
+    if let Some(pid) = pid {
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
         }
     }
     std::fs::remove_dir_all(long.ancestors().nth(3).unwrap()).ok();
+    // Only a path too long for `sun_path` moves the socket to TMPDIR.
+    let dir = pid.and_then(tmpdir_socket_dir);
+    assert!(dir.is_some(), "the long path never reached the socket code");
+    std::fs::remove_dir_all(dir.unwrap()).ok();
 }
 
 /// The measured use must appear in the status, so an agent can correct its
