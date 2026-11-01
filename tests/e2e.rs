@@ -7430,9 +7430,10 @@ fn a_long_runtime_directory_still_works() {
     let pid = serde_json::from_slice::<serde_json::Value>(&info.stdout)
         .ok()
         .and_then(|v| v["pid"].as_i64());
-    h.stop_coordinator();
-    // Only a path too long for `sun_path` moves the socket to TMPDIR.
+    // Only a path too long for `sun_path` moves the socket to TMPDIR. Look while
+    // the coordinator runs, so a shutdown that tidies the directory can't hide it.
     let dir = pid.and_then(tmpdir_socket_dir);
+    h.stop_coordinator();
     assert!(dir.is_some(), "the long path never reached the socket code");
     std::fs::remove_dir_all(dir.unwrap()).ok();
 }
