@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the hook.log that `note` makes, and the doc of `note` says so (R3 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-11-01: run and note set 0600 on a hook.log that exists, with a unit test; a test comment no longer says run opened no file (issue #56).
+// Modified by the local-resource-coordinator fork, 2026-11-02: run and note open hook.log with O_NOFOLLOW (issue #88).
 //! This module runs the command that qex starts when a job stops.
 //!
 //! The hook is a property of the machine and of the person at it, and not a
@@ -224,6 +225,8 @@ fn note(dir: &Path, text: &str) {
         .create(true)
         .append(true)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(dir.join(LOG_FILE))
     {
         crate::paths::make_private(&f);
@@ -370,6 +373,8 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
         .create(true)
         .truncate(true)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(dir.join(LOG_FILE))?;
     crate::paths::make_private(&out);
 

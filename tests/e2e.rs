@@ -13,6 +13,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: ten tests for a state directory, job record or config file that another user owns or can change, and for a refused state directory in info --no-start (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie supervisor under a subreaper; the recovery test no longer waits for the reaper (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-02: eight tests plant a symbolic link at a state or coordinator file and expect its target untouched (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-02: seven tests plant a symbolic link at a job file and expect its target untouched (issue #88).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -21399,4 +21400,187 @@ fn the_update_lock_is_not_followed() {
 
     no_file_at(&target);
     assert!(!h.root.join("state/qex/update.json").exists());
+}
+
+/// Puts a symbolic link to `target` at `name` in the directory of a job.
+fn plant_job(dir: &Path, name: &str, target: &Path) {
+    std::os::unix::fs::symlink(target, dir.join(name)).unwrap();
+}
+
+/// Queues `job` on a paused queue, plants a link to `target` at `name` in its
+/// directory, then lets it run to its end. Gives the id.
+fn run_with_a_link(h: &Harness, name: &str, target: &Path, job: &[&str]) -> String {
+    h.ok(&["pause", "queue"]);
+    let mut args = vec!["submit", "--"];
+    args.extend_from_slice(job);
+    let id = h.submit(&args);
+    plant_job(&h.job_dir(&id), name, target);
+    h.ok(&["resume", "queue", "--all"]);
+    h.qex_within(&["wait", &id, "--timeout", "30s"], Duration::from_secs(60));
+    id
+}
+
+/// Waits for the supervisor's line about the stop hook, and gives its log.
+///
+/// qex prints that line after both opens of hook.log, whether they succeed or fail.
+fn the_hook_line(h: &Harness, id: &str) -> String {
+    let log = h.job_dir(id).join("supervisor.log");
+    let said = format!("the stop hook of the job {id}");
+    h.until("the line about the hook", Duration::from_secs(30), || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .contains(&said)
+    });
+    std::fs::read_to_string(&log).unwrap()
+}
+
+/// A link at supervisor.log fails the job and leaves its target (issue #88).
+#[test]
+fn a_supervisor_log_link_fails_the_job() {
+    let h = Harness::with_default_config("svloglink");
+    let target = a_target_file(&h);
+
+    let id = run_with_a_link(&h, "supervisor.log", &target, &[TESTJOB, "print", "x"]);
+
+    assert_unchanged(&target);
+    let status = h.status_json(&id);
+    assert_eq!(status["state"], "failed", "{status}");
+    let error = status["error"].as_str().unwrap_or("");
+    assert!(
+        error.contains("qex could not start the job") && error.contains("supervisor.log"),
+        "{error}"
+    );
+}
+
+/// A link at stdout.log fails the job and leaves its target (issue #88).
+#[test]
+fn a_stdout_log_link_fails_the_job() {
+    let h = Harness::with_default_config("outlink");
+    let target = a_target_file(&h);
+
+    let id = run_with_a_link(&h, "stdout.log", &target, &[TESTJOB, "print", "x"]);
+
+    assert_unchanged(&target);
+    let status = h.status_json(&id);
+    assert_eq!(status["state"], "failed", "{status}");
+    let error = status["error"].as_str().unwrap_or("");
+    assert!(
+        error.contains("opening the standard output file of the job"),
+        "{error}"
+    );
+}
+
+/// A link at stderr.log fails the job and leaves its target (issue #88).
+#[test]
+fn a_stderr_log_link_fails_the_job() {
+    let h = Harness::with_default_config("errlink");
+    let target = a_target_file(&h);
+
+    let id = run_with_a_link(&h, "stderr.log", &target, &[TESTJOB, "print", "x"]);
+
+    assert_unchanged(&target);
+    let status = h.status_json(&id);
+    assert_eq!(status["state"], "failed", "{status}");
+    let error = status["error"].as_str().unwrap_or("");
+    assert!(
+        error.contains("opening the standard error file of the job"),
+        "{error}"
+    );
+}
+
+/// A link at the tail file is refused, and the job completes (issue #88).
+#[test]
+fn a_tail_file_link_is_refused_and_the_job_completes() {
+    let h = Harness::new(
+        "taillink",
+        concat!(
+            "[peers]\nenabled = false\n",
+            "[system]\nreserve_mem = \"0\"\nmax_pressure = 100\n",
+            "[logs]\nmax_bytes = \"64KB\"\n",
+        ),
+    );
+    let target = a_target_file(&h);
+
+    let job = ["sh", "-c", "seq 1 500000"];
+    let id = run_with_a_link(&h, "stdout.log.tail", &target, &job);
+
+    assert_unchanged(&target);
+    assert_eq!(h.state_of(&id), "completed");
+    let log = std::fs::read_to_string(h.job_dir(&id).join("supervisor.log")).unwrap();
+    assert!(log.contains("making the file for the last output"), "{log}");
+}
+
+/// A link at hook.log is refused where qex opens it for the hook's output (issue #88).
+#[test]
+fn a_hook_log_link_is_refused_and_the_job_keeps_its_result() {
+    let h = Harness::new(
+        "hooklink",
+        concat!(
+            "[peers]\nenabled = false\n",
+            "[system]\nreserve_mem = \"0\"\nmax_pressure = 100\n",
+            "[hooks]\non_stop = [\"true\"]\n",
+        ),
+    );
+    let target = a_target_file(&h);
+
+    let id = run_with_a_link(&h, "hook.log", &target, &[TESTJOB, "print", "x"]);
+    let log = the_hook_line(&h, &id);
+
+    assert_unchanged(&target);
+    assert!(is_link(&h.job_dir(&id).join("hook.log")));
+    assert_eq!(h.state_of(&id), "completed");
+    let said = format!("the stop hook of the job {id} did not start");
+    assert!(log.contains(&said), "{log}");
+}
+
+/// `qex kill` does not write its mark through a link (issue #88).
+#[test]
+fn a_killed_by_user_link_is_not_written() {
+    let h = Harness::with_default_config("killlink");
+    let target = a_target_file(&h);
+    let id = h.submit(&["submit", "--", TESTJOB, "sleep", "30"]);
+    h.until("the job starts", Duration::from_secs(45), || {
+        h.has_started(&id)
+    });
+    plant_job(&h.job_dir(&id), "killed-by-user", &target);
+
+    // The coordinator writes the mark before it sends the signal, and answers after both.
+    h.ok(&["kill", &id, "--grace", "1s"]);
+    h.qex_within(&["wait", &id, "--timeout", "30s"], Duration::from_secs(60));
+
+    assert_unchanged(&target);
+    assert_eq!(h.state_of(&id), "killed");
+}
+
+/// The verdict of the stop hook is not appended through a link (issue #88).
+#[test]
+fn the_hook_verdict_is_not_appended_through_a_link() {
+    let h = Harness::with_default_config("verdictlink");
+    let target = a_target_file(&h);
+    // The hook replaces hook.log with a link after `run` opened it, so only
+    // the append of the verdict meets the link.
+    let script = format!(
+        r#"rm "$QEX_JOB_DIR/hook.log" && ln -s {} "$QEX_JOB_DIR/hook.log""#,
+        target.display()
+    );
+    h.write_config(&format!(
+        "[peers]\nenabled = false\n\
+         [budget]\ncpu = \"3\"\n\
+         [defaults]\nmem = \"256MB\"\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [hooks]\non_stop = [\"sh\", \"-c\", '{script}']\n"
+    ));
+
+    let id = h.submit(&["submit", "--", "true"]);
+    h.qex_within(&["wait", &id, "--timeout", "30s"], Duration::from_secs(60));
+    let log = the_hook_line(&h, &id);
+
+    assert_unchanged(&target);
+    assert!(
+        is_link(&h.job_dir(&id).join("hook.log")),
+        "the hook put its link in place"
+    );
+    assert_eq!(h.state_of(&id), "completed");
+    let said = format!("the stop hook of the job {id} ran in");
+    assert!(log.contains(&said), "{log}");
 }

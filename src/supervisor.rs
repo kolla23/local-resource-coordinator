@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-01: supervisor.log and the job's output files are set to 0600 when they exist (issue #56).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the watch of a recovered supervisor ends on a zombie (issue #85).
+// Modified by the local-resource-coordinator fork, 2026-11-02: supervisor.log and the job's output files are opened with O_NOFOLLOW (issue #88).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -34,6 +35,8 @@ pub fn spawn(id: uuid::Uuid) -> Result<i32> {
         .create(true)
         .append(true)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(&log_path)
         .with_context(|| format!("opening {}", log_path.display()))?;
     paths::make_private(&log_file);
@@ -1044,6 +1047,8 @@ fn create_private(path: &std::path::Path, append: bool) -> std::io::Result<std::
         .truncate(!append)
         .append(append)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(path)?;
     paths::make_private(&file);
     Ok(file)

@@ -3,6 +3,7 @@ title: qex security
 description: What qex writes to the disk, who can read it, and where the trust boundaries are.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the state directory, job records and the config file must be yours (issue #88). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: qex opens the files it writes in the state and job directories without following a symbolic link (issue #88). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: reports go to this repository's advisories (issue #100). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
@@ -33,6 +34,10 @@ qex follows a symbolic link only when you or root own it. The state directory
 itself is never left writable by group or others: qex sets it to 0700. qex reads
 a job record only if you own it, and the config file only if you or root own it
 and other users cannot write it.
+
+qex opens the files it writes in the state directory and in a job directory
+without following a symbolic link at their name, so a link planted there makes
+the open fail instead of writing elsewhere.
 
 A directory above the state directory, and the config file, may be writable by a
 group, and the members of that group can still change them. On a system that

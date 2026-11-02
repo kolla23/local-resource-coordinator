@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the oom mark (R3 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-10-06: the oom and killed-by-user marks are made and kept 0600.
+// Modified by the local-resource-coordinator fork, 2026-11-02: the oom and killed-by-user marks are opened with O_NOFOLLOW, with a test (issue #88).
 //! This module reports a kill for memory. It applies no limit.
 //!
 //! qex does not limit a job. A claim decides what STARTS and when, and a job
@@ -204,6 +205,8 @@ fn write_mark(path: &Path) {
         .write(true)
         .truncate(true)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(path)
     {
         crate::paths::make_private(&file);
@@ -478,5 +481,27 @@ mod tests {
         mark_oom(&dir);
         assert_eq!(mode(), 0o600, "a mark that existed with 0644");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The out-of-memory mark is not written through a link (issue #88). Only a
+    /// real out-of-memory kill in a delegated cgroup reaches it, so no e2e test can.
+    #[test]
+    fn the_out_of_memory_mark_is_not_written_through_a_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::testutil::temp_dir().join(format!("qex-oomlink-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("target");
+        std::fs::write(&target, b"ORIGINAL\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::os::unix::fs::symlink(&target, dir.join("oom")).unwrap();
+
+        mark_oom(&dir);
+        let bytes = std::fs::read(&target).unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(bytes, b"ORIGINAL\n", "the target keeps its bytes");
+        assert_eq!(mode, 0o644, "the target keeps its mode");
     }
 }
