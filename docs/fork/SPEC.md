@@ -608,9 +608,9 @@ Pass a private authenticated supervisor-channel reference to descendants. If a r
 
 ## 15. Persistence, IPC, startup, and recovery
 
-Amended by [DECISION_PERSISTENCE.md](DECISION_PERSISTENCE.md): V1 keeps qex's atomic job files instead of a SQLite store; each write goes to a private temporary file that is renamed into place. Events keep a bounded, append-only sequence (§11.2, §27.2). Network-shared state directories are unsupported. Durable launch-state commits and monotonic transition validation remain mandatory.
+Amended by [DECISION_PERSISTENCE.md](DECISION_PERSISTENCE.md): V1 keeps qex's atomic job files instead of a SQLite store, with a single coordinator writer; each write goes to a private temporary file that is renamed into place. Events keep a bounded, append-only sequence (§11.2, §27.2). Network-shared state directories are unsupported. Durable launch-state commits and monotonic transition validation remain mandatory.
 
-Supervisors write private per-job receipts/spool files atomically, with restrictive permissions and durable replacement where required. They replace a job file only through that temporary-file-and-rename step, never by writing in place. The coordinator reconciles receipts by job ID, token, boot identity, and supervisor identity. A change to the job-file format takes an exclusive lock, makes a recoverable backup, and never runs implicitly from an older binary against files in a newer format.
+Supervisors write private per-job receipts/spool files atomically, with restrictive permissions and durable replacement where required. They never replace the coordinator's job state files. The coordinator reconciles receipts by job ID, token, boot identity, and supervisor identity. A change to the format of the job state files takes an exclusive lock, makes a recoverable backup, and never runs implicitly from an older binary against files in a newer format.
 
 IPC uses user-private Unix domain sockets on Linux/macOS and local-only ACL-restricted named pipes on Windows. No TCP listener in V1. Authenticate OS peer identity plus supervisor capabilities where applicable; do not trust a PID supplied in JSON. Use length-prefixed, versioned messages, a 1 MiB request limit, bounded stream frames, timeouts, and backpressure. Major protocol mismatch refuses mutating calls with upgrade guidance.
 
