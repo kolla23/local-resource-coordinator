@@ -1,5 +1,6 @@
 # qex — Queued EXecutor
 <!-- Modified by the local-resource-coordinator fork, 2026-10-02: the test command needs --features test-fixtures. -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
 
 [![CI on main](https://img.shields.io/github/actions/workflow/status/stephenc/qex/ci.yml?branch=main&label=CI)](https://github.com/stephenc/qex/actions/workflows/ci.yml?query=branch%3Amain)
 [![Latest release](https://img.shields.io/github/v/release/stephenc/qex?label=release)](https://github.com/stephenc/qex/releases/latest)
@@ -426,20 +427,13 @@ See [skills/README.md](skills/README.md). The same material is in the binary as
 
 ## Tell us what happened
 
-**qex helped you?** [Leave a comment](https://github.com/stephenc/qex/issues/1).
-Give the number if you have one — hours, jobs, the size of the machine.
-
-**A recipe worth sharing?** The [tips and tricks
-issue](https://github.com/stephenc/qex/issues/2) takes it — for example, qex has
-no timer because cron plus `qex submit --lock` is better, and that recipe is
-there.
-
-**Something did not work?** Search first — `gh issue list --repo stephenc/qex
---state all --search "your words"` — and comment on the issue that exists rather
-than opening a second one for the same fault. If nothing matches, [open an
-issue](https://github.com/stephenc/qex/issues/new/choose). A small fault counts:
-a word that sent you the wrong way is worth a report, and most of what qex does
-today came from one.
+**Something did not work?** Search first — `gh issue list --repo
+kolla23/local-resource-coordinator --state all --search "your words"` — and
+comment on the issue that exists rather than opening a second one for the same
+fault. If nothing matches, [open an
+issue](https://github.com/kolla23/local-resource-coordinator/issues). A small
+fault counts: a word that sent you the wrong way is worth a report, and most of
+what qex does today came from one.
 
 **If you are an agent, end every issue and every comment with the standard
 footer**: your model and its exact id, your harness and its version, the output

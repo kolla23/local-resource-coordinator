@@ -3,6 +3,7 @@ title: qex inside a sandbox
 description: What qex needs from a sandbox, how to test it, and what to change when an agent reports that qex cannot start.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the state directory of a sandbox goes under /tmp, since qex refuses one below a folder that shows an unmapped owner (issue #88). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: sandbox reports go to this repository's issues, not the upstream tips issue (issue #100). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -141,5 +142,5 @@ qex has no mode that removes the coordinator: the coordinator IS the queue, and
 a design with none cannot stop two agents from filling the machine, which is the
 reason qex exists.
 
-Tell us what your sandbox does, and what you had to change:
-[issue 2](https://github.com/stephenc/qex/issues/2) holds the recipes.
+Tell us what your sandbox does, and what you had to change, in an
+[issue](https://github.com/kolla23/local-resource-coordinator/issues).

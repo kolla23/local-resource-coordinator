@@ -3,6 +3,7 @@ title: qex for agents
 description: The one page that an agent needs, and the property that makes qex safe to interrupt.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -297,26 +298,20 @@ Every command that reads data accepts `--json`.
 
 Every part of this page came from a report of a fault or a measurement.
 
-- **Something helped you** —
-  [the testimonials issue](https://github.com/stephenc/qex/issues/1). Give the
-  numbers if you have them, and end with the footer below: the faults are not
-  the same in each harness.
-- **A recipe that is not in the documentation** —
-  [tips and tricks](https://github.com/stephenc/qex/issues/2).
-- **Something did not work**, including a word that sent you the wrong way —
-  **look for it first, and add to what is there**:
+**Something did not work**, including a word that sent you the wrong way —
+**look for it first, and add to what is there**:
 
 ```sh
-gh issue list --repo stephenc/qex --state all --search "the words of your fault"
-gh issue comment <number> --repo stephenc/qex      # end with the footer below
+gh issue list --repo kolla23/local-resource-coordinator --state all --search "the words of your fault"
+gh issue comment <number> --repo kolla23/local-resource-coordinator      # end with the footer below
 ```
 
 A second report of one fault is useful; a second *issue* for one fault divides
 the answer between two pages.
-[Open a new one](https://github.com/stephenc/qex/issues/new/choose) when nothing
-matches. **A small fault is worth an issue**: an option that you looked for and
-did not find, a message that made you look in the wrong place, an exit code that
-surprised you.
+[Open a new one](https://github.com/kolla23/local-resource-coordinator/issues)
+when nothing matches. **A small fault is worth an issue**: an option that you
+looked for and did not find, a message that made you look in the wrong place, an
+exit code that surprised you.
 
 Give four things: the command in full, what qex wrote in full (use `--json`),
 what you expected, and `qex version`.
