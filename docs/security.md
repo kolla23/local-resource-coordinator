@@ -2,6 +2,7 @@
 title: qex security
 description: What qex writes to the disk, who can read it, and where the trust boundaries are.
 ---
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: the state directory, job records and the config file must be yours (issue #88). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -21,6 +22,24 @@ description: What qex writes to the disk, who can read it, and where the trust b
 
 The job directory and the files in it are for you only. No other user of the
 machine can read the environment of your job, or its output.
+
+## Whose files qex uses
+
+qex uses a state directory only if you own it and no other user can replace it
+or a directory above it: each directory on the way must be yours or root's and
+must not be writable by every user (a sticky directory such as `/tmp` is), and
+qex follows a symbolic link only when you or root own it. The state directory
+itself is never left writable by group or others: qex sets it to 0700. qex reads
+a job record only if you own it, and the config file only if you or root own it
+and other users cannot write it.
+
+A directory above the state directory, and the config file, may be writable by a
+group, and the members of that group can still change them. On a system that
+gives each user a private group, that group is you alone.
+
+So `sudo -E qex` on the files of another user stops with a message. Set
+`XDG_STATE_HOME` and `XDG_CONFIG_HOME` to directories that you own. Inside a
+sandbox with its own user namespace, put `XDG_STATE_HOME` under `/tmp`.
 
 ## The environment
 
