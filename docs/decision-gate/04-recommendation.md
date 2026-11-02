@@ -38,7 +38,7 @@
   - admission against a memory budget, not serial running
   - whole-tree memory
   - a per-job `TEMP`
-- qex already has the first: the scheduler admits work up to a memory budget, and its admission logic is OS-independent. Its inputs (memory, pressure, peer claims) and the modules it calls to start supervisors, run hooks and write job files need the backend; those are counted in step 3. The second comes from step 1. The third neither option has yet; it's an ADR either way, because SPEC preserves the submitted environment (`SPEC.md:37`) and allows only documented coordinator-owned additions (`SPEC.md:1003`); a per-job TEMP overrides a submitted value.
+- qex already has the first: the scheduler admits work up to a memory budget, and its admission logic is OS-independent. Its inputs (memory, pressure, peer claims) and the modules it calls to start supervisors, run hooks and write job files need the backend; those are counted in step 3. The second comes from step 1. The third neither option has yet; it's an ADR either way, because SPEC preserves the submitted environment (`SPEC.md:37`) and allows only documented coordinator-owned additions (`SPEC.md:1007`); a per-job TEMP overrides a submitted value.
 
 **Step 3: [Unix inventory](03-unix-inventory.md).**
 - About 10% of the production code (≈3,635 of 37,867 lines) is in code that changes for Windows:
@@ -53,7 +53,7 @@
 - **Windows-only gains:**
   - A new core would be clean on Windows: no pid/process-group identity, no `max_rss` in the formats and no Unix socket files.
   - It would have a backend layer from day one, and the fork would have to retrofit one.
-- **qex also differs from SPEC's V1 target beyond Windows** ([QEX_ASSESSMENT.md:110](../fork/QEX_ASSESSMENT.md); `SPEC.md:611–619`):
+- **qex also differs from SPEC's V1 target beyond Windows** ([QEX_ASSESSMENT.md:110](../fork/QEX_ASSESSMENT.md); `SPEC.md:615–623`):
   - atomic job files instead of SQLite
   - newline-separated JSON instead of length-prefixed messages
   - no OS peer authentication

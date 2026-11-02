@@ -26,7 +26,7 @@ Every step is its own PR, planned at about 400 changed lines (not counting logs 
 
 **Shape:**
 - A module `src/os/` with `unix.rs` (code shared by Linux and macOS), `linux.rs` and `macos.rs` now, and `windows.rs` later. Code that is the same on every platform (plain std, such as `cpu_count`) stays where it is. Each moved body goes to exactly one file, so a move is never a copy.
-- Its functions are plain functions chosen at compile time by `cfg`. No trait objects and no plugin framework (SPEC.md:887, "small backend contracts").
+- Its functions are plain functions chosen at compile time by `cfg`. No trait objects and no plugin framework (SPEC.md:891, "small backend contracts").
 - Callers name what they need (`os::available_memory()`, `os::lock_exclusive(&file)`) and never `libc` or `std::os::unix`.
 - Every modified upstream file gets the fork header line.
 
@@ -65,8 +65,8 @@ All ADRs go in `docs/fork/adr/`, one docs-only PR each, written while R2–R6 ar
 
 | Order | ADR | Why here |
 |---|---|---|
-| 1 | **IPC transport and launch protocol** ([ADR 1](adr/0001-ipc-transport-and-launch.md)): named pipes, who may start a coordinator, liveness without a socket file; SPEC's framing gap decided at the same time | The largest area (≈800 lines). AGENTS.md requires an ADR before any launch change. Unblocks R7. Sets the pipe security that the acceptance check below tests: the ACL, local-only clients (SPEC.md:615), and protection against another user creating the pipe name first. |
-| 1 (alongside) | **Per-job TEMP** | Depends on no other ADR. Changes Linux behaviour too: it overrides the submitted environment, against SPEC.md:37 and :1003, so it is a product decision. |
+| 1 | **IPC transport and launch protocol** ([ADR 1](adr/0001-ipc-transport-and-launch.md)): named pipes, who may start a coordinator, liveness without a socket file; SPEC's framing gap decided at the same time | The largest area (≈800 lines). AGENTS.md requires an ADR before any launch change. Unblocks R7. Sets the pipe security that the acceptance check below tests: the ACL, local-only clients (SPEC.md:619), and protection against another user creating the pipe name first. |
+| 1 (alongside) | **Per-job TEMP** ([the per-job TEMP ADR](adr/0001b-per-job-temp.md)) | Depends on no other ADR. Changes Linux behaviour too: it overrides the submitted environment, against SPEC.md:37 and :1007, so it is a product decision. |
 | 2 | **Who may signal a job**: a named Job Object, or a request routed through the supervisor | The routed option needs a channel to the supervisor, which ADR 1 defines. |
 | 3 | **Exit classification, `--signal` and CLI compatibility for signals** | Depends on 2: how a job is stopped decides what its exit code means. Settles HUP, QUIT and USR1/2. |
 | 4 | **Memory metric in history and admission**: commit vs working set, metric-kind labels, the commit ledger and gate, `max_pressure` | Independent of 1–3 and may be drafted alongside them. Changes the on-disk history, so it comes before peers. |
@@ -123,7 +123,7 @@ The Windows backend is not done, and no Windows release is made, until this chec
   - The descriptor's owner is the user, even when the coordinator runs elevated (an elevated process would otherwise make Administrators the owner).
   - Atomic replace: a rename keeps the *source* file's DACL, so the temporary file is created with the restricted DACL, not fixed after the rename.
   - Each such pipe also:
-    - accepts local clients only (SPEC.md:615)
+    - accepts local clients only (SPEC.md:619)
     - is created with `FILE_FLAG_FIRST_PIPE_INSTANCE`, so its server never joins a pipe that someone else created
     - is used by clients only after they check that the server process runs as the same user. Otherwise another user could create the name first and receive submitted environments.
   - A named Job Object, if ADR 2 chooses one, is created new: if `CreateJobObjectW` reports `ERROR_ALREADY_EXISTS`, the coordinator does not use it (or the object lives in a private namespace). Otherwise another user could create the name first and control the user's jobs.
@@ -139,6 +139,7 @@ The Windows backend is not done, and no Windows release is made, until this chec
   4. For each pipe, and the named Job Object if there is one, create its name first from a process that runs as a second local account, which the test setup creates. Then start the pipe's server (the coordinator, or a supervisor): it must refuse to serve, and a client must refuse to send to that process. For the Job Object, submit a job: it must not run inside the squatter's object. (A squatter running as the same user is out of scope: same-user processes are trusted, as on Unix.)
   5. Connect to each pipe through the SMB loopback path `\\127.0.0.1\pipe\<name>`, which arrives as a remote client. The connection must be refused. If the test machine cannot make such a connection at all (for example, SMB is off), the test reports "local-only: not evaluated" and does not pass that step.
   6. After the job ends, search for the secret value from step 1 in the user's `%TEMP%`, `%LOCALAPPDATA%`, `%ProgramData%` and the job's working folder. Fail if it appears anywhere outside the objects checked in step 3. This search covers the likely places, not the whole disk, and the test says so.
+  7. With the coordinator elevated, run the per-job TEMP ADR's swap and plant tests, a junction and a symlink each: the cleanup of a job's TEMP folder must leave every outside folder and file it was pointed at unchanged. Until this run happens, the step reports "not evaluated" and does not pass.
 - **Manual check, recorded in `docs/baseline/`:**
   1. Log in as a second, standard (non-admin) local account.
   2. Try to read a job file, its log and the history with `type` and `Get-Content`, and try to connect to each pipe. Each attempt fails with "access denied".

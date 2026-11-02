@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-01
 **Status:** proposed; accepted when the owner merges the PR that adds this file
-**Context:** GitHub issue #4; SPEC goal 10 and R11 (core policy works offline), SPEC L669 ("No automatic network telemetry, update execution, …")
+**Context:** GitHub issue #4; SPEC goal 10 and R11 (core policy works offline), SPEC L675 ("No automatic network telemetry, update execution, …")
 
 ## Problem
 Upstream qex's coordinator asks `https://api.github.com/repos/stephenc/qex/releases/latest` for the newest release every 7 days (`[update] check = "7d"`, `src/config.rs` `UpdateConfig::default`; called from `src/daemon.rs`, run with `curl` or `wget`).
