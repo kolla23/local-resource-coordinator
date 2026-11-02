@@ -710,7 +710,7 @@ A successful shell exit is evidence about that shell command, not proof that eve
 | Daemon dies during launch handshake | Reconcile token/receipt; ambiguous work becomes LOST, never replayed. |
 | Supervisor disappears | Verify and clean up only owned remnants; preserve unresolved accounting. |
 | PID recycled | Reject stale identity; do not signal replacement. |
-| Disk full/database corruption | Stop admission; protect running supervision; preserve files for repair; no reset-on-error. |
+| Disk full/job state file corruption | Stop admission; protect running supervision; preserve files for repair; no reset-on-error. |
 | Output flood/slow reader | Bounded spool, continued drain, explicit truncation. |
 | Git unavailable/metadata races | Mark unknown/unstable context; execute unless an explicit precondition fails. |
 | cwd deleted or executable replaced | Fail nonexistent cwd; revalidate executable identity at launch and update context/estimate when changed. |
@@ -906,7 +906,7 @@ Complete durable queue/supervisor receipts, crash reconciliation, CLI/IPC schema
 
 ### V1 beta to GA
 
-Complete native platform matrix, WSL2 domain documentation, opt-in hard limits on capable platforms, fault/security testing, benchmarks, soak tests, packaging, migration tests, operator documentation, and signed releases. No platform may be labelled fully supported merely because its binary builds. Publish limitations alongside installation instructions.
+Complete native platform matrix, WSL2 domain documentation, opt-in hard limits on capable platforms, fault/security testing, benchmarks, soak tests, packaging, job state file format-change tests, operator documentation, and signed releases. No platform may be labelled fully supported merely because its binary builds. Publish limitations alongside installation instructions.
 
 ### V2 candidates, each separately specified
 
