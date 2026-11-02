@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests of the line and record turn the check on, since the default is now never (issue #4); tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-11-02: update.lock is opened with O_NOFOLLOW, with a test (issue #88).
 //! Looks for a newer release of qex, and says so one time.
 //!
 //! # Who asks
@@ -126,6 +127,8 @@ fn with_the_record_in(dir: &std::path::Path, change: impl FnOnce(&mut Record)) -
         .write(true)
         .truncate(false)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(&path)?;
 
     // FAIL WITH NO LOCK, AND NEVER WORK WITH NO LOCK.
@@ -1037,6 +1040,23 @@ mod tests {
         assert!(note_for_a_command_in(&dir, "0.23.0", &checking()).is_none());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The lock is not made through a symbolic link at its name (issue #88).
+    #[test]
+    fn the_lock_is_not_made_through_a_link() {
+        let dir = a_directory("locklink");
+        let target = dir.join("elsewhere");
+        std::os::unix::fs::symlink(&target, dir.join("update.lock")).unwrap();
+
+        let answer = with_the_record_in(&dir, |r| r.told = Some("0.24.0".into()));
+        let made = std::fs::symlink_metadata(&target).is_ok();
+        let told = read_record_in(&dir).told;
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(!made, "nothing is made at the target");
+        assert!(answer.is_err(), "a lock that is a link must stop the write");
+        assert!(told.is_none(), "nothing may reach the disk");
     }
 
     /// The lock keeps two writers apart.

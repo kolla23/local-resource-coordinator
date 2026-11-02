@@ -12,6 +12,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-01: three tests plant job, follower and history files at 0644 and expect 0600 after qex opens them (issue #56); the follower refuses a symlink and leaves a hard-linked or foreign file wide.
 // Modified by the local-resource-coordinator fork, 2026-11-02: ten tests for a state directory, job record or config file that another user owns or can change, and for a refused state directory in info --no-start (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie supervisor under a subreaper; the recovery test no longer waits for the reaper (issue #85).
+// Modified by the local-resource-coordinator fork, 2026-11-02: eight tests plant a symbolic link at a state or coordinator file and expect its target untouched (issue #88).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -20843,7 +20844,11 @@ fn a_target_file(h: &Harness) -> PathBuf {
 
 fn assert_unchanged(target: &Path) {
     use std::os::unix::fs::PermissionsExt;
-    assert_eq!(std::fs::read(target).unwrap(), b"ORIGINAL\n");
+    assert_eq!(
+        std::fs::read(target).unwrap(),
+        b"ORIGINAL\n",
+        "the target keeps its bytes"
+    );
     let mode = std::fs::metadata(target).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o644, "the target keeps its mode");
 }
@@ -21118,4 +21123,280 @@ fn a_question_about_the_coordinator_names_a_refused_state_directory() {
     assert!(h.ok(&["version"]).contains("coordinator: none operates"));
     // The harness asks `info --no-start` when it cannot see the processes.
     std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// Puts a symbolic link to `target` at `name` in the state directory.
+fn plant_state(h: &Harness, name: &str, target: &Path) {
+    let link = h.root.join("state/qex").join(name);
+    std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+/// A path under the harness root that does not exist, in a directory that does.
+fn a_missing_target(h: &Harness) -> PathBuf {
+    let dir = h.root.join("elsewhere");
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.join("missing")
+}
+
+fn no_file_at(target: &Path) {
+    let kind = std::fs::symlink_metadata(target).err().map(|e| e.kind());
+    assert_eq!(
+        kind,
+        Some(std::io::ErrorKind::NotFound),
+        "nothing is made at the target {}",
+        target.display()
+    );
+}
+
+fn is_link(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
+}
+
+/// qex adds to its history without following a link at the file's name (issue #88).
+#[test]
+fn history_is_not_appended_through_a_link() {
+    let h = Harness::with_default_config("histlink");
+    let target = a_target_file(&h);
+    plant_state(&h, "history.jsonl", &target);
+
+    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+
+    assert_unchanged(&target);
+    assert!(
+        out.status.success(),
+        "a history that qex cannot write never stops a command: {out:?}"
+    );
+    assert!(is_link(&h.root.join("state/qex/history.jsonl")));
+}
+
+/// The lock of the usage record is not opened through a link (issue #88).
+#[test]
+fn the_usage_lock_is_not_opened_through_a_link() {
+    let h = Harness::with_default_config("usagelink");
+    let marker = h.root.join("hook-ran");
+    // The supervisor records usage before it runs the stop hook, so the
+    // hook's marker shows that the usage step is over.
+    h.write_config(&format!(
+        "[peers]\nenabled = false\n\
+         [budget]\ncpu = \"3\"\n\
+         [defaults]\nmem = \"256MB\"\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [hooks]\non_stop = [\"sh\", \"-c\", \"echo done >> {}\"]\n",
+        marker.display()
+    ));
+    let target = a_target_file(&h);
+    plant_state(&h, "usage.lock", &target);
+
+    let id = h.submit(&["submit", "--", TESTJOB, "print", "x"]);
+    h.ok(&["wait", &id, "--timeout", "30s"]);
+    h.until("the stop hook runs", Duration::from_secs(30), || {
+        marker.exists()
+    });
+
+    assert_unchanged(&target);
+    let rss = h.status_json(&id)["usage"]["max_rss"].as_u64().unwrap_or(0);
+    assert!(rss > 0, "the job must reach the usage record");
+    assert!(!h.root.join("state/qex/usage.json").exists());
+}
+
+/// A link at the spawn lock stops the start, and nothing is made through it (issue #88).
+#[test]
+fn a_spawn_lock_link_stops_the_start_and_makes_nothing() {
+    let h = Harness::with_default_config("spawnlink");
+    let target = a_missing_target(&h);
+    plant_state(&h, "run/spawn.lock", &target);
+
+    let out = h.qex_within(&["info"], Duration::from_secs(60));
+
+    no_file_at(&target);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "qex must refuse the link: {err}");
+    assert!(
+        err.contains("spawn.lock"),
+        "the refusal names the file: {err}"
+    );
+}
+
+/// A link at the coordinator's log stops the start and leaves its target (issue #88).
+#[test]
+fn a_daemon_log_link_stops_the_start_and_leaves_its_target() {
+    let h = Harness::with_default_config("dloglink");
+    let target = a_target_file(&h);
+    plant_state(&h, "run/daemon.log", &target);
+
+    let out = h.qex_within(&["info"], Duration::from_secs(60));
+
+    assert_unchanged(&target);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "qex must refuse the link: {err}");
+    // The generic "did not start" text names daemon.log too; match the refused open.
+    assert!(
+        err.contains("opening the log file") && err.contains("daemon.log"),
+        "the refusal names the file: {err}"
+    );
+}
+
+/// A link at the pid file stops the coordinator and leaves its target (issue #88).
+#[test]
+fn a_pid_file_link_stops_the_coordinator_and_leaves_its_target() {
+    let mut h = Harness::with_default_config("pidlink");
+    // Without the idle exit, a coordinator that took the file would run for ever.
+    h.extra_env.push(("QEX_IDLE_EXIT_SECS".into(), "1".into()));
+    let target = a_target_file(&h);
+    plant_state(&h, "run/pid", &target);
+    let pid = h.root.join("state/qex/run/pid");
+
+    let out = h.qex_within(&["daemon"], Duration::from_secs(60));
+    let made_a_socket = h.root.join("state/qex/run/s").exists();
+
+    assert_unchanged(&target);
+    assert!(
+        out.status.success(),
+        "the coordinator stops with no fault: {out:?}"
+    );
+    assert!(!made_a_socket, "no coordinator starts on that file");
+    let log = String::from_utf8_lossy(&out.stdout);
+    assert!(log.contains(&pid.display().to_string()), "{log}");
+    assert!(
+        log.contains("Delete that file if no coordinator operates"),
+        "{log}"
+    );
+}
+
+/// The pid file of a socket directory in TMPDIR is not made through a link (issue #88).
+#[test]
+fn a_socket_directory_makes_no_pid_file_through_a_link() {
+    let mut h = Harness::with_default_config("sd");
+    let tmp = h.root.join("t");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let uid = unsafe { libc::getuid() };
+    let longest = format!("{}/qex-{uid}-{}/s", tmp.display(), "0".repeat(16));
+    assert!(
+        longest.len() <= 100,
+        "the private TMPDIR leaves room for the socket path: {longest}"
+    );
+    let deep = h
+        .root
+        .join("a-directory-with-a-very-long-name-to-pass-the-limit")
+        .join("another-directory-with-a-long-name-to-pass-the-limit");
+    std::fs::create_dir_all(&deep).unwrap();
+    for (key, value) in [
+        ("XDG_STATE_HOME", deep.display().to_string()),
+        ("TMPDIR", tmp.display().to_string()),
+        ("QEX_IDLE_EXIT_SECS", "1".to_string()),
+    ] {
+        h.extra_env.push((key.into(), value));
+    }
+
+    // The first start makes the directory, whose name is a hash of the state path.
+    let first = h.qex_within(&["daemon"], Duration::from_secs(60));
+    assert!(first.status.success(), "the first start: {first:?}");
+    let prefix = format!("qex-{uid}-");
+    let dirs: Vec<PathBuf> = std::fs::read_dir(&tmp)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&prefix)
+        })
+        .collect();
+    assert_eq!(dirs.len(), 1, "one socket directory: {dirs:?}");
+    let pid = dirs[0].join("pid");
+    std::fs::remove_file(&pid).unwrap();
+    // A dangling link: a target that exists would make qex skip the open.
+    let target = a_missing_target(&h);
+    std::os::unix::fs::symlink(&target, &pid).unwrap();
+
+    let out = h.qex_within(&["daemon"], Duration::from_secs(60));
+
+    no_file_at(&target);
+    assert!(
+        out.status.success(),
+        "the coordinator stops with no fault: {out:?}"
+    );
+    let log = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        log.contains("Delete that file if no coordinator operates"),
+        "{log}"
+    );
+    assert!(is_link(&pid));
+}
+
+/// The sweep keeps a socket directory whose pid file is a link, and leaves the target (issue #88).
+#[test]
+fn the_sweep_keeps_a_directory_whose_pid_file_is_a_link() {
+    let mut h = Harness::with_default_config("sweeplink");
+    let tmp = h.root.join("t");
+    let uid = unsafe { libc::getuid() };
+    let linked = tmp.join(format!("qex-{uid}-linked"));
+    let control = tmp.join(format!("qex-{uid}-control"));
+    std::fs::create_dir_all(&linked).unwrap();
+    std::fs::create_dir_all(&control).unwrap();
+    let target = a_target_file(&h);
+    std::os::unix::fs::symlink(&target, linked.join("pid")).unwrap();
+    h.extra_env
+        .push(("TMPDIR".into(), tmp.display().to_string()));
+
+    let out = h.qex_within(&["info", "--json"], Duration::from_secs(60));
+
+    // The sweep runs on a thread of the coordinator; watch for longer than its limit.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut survived = true;
+    while Instant::now() < deadline {
+        if !linked.exists() {
+            survived = false;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    assert_unchanged(&target);
+    assert!(out.status.success(), "qex info: {out:?}");
+    assert!(survived, "the sweep keeps a directory it cannot lock");
+    assert!(!control.exists(), "the sweep ran inside the window");
+    assert!(is_link(&linked.join("pid")));
+}
+
+/// The update lock is not made through a link (issue #88).
+#[test]
+fn the_update_lock_is_not_followed() {
+    let config = |h: &Harness| {
+        let answer = h.root.join("latest.json");
+        std::fs::write(&answer, r#"{"tag_name": "v0.0.1"}"#).unwrap();
+        h.write_config(&format!(
+            "[peers]\nenabled = false\n\
+             [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+             [update]\ncheck = \"300s\"\nurl = \"file://{}\"\n",
+            answer.display()
+        ));
+    };
+
+    // The control shows that this config writes an update record.
+    let control = Harness::with_default_config("updctl");
+    config(&control);
+    control.ok(&["info"]);
+    let record = control.root.join("state/qex/update.json");
+    control.until("the update record", Duration::from_secs(45), || {
+        record.exists()
+    });
+
+    let mut h = Harness::with_default_config("updlink");
+    h.extra_env.push(("QEX_IDLE_EXIT_SECS".into(), "5".into()));
+    config(&h);
+    let target = a_missing_target(&h);
+    plant_state(&h, "update.lock", &target);
+    let info: serde_json::Value = serde_json::from_str(&h.ok(&["info", "--json"])).unwrap();
+    let pid = info["pid"].as_i64().expect("info gives the pid") as i32;
+    h.until(
+        "the coordinator stops when idle",
+        Duration::from_secs(30),
+        || Harness::stopped(pid),
+    );
+
+    no_file_at(&target);
+    assert!(!h.root.join("state/qex/update.json").exists());
 }

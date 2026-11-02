@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: daemon.log and spawn.lock are made and kept 0600.
 // Modified by the local-resource-coordinator fork, 2026-11-02: connect_existing_result reports a refused state directory; the sandbox link names this fork's page (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-02: daemon.log, spawn.lock and the probe file are opened with O_NOFOLLOW, with a test for the probe (issue #88).
 //! This module connects the CLI to the coordinator.
 //!
 //! If no coordinator operates, the CLI starts one. Many CLI processes can do
@@ -1146,7 +1147,20 @@ impl Refusal {
 fn classify_refusal(dir: &Path, bind: impl Fn(&Path) -> std::io::Result<()>) -> Option<Refusal> {
     let name = format!("probe-{}", std::process::id());
     let file = dir.join(format!("{name}.tmp"));
-    if let Err(e) = std::fs::write(&file, b"qex") {
+    let written = {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            // A link planted at this name fails the open: nothing is made or changed through it.
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&file)
+            .and_then(|mut f| f.write_all(b"qex"))
+    };
+    if let Err(e) = written {
         return a_refusal(e).map(Refusal::Directory);
     }
     std::fs::remove_file(&file).ok();
@@ -1278,6 +1292,8 @@ fn spawn_daemon() -> Result<()> {
         .create(true)
         .append(true)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(&log_path)
         .with_context(|| format!("opening the log file {}", log_path.display()))?;
     paths::make_private(&log);
@@ -1328,6 +1344,8 @@ impl SpawnLock {
             .write(true)
             .truncate(false)
             .mode(0o600)
+            // A link planted at this name fails the open: nothing is made or changed through it.
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&path)
             .with_context(|| format!("opening the lock file {}", path.display()))?;
         paths::make_private(&file);
@@ -1677,6 +1695,29 @@ mod tests {
         let answer = classify_refusal(&dir, |_| Ok(()));
         std::fs::remove_dir_all(&dir).ok();
         assert!(answer.is_none(), "a socket that works is not a fault");
+    }
+
+    /// The probe file is not written through a symbolic link at its name (issue #88).
+    #[test]
+    fn a_probe_file_is_not_written_through_a_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(dir) = writable_dir("link") else {
+            return;
+        };
+        let target = dir.join("target");
+        std::fs::write(&target, b"ORIGINAL\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let probe = dir.join(format!("probe-{}.tmp", std::process::id()));
+        std::os::unix::fs::symlink(&target, probe).unwrap();
+
+        let answer = classify_refusal(&dir, |_| Ok(()));
+        let bytes = std::fs::read(&target).unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(bytes, b"ORIGINAL\n", "the target keeps its bytes");
+        assert_eq!(mode, 0o644, "the target keeps its mode");
+        assert!(answer.is_none(), "a link is not a refusal");
     }
 
     /// A fault that is not a refusal gives no message at all.
