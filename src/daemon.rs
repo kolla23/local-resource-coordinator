@@ -1516,14 +1516,15 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
             // number can lead a group of its own (a shell, a daemon); it
             // cannot also have the recorded start time. A process of another
             // user (which `pid_alive` counts as alive) is never the job.
-            let job_alive = same_boot
-                && status
-                    .pid
-                    .map(|pid| {
-                        sys::job_pid_alive(pid)
-                            && sys::same_process_start(pid, status.pid_start_token)
-                    })
-                    .unwrap_or(false);
+            let job_alive = |s: &JobStatus| {
+                same_boot
+                    && s.pid
+                        .map(|pid| {
+                            sys::job_pid_alive(pid)
+                                && sys::same_process_start(pid, s.pid_start_token)
+                        })
+                        .unwrap_or(false)
+            };
             // The pid comes from the record, or from the file that the
             // coordinator wrote at the fork. The second one covers the moment
             // between the fork and the first write of the supervisor: without
@@ -1559,6 +1560,9 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                     })
                     .unwrap_or(false);
 
+            if !supervisor_alive {
+                status = latest_record(&path, status);
+            }
             if supervisor_alive {
                 // The job continues. Keep its state, and let the supervisor
                 // write the result.
@@ -1569,16 +1573,15 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                     let id = status.id;
                     std::thread::spawn(move || crate::supervisor::reap(coord2, id, pid));
                 }
-            } else if let Some(disk) = final_record(&path) {
+            } else if status.state.is_terminal() {
                 // The supervisor wrote its result after the read above. Keep it, and run the hook
                 // that the supervisor may not have reached, as `reap` does.
-                status = disk;
                 log(&format!(
                     "job {} ended before recovery; its result stays",
                     status.id
                 ));
                 crate::hook::fire_detached(&path, &status);
-            } else if job_alive {
+            } else if job_alive(&status) {
                 // The supervisor is gone, and the job process continues. No
                 // process will ever write the result: the supervisor was the
                 // parent of the job, and the exit code of the job goes to that
@@ -1779,10 +1782,10 @@ fn retire_the_pids(status: &mut crate::job::JobStatus) {
     status.supervisor_pid = None;
 }
 
-/// Gives the record on disk when it is final. Read it only after the supervisor is
-/// known to be gone, so that nothing can write after it.
-fn final_record(dir: &std::path::Path) -> Option<JobStatus> {
-    job::read_status(dir).ok().filter(|s| s.state.is_terminal())
+/// Gives the record on disk, or `stale` when it cannot be read. Read it only after the
+/// supervisor is known to be gone, so that nothing can write after it.
+fn latest_record(dir: &std::path::Path, stale: JobStatus) -> JobStatus {
+    job::read_status(dir).unwrap_or(stale)
 }
 
 /// Returns an active record to the queue only when it proves that no job
@@ -3227,23 +3230,26 @@ mod tests {
         );
     }
 
-    /// Recovery must keep a result that the supervisor wrote after the first read (#85).
+    /// Recovery must keep what the supervisor wrote after the first read (#85).
     #[test]
-    fn a_final_record_on_disk_wins_over_the_stale_copy() {
+    fn the_record_on_disk_wins_over_the_stale_copy() {
         let dir = crate::testutil::temp_dir().join(format!("qx-final-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(final_record(&dir).is_none(), "no record is no result");
-        let mut status = JobStatus::new(&spec_with_key("final"));
-        for (state, kept) in [
-            (JobState::Starting, false),
-            (JobState::Running, false),
-            (JobState::Completed, true),
-            (JobState::Failed, true),
+        let mut stale = JobStatus::new(&spec_with_key("final"));
+        stale.state = JobState::Starting;
+        let found = latest_record(&dir, stale.clone());
+        assert_eq!((found.state, found.pid), (JobState::Starting, None), "no record");
+        for (state, pid) in [
+            (JobState::Running, Some(4242)),
+            (JobState::Completed, None),
+            (JobState::Failed, None),
         ] {
-            status.state = state;
-            job::write_status(&dir, &status).unwrap();
-            let found = final_record(&dir).map(|s| s.state);
-            assert_eq!(found, kept.then_some(state), "{state:?}");
+            let mut disk = stale.clone();
+            disk.state = state;
+            disk.pid = pid;
+            job::write_status(&dir, &disk).unwrap();
+            let found = latest_record(&dir, stale.clone());
+            assert_eq!((found.state, found.pid), (state, pid), "{state:?}");
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }

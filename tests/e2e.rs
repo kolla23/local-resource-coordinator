@@ -4681,6 +4681,7 @@ fn a_zombie_supervisor_ends_the_watch_of_a_recovered_job() {
         !Harness::stopped(supervisor),
         "the supervisor must still run"
     );
+    assert!(!Harness::stopped(job_pid), "the job process must still run");
 
     unsafe { libc::kill(supervisor, libc::SIGKILL) };
     h.until(
@@ -4689,7 +4690,6 @@ fn a_zombie_supervisor_ends_the_watch_of_a_recovered_job() {
         || Harness::state_in_proc(supervisor) == Some('Z'),
     );
     assert_eq!(Harness::parent_in_proc(supervisor), Some(held));
-    assert!(!Harness::stopped(job_pid), "the job process must still run");
 
     h.until("the job is failed", Duration::from_secs(20), || {
         h.state_of(&id) == "failed"
