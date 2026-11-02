@@ -1,6 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: daemon.log and spawn.lock are made and kept 0600.
-// Modified by the local-resource-coordinator fork, 2026-11-02: connect_existing_result reports a refused state directory (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-02: connect_existing_result reports a refused state directory; the sandbox link names this fork's page (issue #88).
 //! This module connects the CLI to the coordinator.
 //!
 //! If no coordinator operates, the CLI starts one. Many CLI processes can do
@@ -1112,7 +1112,7 @@ impl Refusal {
         let page = "IF YOU ARE AN AGENT: tell the person that you work with. They must let qex \
                     run outside the sandbox, or give the sandbox permission for that \
                     directory. The page for them is:\n\
-                    \x20   https://github.com/stephenc/qex/blob/main/docs/sandbox.md";
+                    \x20   https://github.com/kolla23/local-resource-coordinator/blob/main/docs/sandbox.md";
         match self {
             Refusal::Socket(e) => format!(
                 "qex cannot make a Unix socket in {}: {e}. An ordinary file in that directory \
@@ -1223,7 +1223,7 @@ fn name_the_sandbox(error: anyhow::Error) -> anyhow::Error {
          qex could not make the files that it needs. A sandbox that gives qex a read-only \
          mount, or no permission for that directory, gives this fault.\n\
          IF YOU ARE AN AGENT: tell the person that you work with. The page for them is \
-         https://github.com/stephenc/qex/blob/main/docs/sandbox.md"
+         https://github.com/kolla23/local-resource-coordinator/blob/main/docs/sandbox.md"
     )
 }
 

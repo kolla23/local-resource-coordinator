@@ -1,6 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: a clock step must not settle a config file that just changed (issue #17).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a comment no longer calls `7d` the default (issue #4).
-// Modified by the local-resource-coordinator fork, 2026-11-02: recovery skips a job record another user owns; a refused config reload says why (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-02: recovery skips a job record another user owns; a refused config reload says why; the sandbox link names this fork's page (issue #88).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1257,7 +1257,7 @@ pub fn run() -> Result<()> {
                 std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Unsupported
             ) {
                 "\nA sandbox that refuses a Unix socket gives this fault. See \
-                 https://github.com/stephenc/qex/blob/main/docs/sandbox.md"
+                 https://github.com/kolla23/local-resource-coordinator/blob/main/docs/sandbox.md"
                     .to_string()
             } else if e.kind() == std::io::ErrorKind::AddrInUse {
                 // Something that is not a socket of this coordinator holds

@@ -539,7 +539,8 @@ const LINK_LIMIT: usize = 40;
 /// do; it is trusted above the state directory here only (`/var` to reach `/var/tmp`).
 const OVERFLOW_PATHS: [&str; 4] = ["/", "/tmp", "/var", "/var/tmp"];
 
-const SANDBOX_PAGE: &str = "https://github.com/stephenc/qex/blob/main/docs/sandbox.md";
+const SANDBOX_PAGE: &str =
+    "https://github.com/kolla23/local-resource-coordinator/blob/main/docs/sandbox.md";
 
 /// One check of a path, a component at a time, following only owned links.
 struct Walk<'a> {
