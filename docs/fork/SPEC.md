@@ -190,6 +190,8 @@ Let `N` be effective logical-core capacity. CPU budget `C = max(1, N-1)` for `N 
 
 CPU claims are advisory scheduling reservations, not promises about runtime thread count. Default execution does not set `OMP_NUM_THREADS`, `GOMAXPROCS`, test workers, runtime heap flags, or similar variables. Such changes require explicit user configuration in a future adapter or the submitted command itself.
 
+Amended by the per-job TEMP ADR (per-job TEMP folders, when turned on): [adr/0001b-per-job-temp.md](adr/0001b-per-job-temp.md)
+
 ### 8.2 Admission math
 
 For active job `i`, let `q_i` be its current memory claim and `u_i` its allowed materialized-memory credit on the backend's accounting basis. Credit is distinct from displayed raw usage: shared-page overcounts or incomparable footprint metrics cannot reduce future reservations. Raise `q_i` to at least observed usage immediately, regardless of credit; never reduce an active job's memory claim. For STARTING, stale/incomplete workload data, and the initial macOS/Windows backend policies in §10, use `u_i = 0` when calculating unmaterialized reservations; this intentionally errs toward waiting. Linux sampled-tree fallback also uses zero credit; fresh delegated cgroup accounting may use its current charged-memory value, subject to the documented metric limitations.
@@ -300,6 +302,8 @@ A narrower profile improves precision but causes cold starts. A coarser reposito
 Fingerprint the original submitted environment before adding coordinator-internal job IDs, channel references, or launch tokens. These per-run values must not force every execution into a new cold profile. On a detected source/dependency/executable change within a profile, retain its previous conservative peak floor but reset the confidence/sample-count eligibility for downward adjustment; no change may reset the claim to a smaller cold default automatically.
 
 Capture the environment actually submitted, not the daemon's environment. Persist only keyed fingerprints in historical profiles; do not log environment values. An environment hash establishes byte equality of captured values, not equivalence of remote state, file contents, or secrets' semantics.
+
+Amended by the per-job TEMP ADR (TEMP values added at launch are not captured): [adr/0001b-per-job-temp.md](adr/0001b-per-job-temp.md)
 
 ### 9.3 Update algorithm
 
@@ -1001,6 +1005,8 @@ Default responses omit raw argv, environment, absolute source paths, and secret 
 3. Non-Windows jobs use null commit claims. Windows jobs use positive commit claims and the independent ledger. A zero released reservation is represented by `reservation_released=true` retaining the original `reserved` quantities for audit; it is not subtracted twice.
 4. Recovery mutation revision must match the current record and the action must be supported by current evidence. A valid schema cannot prove either fact.
 5. A shell request contains only `shell_path` and script in its execution object; a direct request contains only argv. The environment is complete for the child, apart from documented coordinator-owned additions; the daemon does not fill missing values from its own environment.
+
+   Amended by the per-job TEMP ADR (TMPDIR, TMP and TEMP as coordinator-owned additions): [adr/0001b-per-job-temp.md](adr/0001b-per-job-temp.md)
 6. `memory_limit_bytes` requires a capable backend and an effective claim not larger than the limit. An estimate that later grows beyond a fixed limit does not silently raise that limit; record the risk and hold new work according to the normal overrun policy.
 7. Permission, executable/cwd checks, aggregate request bytes, base64 validity/decoded size, environment rules, and policy budget checks are mandatory after schema validation and before launch.
 

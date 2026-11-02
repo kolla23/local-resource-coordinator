@@ -102,7 +102,7 @@ Run all of these from the repository root. `src/` and `tests/` are unchanged sin
      - Only "nobody listens" (ENOENT, ECONNREFUSED, ENOTSOCK) lets a client start a coordinator.
      - The socket path limit forces short `/tmp` folders and a sweep.
    - Named pipes have no file, and the OS removes them when the server exits, so most of this machinery goes away.
-   - `SPEC.md:615` already names local-only, ACL-restricted named pipes for Windows. The *launch rules* still change, and AGENTS.md requires an ADR for that.
+   - `SPEC.md:619` already names local-only, ACL-restricted named pipes for Windows. The *launch rules* still change, and AGENTS.md requires an ADR for that.
    - Today no peer is authenticated by identity: access comes only from file modes (0700 folder, 0600 socket).
 2. **Who may signal a job** (`lifecycle.rs` kill and abort, ≈150 lines).
    - The coordinator calls `killpg` on the job's group directly.
@@ -123,7 +123,7 @@ Run all of these from the repository root. `src/` and `tests/` are unchanged sin
    - An ACL-based `%ProgramData%` design would be new security work. Turning peers off on Windows is the likely answer: the owner's machine is single-user (*inferred*).
 
 **Gaps on every platform, not caused by the OS** (found on the way):
-- **Framing:** messages are separated by newlines (`daemon.rs:1824`), where `SPEC.md:615` asks for length-prefixed messages.
+- **Framing:** messages are separated by newlines (`daemon.rs:1824`), where `SPEC.md:619` asks for length-prefixed messages.
 - **Admission:** the test has no SPEC §8.2 `growth_reserved` term.
 
 ## Tested on Windows: atomic replace works
@@ -173,7 +173,7 @@ I checked these claims against the code at `f2d96f0`:
 - Framing is `reader.lines()` (`daemon.rs:1824`).
 - The peer default is `/tmp/qex` (`config.rs:461`).
 - `max_rss` appears in 10 files.
-- `SPEC.md:615` names named pipes for Windows.
+- `SPEC.md:619` names named pipes for Windows.
 
 ## Not done
 - No Windows port was written, so every Windows line count is an estimate.
