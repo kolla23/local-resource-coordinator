@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: default [update] check = "never" (issue #4).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a config file replaced during the read is young (issue #17).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a read returns the clocks its age was measured against; a read with a future mtime has no age (issue #17).
+// Modified by the local-resource-coordinator fork, 2026-11-02: the config file is read only when the user or root owns it and other users cannot write it (issue #88).
 //! This module reads the config file `~/.config/qex.toml`.
 //!
 //! Each field has a default value. The config file is thus optional. If the
@@ -1290,6 +1291,28 @@ fn read_config_clocked(
     (read, clocks.unwrap_or_else(LookClocks::now))
 }
 
+/// The opened file must be the user's or root's, and not writable by every user.
+/// Not `PermissionDenied`: that kind would add the sandbox remedy to the message.
+fn refuse_config_owner(
+    path: &std::path::Path,
+    meta: &std::fs::Metadata,
+    euid: u32,
+) -> Option<std::io::Error> {
+    use std::os::unix::fs::MetadataExt;
+    let why = if meta.uid() != euid && meta.uid() != 0 {
+        format!("it belongs to the user {}", meta.uid())
+    } else if meta.mode() & 0o002 != 0 {
+        "every user can write to it".to_string()
+    } else {
+        return None;
+    };
+    Some(std::io::Error::other(format!(
+        "qex will not read the config file {}: {why}. Set XDG_CONFIG_HOME to a directory \
+         that you own, with a config file that only you can change",
+        path.display()
+    )))
+}
+
 fn read_config_inner(
     path: &std::path::Path,
     after_read: impl FnOnce(),
@@ -1308,7 +1331,11 @@ fn read_config_inner(
     };
     match file.metadata() {
         Ok(m) if !m.is_file() => return ConfigFile::NotRegular,
-        Ok(_) => {}
+        Ok(m) => {
+            if let Some(e) = refuse_config_owner(path, &m, unsafe { libc::geteuid() }) {
+                return ConfigFile::Unreadable(e);
+            }
+        }
         Err(e) => return ConfigFile::Unreadable(e),
     }
     // Take the age from the same handle, AFTER the read.

@@ -20585,3 +20585,325 @@ fn a_cancel_of_many_ids_gives_a_line_for_each() {
         "a kill of one job that waits names the command that fits"
     );
 }
+
+/// The owner of the files that the ownership tests plant: a uid with no account.
+const ANOTHER_UID: u32 = 4242;
+
+fn running_as_root() -> bool {
+    unsafe { libc::geteuid() == 0 }
+}
+
+/// Gives every entry under `path`, and `path` itself, to `uid`; links stay links.
+fn give_tree_to(path: &Path, uid: u32) {
+    std::os::unix::fs::lchown(path, Some(uid), Some(uid)).unwrap();
+    let meta = std::fs::symlink_metadata(path).unwrap();
+    if meta.is_dir() {
+        for entry in std::fs::read_dir(path).unwrap() {
+            give_tree_to(&entry.unwrap().path(), uid);
+        }
+    }
+}
+
+/// Leaves one queued job record for `true` in the state directory, with no coordinator.
+fn leave_a_queued_record(h: &Harness) -> String {
+    h.ok(&["pause", "queue"]);
+    let id = h.submit(&["submit", "--", "true"]);
+    h.stop_coordinator();
+    std::fs::remove_file(h.root.join("state/qex/run/paused.json")).unwrap();
+    id
+}
+
+/// Requires a refusal that names the refused path and the remedy.
+fn assert_refused(out: &Output, component: &Path) {
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_ne!(out.status.code(), Some(0), "qex must refuse: {err}");
+    assert!(
+        err.contains(&component.display().to_string()),
+        "the refusal must name {}: {err}",
+        component.display()
+    );
+    assert!(
+        err.contains("XDG_STATE_HOME"),
+        "the refusal gives the remedy: {err}"
+    );
+    assert!(
+        !err.contains("docs/sandbox.md"),
+        "outside a sandbox the refusal must not send the reader to the sandbox page: {err}"
+    );
+}
+
+fn a_target_file(h: &Harness) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = h.root.join("elsewhere");
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("target");
+    std::fs::write(&target, b"ORIGINAL\n").unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+    target
+}
+
+fn assert_unchanged(target: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(std::fs::read(target).unwrap(), b"ORIGINAL\n");
+    let mode = std::fs::metadata(target).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o644, "the target keeps its mode");
+}
+
+/// qex uses a state directory only when the user that runs it owns it.
+#[test]
+fn a_state_directory_another_user_owns_is_refused() {
+    let limit = Duration::from_secs(60);
+    if !running_as_root() {
+        // A link to `/`, which this user does not own. Never as root: the code before
+        // this check would change the mode of `/run`.
+        let h = Harness::with_default_config("ownlink");
+        std::os::unix::fs::symlink("/", h.root.join("state/qex")).unwrap();
+        let out = h.qex_within(&["submit", "--wait", "--", "true"], limit);
+        assert_refused(&out, &h.root.join("state/qex"));
+        // The harness looks for processes under its root, and must not look in `/`.
+        std::fs::remove_file(h.root.join("state/qex")).unwrap();
+        return;
+    }
+
+    // A link in the state directory of another user.
+    let h = Harness::with_default_config("ownhist");
+    let target = a_target_file(&h);
+    let state = h.root.join("state/qex");
+    std::fs::create_dir(&state).unwrap();
+    std::os::unix::fs::symlink(&target, state.join("history.jsonl")).unwrap();
+    give_tree_to(&state, ANOTHER_UID);
+    let out = h.qex_within(&["submit", "--wait", "--", "true"], limit);
+    assert_refused(&out, &state);
+    assert_unchanged(&target);
+
+    // A queued record in the state directory of another user is not taken.
+    let h = Harness::with_default_config("ownrec");
+    let id = leave_a_queued_record(&h);
+    let status = h.job_dir(&id).join("status.json");
+    let before = std::fs::read(&status).unwrap();
+    give_tree_to(&h.root.join("state/qex"), ANOTHER_UID);
+    let out = h.qex_within(&["submit", "--wait", "--", "true"], limit);
+    assert_refused(&out, &h.root.join("state/qex"));
+    assert_eq!(
+        std::fs::read(&status).unwrap(),
+        before,
+        "the record stays as it was"
+    );
+
+    // A missing state directory in a directory of another user.
+    let h = Harness::with_default_config("ownparent");
+    give_tree_to(&h.root.join("state"), ANOTHER_UID);
+    let out = h.qex_within(&["submit", "--wait", "--", "true"], limit);
+    assert_refused(&out, &h.root.join("state"));
+
+    // XDG_STATE_HOME is a link that another user owns, and the state directory is missing.
+    let h = Harness::with_default_config("ownmissing");
+    let target = h.root.join("target");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::remove_dir(h.root.join("state")).unwrap();
+    std::os::unix::fs::symlink(&target, h.root.join("state")).unwrap();
+    give_tree_to(&h.root.join("state"), ANOTHER_UID);
+    let out = h.qex_within(&["submit", "--wait", "--", "true"], limit);
+    assert_refused(&out, &h.root.join("state"));
+    assert_eq!(
+        std::fs::read_dir(&target).unwrap().count(),
+        0,
+        "nothing is made under the target of the link"
+    );
+}
+
+/// Every directory on the way to the target of a link counts, not only the link.
+#[test]
+fn a_link_whose_target_passes_through_another_users_directory_is_refused() {
+    // Only root can make a directory that another user owns; CI runs as a normal user.
+    if !running_as_root() {
+        return;
+    }
+    let h = Harness::with_default_config("ownhop");
+    let real = h.root.join("real");
+    std::fs::create_dir_all(real.join("state")).unwrap();
+    let foreign = h.root.join("foreign");
+    std::fs::create_dir(&foreign).unwrap();
+    std::os::unix::fs::symlink(&real, foreign.join("hop")).unwrap();
+    std::os::unix::fs::chown(&foreign, Some(ANOTHER_UID), Some(ANOTHER_UID)).unwrap();
+    std::os::unix::fs::symlink(foreign.join("hop/state"), h.root.join("state/qex")).unwrap();
+
+    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    assert_refused(&out, &foreign);
+    assert_eq!(
+        std::fs::read_dir(real.join("state")).unwrap().count(),
+        0,
+        "nothing is made in the directory behind the link"
+    );
+}
+
+/// A job record that another user owns is not read, and no command counts it.
+#[test]
+fn a_job_record_another_user_owns_is_not_read() {
+    // Only root can plant a file that another user owns; CI runs as a normal user.
+    if !running_as_root() {
+        return;
+    }
+    let h = Harness::with_default_config("ownjob");
+    let id = leave_a_queued_record(&h);
+    let dir = h.job_dir(&id);
+    let status = dir.join("status.json");
+    let before = std::fs::read(&status).unwrap();
+    for name in ["spec.json", "status.json"] {
+        std::os::unix::fs::chown(dir.join(name), Some(ANOTHER_UID), Some(ANOTHER_UID)).unwrap();
+    }
+    // A record that qex never accepted has no line in the history.
+    std::fs::remove_file(h.root.join("state/qex/history.jsonl")).unwrap();
+
+    // `qex du` reads the disk and starts no coordinator.
+    let du = json_of(&h.ok(&["du", "--json"]));
+    assert_eq!(du["job_count"], 0, "{du}");
+    assert_eq!(du["directories_with_no_record"], 1, "{du}");
+
+    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let list = h.ok(&["list"]);
+    assert!(!list.contains(&id[..8]), "the record is not listed: {list}");
+    let status_out = h.qex(&["status", &id]);
+    assert_eq!(status_out.status.code(), Some(127));
+    assert_eq!(
+        String::from_utf8_lossy(&status_out.stderr).trim_end(),
+        format!(
+            "qex: there is no job with the id {id}, and qex has no record of one. \
+             Test the id, or submit the job."
+        )
+    );
+    assert_eq!(
+        std::fs::read(&status).unwrap(),
+        before,
+        "the record stays as it was"
+    );
+    let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log")).unwrap();
+    assert!(
+        log.lines()
+            .any(|l| l.contains(&id) && l.contains("skipped: not owned by this user")),
+        "the log names the directory that was skipped: {log}"
+    );
+}
+
+/// A state directory behind a link that the user owns works as before.
+#[test]
+fn a_state_directory_behind_your_own_link_still_works() {
+    let h = Harness::with_default_config("ownmine");
+    let elsewhere = h.root.join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, h.root.join("state/qex")).unwrap();
+    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(elsewhere.join("jobs").is_dir());
+}
+
+/// A directory that qex makes in the state directory must be the user's own.
+#[test]
+fn a_jobs_directory_another_user_owns_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    // Only root can make a directory that another user owns; CI runs as a normal user.
+    if !running_as_root() {
+        return;
+    }
+    let h = Harness::with_default_config("ownjobs");
+    let jobs = h.root.join("state/qex/jobs");
+    std::fs::create_dir_all(&jobs).unwrap();
+    std::fs::set_permissions(&jobs, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::os::unix::fs::chown(&jobs, Some(ANOTHER_UID), Some(ANOTHER_UID)).unwrap();
+
+    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_ne!(out.status.code(), Some(0), "qex must refuse: {err}");
+    assert!(err.contains(&jobs.display().to_string()), "{err}");
+    let mode = std::fs::metadata(&jobs).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(mode, 0o755, "the directory keeps its mode");
+}
+
+/// A state directory that other users can write is made private before use.
+#[test]
+fn an_open_state_directory_is_made_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Harness::with_default_config("ownopen");
+    let state = h.root.join("state/qex");
+    std::fs::create_dir(&state).unwrap();
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(mode, 0o700);
+}
+
+/// Requires a refusal of the config file that names it and the remedy.
+fn assert_config_refused(out: &Output, file: &Path) {
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_ne!(out.status.code(), Some(0), "qex must refuse: {err}");
+    assert!(err.contains(&file.display().to_string()), "{err}");
+    assert!(err.contains("XDG_CONFIG_HOME"), "{err}");
+}
+
+/// qex reads a config file only when the user or root owns it.
+#[test]
+fn a_config_file_another_user_owns_is_refused() {
+    // Only root can plant a file that another user owns; CI runs as a normal user.
+    if !running_as_root() {
+        return;
+    }
+    let h = Harness::with_default_config("owncfg");
+    let file = h.root.join("cfg/qex.toml");
+    std::os::unix::fs::chown(&file, Some(ANOTHER_UID), Some(ANOTHER_UID)).unwrap();
+    assert_config_refused(&h.qex(&["config", "show"]), &file);
+    let submit = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    assert_config_refused(&submit, &file);
+}
+
+/// A config file that every user can write is refused; a group-writable one is read.
+#[test]
+fn a_world_writable_config_file_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Harness::with_default_config("cfgopen");
+    let file = h.root.join("cfg/qex.toml");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666)).unwrap();
+    assert_config_refused(&h.qex(&["config", "show"]), &file);
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o664)).unwrap();
+    h.ok(&["config", "show"]);
+}
+
+/// A coordinator that refuses a changed config file says why in its log.
+#[test]
+fn a_config_reload_names_why_it_was_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Harness::with_default_config("cfgreload");
+    h.ok(&["info"]);
+    let file = h.root.join("cfg/qex.toml");
+    let text = std::fs::read_to_string(&file).unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666)).unwrap();
+    std::fs::write(&file, format!("{text}# changed\n")).unwrap();
+    let log = h.root.join("state/qex/run/daemon.log");
+    h.until(
+        "the coordinator logs the refusal",
+        Duration::from_secs(45),
+        || std::fs::read_to_string(&log).is_ok_and(|l| l.contains("XDG_CONFIG_HOME")),
+    );
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert!(text.contains(&file.display().to_string()), "{text}");
+    assert!(
+        !text.contains("the file is empty, or qex cannot read it"),
+        "{text}"
+    );
+}
