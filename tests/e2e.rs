@@ -21230,8 +21230,9 @@ fn a_daemon_log_link_stops_the_start_and_leaves_its_target() {
     assert_unchanged(&target);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "qex must refuse the link: {err}");
+    // The generic "did not start" text names daemon.log too; match the refused open.
     assert!(
-        err.contains("daemon.log"),
+        err.contains("opening the log file") && err.contains("daemon.log"),
         "the refusal names the file: {err}"
     );
 }
