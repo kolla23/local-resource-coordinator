@@ -10,6 +10,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-01: the long-path test sets a long XDG_STATE_HOME, which qex reads, and checks that the socket moved to TMPDIR (issue #54).
 // Modified by the local-resource-coordinator fork, 2026-11-01: the e2e suite passes as root and in a container with a slow reaper: stop_coordinator waits for the reaper, the abort test blocks the write with a directory, the memory-hint test keeps out the ambient environment (issue #84).
 // Modified by the local-resource-coordinator fork, 2026-11-01: three tests plant job, follower and history files at 0644 and expect 0600 after qex opens them (issue #56); the follower refuses a symlink and leaves a hard-linked or foreign file wide.
+// Modified by the local-resource-coordinator fork, 2026-11-02: ten tests for a state directory, job record or config file that another user owns or can change, and for a refused state directory in info --no-start (issue #88).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
