@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-11-01: the follower sets 0600 on a log file that exists (issue #56) and refuses a symlinked one.
+// Modified by the local-resource-coordinator fork, 2026-11-02: qex version answers when the state directory is refused (issue #88).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -5566,7 +5567,12 @@ pub fn version(args: cli::VersionArgs) -> Result<i32> {
     // reporting "none" for a coordinator that qex could not reach would answer
     // the question wrongly and exit 0. The limit reaches the reader instead,
     // with the code that says qex stopped waiting.
-    let coordinator = match Client::connect_existing_result()? {
+    let existing = match crate::paths::socket_path() {
+        Ok(_) => Client::connect_existing_result()?,
+        // A refused state directory still gives the version; other commands name it.
+        Err(_) => None,
+    };
+    let coordinator = match existing {
         Some(mut c) => match c.call(&Request::Info) {
             Ok(Response::Info {
                 version,

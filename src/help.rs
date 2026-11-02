@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: config template shows check = "never" (issue #4).
+// Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88).
 //! This module holds the text for the `qex help <topic>` command.
 //!
 //! An agent reads this text to learn the tool. Each topic is thus short and
@@ -187,7 +188,7 @@ socket that qex needs. qex then says so, and it names the directory.
 You cannot correct that yourself: the permissions belong to the person who
 starts you. Give them this page, and stop:
 
-    https://github.com/stephenc/qex/blob/main/docs/sandbox.md
+    https://github.com/kolla23/local-resource-coordinator/blob/main/docs/sandbox.md
 
 Do not write a monitor script
 -----------------------------

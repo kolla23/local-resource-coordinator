@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-11-02: a job record is read only when the user owns it (issue #88).
 //! This module holds the job state that qex writes to the disk.
 //!
 //! The file `status.json` is the primary record of a job result. The supervisor
@@ -819,10 +820,45 @@ fn write_atomic_with(path: &Path, bytes: &[u8], mode: u32, sync: bool) -> Result
 }
 
 pub fn read_status(dir: &Path) -> Result<JobStatus> {
+    read_status_as(dir, unsafe { libc::geteuid() })
+}
+
+fn read_status_as(dir: &Path, euid: u32) -> Result<JobStatus> {
     let path = dir.join("status.json");
-    let text =
-        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let text = read_own_record(&path, euid)?;
     serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+}
+
+/// A job record that another user owns, which qex does not read.
+#[derive(Debug)]
+pub struct NotOwned(pub std::path::PathBuf);
+
+impl std::fmt::Display for NotOwned {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} is not owned by this user", self.0.display())
+    }
+}
+
+impl std::error::Error for NotOwned {}
+
+/// Checks the owner on the opened handle, so the answer is about the bytes read.
+fn read_own_record(path: &Path, euid: u32) -> Result<String> {
+    use std::os::unix::fs::MetadataExt;
+    let mut file =
+        std::fs::File::open(path).with_context(|| format!("reading {}", path.display()))?;
+    let meta = file
+        .metadata()
+        .with_context(|| format!("reading {}", path.display()))?;
+    if !meta.is_file() {
+        anyhow::bail!("{} is not a regular file", path.display());
+    }
+    if meta.uid() != euid {
+        return Err(NotOwned(path.to_path_buf()).into());
+    }
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut file, &mut text)
+        .with_context(|| format!("reading {}", path.display()))?;
+    Ok(text)
 }
 
 pub fn write_status(dir: &Path, status: &JobStatus) -> Result<()> {
@@ -866,9 +902,12 @@ pub fn read_all_from_disk() -> Vec<JobStatus> {
 }
 
 pub fn read_spec(dir: &Path) -> Result<JobSpec> {
+    read_spec_as(dir, unsafe { libc::geteuid() })
+}
+
+fn read_spec_as(dir: &Path, euid: u32) -> Result<JobSpec> {
     let path = dir.join("spec.json");
-    let text =
-        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let text = read_own_record(&path, euid)?;
     serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
 }
 
@@ -1039,6 +1078,34 @@ mod tests {
             .collect();
         assert!(leftovers.is_empty(), "atomic write left temp files behind");
 
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_job_record_is_read_only_when_the_user_owns_it() {
+        let dir =
+            crate::testutil::temp_dir().join(format!("qex-own-record-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let me = unsafe { libc::geteuid() };
+        let elsewhere = dir.join("elsewhere.json");
+        std::fs::write(&elsewhere, "{}").unwrap();
+        std::fs::write(dir.join("spec.json"), "{}").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, dir.join("status.json")).unwrap();
+
+        assert_eq!(read_own_record(&dir.join("spec.json"), me).unwrap(), "{}");
+        // Through a link, the owner of the file that is read decides.
+        assert_eq!(read_own_record(&dir.join("status.json"), me).unwrap(), "{}");
+        for (name, err) in [
+            ("spec.json", read_spec_as(&dir, me + 1).unwrap_err()),
+            ("status.json", read_status_as(&dir, me + 1).unwrap_err()),
+        ] {
+            assert!(err.is::<NotOwned>(), "{err:#}");
+            let text = format!("{err:#}");
+            assert!(text.contains(&format!(
+                "{} is not owned by this user",
+                dir.join(name).display()
+            )));
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 }

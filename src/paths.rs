@@ -3,6 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: ensure_dir gives its mode to the parents it makes; the pid file is made and kept 0600 (make_private).
 // Modified by the local-resource-coordinator fork, 2026-10-06: two tests wait out a lock that a forked child of a different test holds for a moment.
 // Modified by the local-resource-coordinator fork, 2026-10-06: the bodies of ensure_dir and make_private move to src/os/unix.rs; these forward (R3a of docs/fork/PORT_PLAN.md).
+// Modified by the local-resource-coordinator fork, 2026-11-02: state_dir checks the owner of the state directory and the directories above it, and makes it private (issue #88).
 //! This module gives the location of each file that qex uses.
 //!
 //! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
@@ -38,7 +39,18 @@ pub fn config_file() -> Result<PathBuf> {
 /// This directory holds the job records and the log files. These files must
 /// stay available after a restart of the machine.
 pub fn state_dir() -> Result<PathBuf> {
-    Ok(xdg("XDG_STATE_HOME", ".local/state")?.join("qex"))
+    let dir = xdg("XDG_STATE_HOME", ".local/state")?.join("qex");
+    // Keyed by path, since tests change XDG_STATE_HOME; a missing directory is
+    // checked again on every call, so one that another user makes later is refused.
+    static CHECKED: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+    let mut checked = CHECKED.lock().unwrap_or_else(|e| e.into_inner());
+    if checked.as_ref() != Some(&dir) {
+        let euid = unsafe { libc::geteuid() };
+        if crate::os::check_state_dir(&dir, euid)? {
+            *checked = Some(dir.clone());
+        }
+    }
+    Ok(dir)
 }
 
 /// `~/.local/state/qex/jobs`

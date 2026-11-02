@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: a clock step must not settle a config file that just changed (issue #17).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a comment no longer calls `7d` the default (issue #4).
+// Modified by the local-resource-coordinator fork, 2026-11-02: recovery skips a job record another user owns; a refused config reload says why; the sandbox link names this fork's page (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery counts a zombie supervisor as gone and keeps a final record written after its first read (issue #85).
 //! This module holds the coordinator.
 //!
@@ -619,7 +620,15 @@ pub fn reload_config_at(state: &mut State, read: ConfigFile, clocks: LookClocks)
         // here: an editor that empties a file before it writes it, and a shell
         // `>` that does the same, would turn a budget of 2 cores into the
         // default budget for as long as that window lasts. Keep the values.
-        ConfigFile::Text(..) | ConfigFile::Missing | ConfigFile::Unreadable(_) => {
+        ConfigFile::Unreadable(e) => {
+            let message = format!("qex cannot read the file: {e}");
+            log(&format!(
+                "{message}. The coordinator keeps the values that it had."
+            ));
+            state.config_error = Some(message);
+            return;
+        }
+        ConfigFile::Text(..) | ConfigFile::Missing => {
             // Say WHICH fault this is. The earlier text of `config_error`
             // names a line of a file that no longer holds that line, and a
             // reader who looks for it does not find it.
@@ -1249,7 +1258,7 @@ pub fn run() -> Result<()> {
                 std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Unsupported
             ) {
                 "\nA sandbox that refuses a Unix socket gives this fault. See \
-                 https://github.com/stephenc/qex/blob/main/docs/sandbox.md"
+                 https://github.com/kolla23/local-resource-coordinator/blob/main/docs/sandbox.md"
                     .to_string()
             } else if e.kind() == std::io::ErrorKind::AddrInUse {
                 // Something that is not a socket of this coordinator holds
@@ -1462,6 +1471,13 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
 
         let (spec, mut status) = match (job::read_spec(&path), job::read_status(&path)) {
             (Ok(s), Ok(st)) => (s, st),
+            (Err(e), _) | (_, Err(e)) if e.is::<job::NotOwned>() => {
+                log(&format!(
+                    "the job directory {} is skipped: not owned by this user",
+                    path.display()
+                ));
+                continue;
+            }
             // A directory without both files is incomplete. `qex clean` deletes
             // it. It must not stop the start of the coordinator.
             _ => continue,
