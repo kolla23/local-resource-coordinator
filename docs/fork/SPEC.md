@@ -608,9 +608,9 @@ Pass a private authenticated supervisor-channel reference to descendants. If a r
 
 ## 15. Persistence, IPC, startup, and recovery
 
-Use SQLite with a single coordinator writer, transactional schema migrations, durable launch-state commits, and a bounded append-only event sequence. Use WAL only on a supported local filesystem. Network-shared state directories are unsupported. Tables: `jobs`, `job_events`, `reservations`, `launch_tokens`, `supervisors`, `contexts`, `profiles`, `observations`, `idempotency_keys`, and `schema_migrations`. Foreign keys and monotonic transition validation are mandatory.
+Amended by [DECISION_PERSISTENCE.md](DECISION_PERSISTENCE.md): V1 keeps qex's atomic job files instead of a SQLite store; each write goes to a private temporary file that is renamed into place. Network-shared state directories are unsupported. Durable launch-state commits and monotonic transition validation remain mandatory.
 
-Supervisors write private per-job receipts/spool files atomically, with restrictive permissions and durable replacement where required. They never become concurrent SQLite writers. The coordinator reconciles receipts by job ID, token, boot identity, and supervisor identity. Schema migrations take an exclusive lock, make a recoverable backup, and never run implicitly from an older binary against a newer schema.
+Supervisors write private per-job receipts/spool files atomically, with restrictive permissions and durable replacement where required. They replace a job file only through that temporary-file-and-rename step, never by writing in place. The coordinator reconciles receipts by job ID, token, boot identity, and supervisor identity. An older binary never implicitly rewrites job files written in a newer format.
 
 IPC uses user-private Unix domain sockets on Linux/macOS and local-only ACL-restricted named pipes on Windows. No TCP listener in V1. Authenticate OS peer identity plus supervisor capabilities where applicable; do not trust a PID supplied in JSON. Use length-prefixed, versioned messages, a 1 MiB request limit, bounded stream frames, timeouts, and backpressure. Major protocol mismatch refuses mutating calls with upgrade guidance.
 
