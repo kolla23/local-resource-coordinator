@@ -11,6 +11,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-01: the e2e suite passes as root and in a container with a slow reaper: stop_coordinator waits for the reaper, the abort test blocks the write with a directory, the memory-hint test keeps out the ambient environment (issue #84).
 // Modified by the local-resource-coordinator fork, 2026-11-01: three tests plant job, follower and history files at 0644 and expect 0600 after qex opens them (issue #56); the follower refuses a symlink and leaves a hard-linked or foreign file wide.
 // Modified by the local-resource-coordinator fork, 2026-11-02: ten tests for a state directory, job record or config file that another user owns or can change, and for a refused state directory in info --no-start (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie supervisor under a subreaper; the recovery test no longer waits for the reaper (issue #85).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -667,7 +668,7 @@ impl Harness {
                 panic!("{}", self.blind_message(reason, &seen));
             }
         }
-        // qex counts a zombie supervisor as alive, and a slow reaper (issue #84) keeps one.
+        // A slow reaper keeps killed processes as zombies; wait until it collects them (PR #86).
         // A zombie child of this test waits for the test, so the wait leaves it out.
         let me = std::process::id() as i32;
         sent_to.retain(|&pid| Self::parent_in_proc(pid) != Some(me));
@@ -4461,11 +4462,10 @@ fn a_recovered_job_without_a_supervisor_does_not_stay_running() {
         libc::kill(supervisor, libc::SIGKILL);
     }
     let deadline = Instant::now() + Duration::from_secs(30);
-    // qex counts a zombie supervisor as alive (issue #84), so wait for the reaper too.
-    while !Harness::stopped(coordinator) || !Harness::reaped(supervisor) {
+    while !Harness::stopped(coordinator) || !Harness::stopped(supervisor) {
         assert!(
             Instant::now() < deadline,
-            "the coordinator and the supervisor did not stop, or the reaper did not collect it"
+            "the coordinator and the supervisor did not stop"
         );
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -4510,6 +4510,204 @@ fn a_recovered_job_without_a_supervisor_does_not_stay_running() {
         Some(121),
         "a wait for a failed job must return at once"
     );
+}
+
+/// A subreaper that never collects its children; `Drop` kills and collects it.
+#[cfg(target_os = "linux")]
+struct Holder(std::process::Child);
+
+#[cfg(target_os = "linux")]
+impl Drop for Holder {
+    fn drop(&mut self) {
+        self.0.kill().ok();
+        self.0.wait().ok();
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Harness {
+    /// Submits `job` under a `Holder`, which adopts the coordinator and its supervisors.
+    /// Returns the holder and the job id once the holder has become `sleep`.
+    fn held_submit(&self, job: &[&str]) -> (Holder, String) {
+        use std::os::unix::process::CommandExt;
+        let id_file = self.root.join("held.id");
+        let script =
+            r#"q="$0"; f="$1"; shift; "$q" submit --name held -- "$@" > "$f" && exec sleep 300"#;
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(script)
+            .arg(env!("CARGO_BIN_EXE_qex"))
+            .arg(&id_file)
+            .args(job)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        isolate(&mut cmd, &self.root, &self.peers_dir);
+        cmd.envs(self.extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut holder = Holder(cmd.spawn().expect("starting the holder"));
+        let pid = holder.0.id();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let id = loop {
+            let text = std::fs::read_to_string(&id_file).unwrap_or_default();
+            if let Ok(id) = text.trim().parse::<uuid::Uuid>() {
+                break id.to_string();
+            }
+            if let Some(status) = holder.0.try_wait().unwrap() {
+                panic!("the holder stopped with {status}; the id file held {text:?}");
+            }
+            assert!(Instant::now() < deadline, "no job id in 30 s: {text:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default() != "sleep\n"
+        {
+            if let Some(status) = holder.0.try_wait().unwrap() {
+                panic!("the holder stopped with {status} before it became sleep");
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the holder did not become sleep in 10 s"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        (holder, id)
+    }
+}
+
+/// A zombie supervisor must not keep a recovered job `running` (issue #85).
+/// Linux only: macOS has no subreaper.
+#[test]
+#[cfg(target_os = "linux")]
+fn a_zombie_supervisor_does_not_keep_a_recovered_job() {
+    let h = Harness::with_default_config("zombiesup");
+    let (holder, id) = h.held_submit(&["sleep", "60"]);
+    h.until("the job operates", Duration::from_secs(45), || {
+        h.state_of(&id) == "running" && h.status_json(&id)["supervisor_pid"].as_i64().is_some()
+    });
+    let job_pid = h.status_json(&id)["pid"].as_i64().unwrap() as i32;
+    let supervisor = h.status_json(&id)["supervisor_pid"].as_i64().unwrap() as i32;
+    let coordinator = h.coordinator_pid();
+    let held = holder.0.id() as i32;
+
+    unsafe { libc::kill(coordinator, libc::SIGKILL) };
+    h.until(
+        "the holder adopts the supervisor",
+        Duration::from_secs(30),
+        || {
+            Harness::state_in_proc(coordinator) == Some('Z')
+                && Harness::parent_in_proc(supervisor) == Some(held)
+        },
+    );
+    unsafe { libc::kill(supervisor, libc::SIGKILL) };
+    h.until(
+        "the supervisor is a zombie",
+        Duration::from_secs(30),
+        || Harness::state_in_proc(supervisor) == Some('Z'),
+    );
+    assert_eq!(Harness::parent_in_proc(supervisor), Some(held));
+    assert_eq!(
+        unsafe { libc::kill(supervisor, 0) },
+        0,
+        "kill(pid, 0) succeeds on a zombie"
+    );
+    assert!(
+        !Harness::stopped(job_pid),
+        "the job process must run when recovery finds it"
+    );
+
+    // The next command starts the next coordinator, and its recovery must give up the job.
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&id) == "failed"
+    });
+    let error = h.status_json(&id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("the supervisor of this job did not continue")
+            && !error.contains("stopped without a result"),
+        "the record must give the recovery cause: {error}"
+    );
+    h.until("the job process stops", Duration::from_secs(30), || {
+        Harness::stopped(job_pid)
+    });
+    let info = h.ok(&["info", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&info).unwrap();
+    assert_eq!(v["cpu_claimed"].as_u64(), Some(0));
+    assert_eq!(h.qex(&["wait", &id]).status.code(), Some(121));
+}
+
+/// A supervisor that dies as a zombie under a recovered coordinator must end the watch (#85).
+/// Linux only: macOS has no subreaper.
+#[test]
+#[cfg(target_os = "linux")]
+fn a_zombie_supervisor_ends_the_watch_of_a_recovered_job() {
+    let h = Harness::with_default_config("zombiewatch");
+    let (holder, id) = h.held_submit(&["sleep", "60"]);
+    h.until("the job operates", Duration::from_secs(45), || {
+        h.state_of(&id) == "running" && h.status_json(&id)["supervisor_pid"].as_i64().is_some()
+    });
+    let job_pid = h.status_json(&id)["pid"].as_i64().unwrap() as i32;
+    let supervisor = h.status_json(&id)["supervisor_pid"].as_i64().unwrap() as i32;
+    let coordinator = h.coordinator_pid();
+    let held = holder.0.id() as i32;
+
+    unsafe { libc::kill(coordinator, libc::SIGKILL) };
+    h.until(
+        "the holder adopts the supervisor",
+        Duration::from_secs(30),
+        || {
+            Harness::state_in_proc(coordinator) == Some('Z')
+                && Harness::parent_in_proc(supervisor) == Some(held)
+        },
+    );
+    // Recovery has run once the next coordinator answers; it must keep the job and watch.
+    let s = h.status_json(&id);
+    assert_eq!(
+        s["state"].as_str(),
+        Some("running"),
+        "recovery must keep the job: {s}"
+    );
+    assert_eq!(s["supervisor_pid"].as_i64(), Some(supervisor as i64));
+    assert!(
+        !Harness::stopped(supervisor),
+        "the supervisor must still run"
+    );
+    assert!(!Harness::stopped(job_pid), "the job process must still run");
+
+    unsafe { libc::kill(supervisor, libc::SIGKILL) };
+    h.until(
+        "the supervisor is a zombie",
+        Duration::from_secs(30),
+        || Harness::state_in_proc(supervisor) == Some('Z'),
+    );
+    assert_eq!(Harness::parent_in_proc(supervisor), Some(held));
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&id) == "failed"
+    });
+    let error = h.status_json(&id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("the supervisor stopped without a result"),
+        "the record must say that the supervisor stopped: {error}"
+    );
+    h.until("the job process stops", Duration::from_secs(30), || {
+        Harness::stopped(job_pid)
+    });
+    let info = h.ok(&["info", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&info).unwrap();
+    assert_eq!(v["cpu_claimed"].as_u64(), Some(0));
 }
 
 /// A record from an earlier start of the machine is dead, whatever its pids
