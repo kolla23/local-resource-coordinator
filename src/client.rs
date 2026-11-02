@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: daemon.log and spawn.lock are made and kept 0600.
 // Modified by the local-resource-coordinator fork, 2026-11-02: connect_existing_result reports a refused state directory; the sandbox link names this fork's page (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-02: a test that the probe file is not written through a symbolic link (issue #88).
 //! This module connects the CLI to the coordinator.
 //!
 //! If no coordinator operates, the CLI starts one. Many CLI processes can do
@@ -1677,6 +1678,29 @@ mod tests {
         let answer = classify_refusal(&dir, |_| Ok(()));
         std::fs::remove_dir_all(&dir).ok();
         assert!(answer.is_none(), "a socket that works is not a fault");
+    }
+
+    /// The probe file is not written through a symbolic link at its name (issue #88).
+    #[test]
+    fn a_probe_file_is_not_written_through_a_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(dir) = writable_dir("link") else {
+            return;
+        };
+        let target = dir.join("target");
+        std::fs::write(&target, b"ORIGINAL\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let probe = dir.join(format!("probe-{}.tmp", std::process::id()));
+        std::os::unix::fs::symlink(&target, probe).unwrap();
+
+        let answer = classify_refusal(&dir, |_| Ok(()));
+        let bytes = std::fs::read(&target).unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(bytes, b"ORIGINAL\n", "the target keeps its bytes");
+        assert_eq!(mode, 0o644, "the target keeps its mode");
+        assert!(answer.is_none(), "a link is not a refusal");
     }
 
     /// A fault that is not a refusal gives no message at all.
