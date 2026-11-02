@@ -3,6 +3,7 @@ title: qex security
 description: What qex writes to the disk, who can read it, and where the trust boundaries are.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the state directory, job records and the config file must be yours (issue #88). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: reports go to this repository's advisories (issue #100). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -164,5 +165,5 @@ that would run with no lock.
 ## Reporting a fault
 
 Write to the [security
-advisories](https://github.com/stephenc/qex/security/advisories/new) of the
-repository, and not to a public issue.
+advisories](https://github.com/kolla23/local-resource-coordinator/security/advisories/new)
+of the repository, and not to a public issue.

@@ -1,10 +1,11 @@
 # Security
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: reports go to this repository's advisories, and the security page is this repository's (issue #100). -->
 
 ## To report a fault
 
 Use the [security
-advisories](https://github.com/stephenc/qex/security/advisories/new) of this
-repository. Do not open a public issue.
+advisories](https://github.com/kolla23/local-resource-coordinator/security/advisories/new)
+of this repository. Do not open a public issue.
 
 ## The versions that get a correction
 
@@ -28,6 +29,6 @@ threat model is a colleague or an agent that does not know about your work, and
 it is not a person who wants to damage your work. Turn the method off with
 `[peers] enabled = false`.
 
-The [security page](https://stephenc.github.io/qex/security) gives the full
+The [security page](docs/security.md) gives the full
 detail, including the tests that qex makes on `/tmp/qex` and the way that qex
 refuses an option that the coordinator cannot obey.
