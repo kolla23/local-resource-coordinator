@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: usage.lock is made and kept 0600.
+// Modified by the local-resource-coordinator fork, 2026-11-02: usage.lock is opened with O_NOFOLLOW (issue #88).
 //! This module remembers what a job really used, and gives the claim for the
 //! next job of the same kind.
 //!
@@ -353,6 +354,8 @@ fn add(spec: &JobSpec, status: &JobStatus, kind: Measurement, bytes: u64) {
         .write(true)
         .truncate(false)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(&lock_path)
     else {
         return;

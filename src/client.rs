@@ -1,7 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: daemon.log and spawn.lock are made and kept 0600.
 // Modified by the local-resource-coordinator fork, 2026-11-02: connect_existing_result reports a refused state directory; the sandbox link names this fork's page (issue #88).
-// Modified by the local-resource-coordinator fork, 2026-11-02: a test that the probe file is not written through a symbolic link (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-02: daemon.log, spawn.lock and the probe file are opened with O_NOFOLLOW, with a test for the probe (issue #88).
 //! This module connects the CLI to the coordinator.
 //!
 //! If no coordinator operates, the CLI starts one. Many CLI processes can do
@@ -1147,7 +1147,20 @@ impl Refusal {
 fn classify_refusal(dir: &Path, bind: impl Fn(&Path) -> std::io::Result<()>) -> Option<Refusal> {
     let name = format!("probe-{}", std::process::id());
     let file = dir.join(format!("{name}.tmp"));
-    if let Err(e) = std::fs::write(&file, b"qex") {
+    let written = {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            // A link planted at this name fails the open: nothing is made or changed through it.
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&file)
+            .and_then(|mut f| f.write_all(b"qex"))
+    };
+    if let Err(e) = written {
         return a_refusal(e).map(Refusal::Directory);
     }
     std::fs::remove_file(&file).ok();
@@ -1279,6 +1292,8 @@ fn spawn_daemon() -> Result<()> {
         .create(true)
         .append(true)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(&log_path)
         .with_context(|| format!("opening the log file {}", log_path.display()))?;
     paths::make_private(&log);
@@ -1329,6 +1344,8 @@ impl SpawnLock {
             .write(true)
             .truncate(false)
             .mode(0o600)
+            // A link planted at this name fails the open: nothing is made or changed through it.
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&path)
             .with_context(|| format!("opening the lock file {}", path.display()))?;
         paths::make_private(&file);

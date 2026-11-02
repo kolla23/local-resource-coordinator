@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-01: append sets 0600 on a history file that exists (issue #56).
+// Modified by the local-resource-coordinator fork, 2026-11-02: append opens the history with O_NOFOLLOW (issue #88).
 //! This module keeps a short record of every job that qex accepted.
 //!
 //! The record of a job is the interface for an agent. When that record is gone,
@@ -70,6 +71,8 @@ fn append(entry: &Entry) {
         .create(true)
         .append(true)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(&file_path)
     {
         paths::make_private(&file);

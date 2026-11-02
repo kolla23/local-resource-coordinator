@@ -4,6 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: two tests wait out a lock that a forked child of a different test holds for a moment.
 // Modified by the local-resource-coordinator fork, 2026-10-06: the bodies of ensure_dir and make_private move to src/os/unix.rs; these forward (R3a of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-11-02: state_dir checks the owner of the state directory and the directories above it, and makes it private (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-02: the three opens of a pid file use O_NOFOLLOW (issue #88).
 //! This module gives the location of each file that qex uses.
 //!
 //! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
@@ -159,6 +160,8 @@ fn short_socket_dir(preferred: &std::path::Path) -> Result<PathBuf> {
             .write(true)
             .truncate(false)
             .mode(0o600)
+            // A link planted at this name fails the open: nothing is made or changed through it.
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&pid)
             .ok();
     }
@@ -315,6 +318,8 @@ fn claim_unused_dir(dir: &std::path::Path, limit: std::time::Duration) -> Option
         .write(true)
         .truncate(false)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(dir.join(PID_FILE))
     {
         Ok(file) => match try_lock(&file) {
@@ -520,6 +525,8 @@ pub fn hold_pid_file(socket: &std::path::Path, patience: std::time::Duration) ->
             .write(true)
             .truncate(false)
             .mode(0o600)
+            // A link planted at this name fails the open: nothing is made or changed through it.
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&path)
         {
             Ok(file) => file,
