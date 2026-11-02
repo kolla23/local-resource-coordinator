@@ -418,19 +418,28 @@ fn ensure_dir_as(path: &Path, mode: u32, euid: u32, ns: &Namespace, look: Look) 
     Ok(())
 }
 
-/// Checks the state directory and every directory and link on the way to it;
-/// a missing state directory passes, since `ensure_dir` checks each level it makes.
-pub fn check_owned_dir(path: &Path, euid: u32) -> Result<()> {
-    check_owned_dir_as(path, euid, &Namespace::detect(), &lstat_entry)
+/// Checks the state directory and every directory and link on the way to it, then
+/// makes it private; false when it is missing, since `ensure_dir` checks each level it makes.
+pub fn check_state_dir(path: &Path, euid: u32) -> Result<bool> {
+    check_state_dir_as(path, euid, &Namespace::detect(), &lstat_entry)
 }
 
+fn check_state_dir_as(path: &Path, euid: u32, ns: &Namespace, look: Look) -> Result<bool> {
+    // Only what the walk saw is opened: an entry made after its look is checked next time.
+    if Walk::new(path, euid, ns, look)?.run()?.is_none() {
+        return Ok(false);
+    }
+    narrow_owned_dir(path, euid)
+}
+
+#[cfg(test)]
 fn check_owned_dir_as(path: &Path, euid: u32, ns: &Namespace, look: Look) -> Result<()> {
-    Walk::new(path, euid, ns, look)?.run()
+    Walk::new(path, euid, ns, look)?.run().map(|_| ())
 }
 
 /// Checks the owner on the opened handle, so the answer is about the directory
 /// that is used; gives false when the directory is missing.
-pub fn narrow_owned_dir(path: &Path, euid: u32) -> Result<bool> {
+fn narrow_owned_dir(path: &Path, euid: u32) -> Result<bool> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     let dir = match std::fs::OpenOptions::new()
         .read(true)
@@ -572,9 +581,9 @@ impl<'a> Walk<'a> {
         })
     }
 
-    fn run(&mut self) -> Result<()> {
+    fn run(&mut self) -> Result<Option<PathBuf>> {
         let target = self.target.clone();
-        self.resolve(&target, true, self.mode_rule).map(|_| ())
+        self.resolve(&target, true, self.mode_rule)
     }
 
     /// Gives the real directory that `path` names, or None when a level is missing;
@@ -609,7 +618,10 @@ impl<'a> Walk<'a> {
             };
             match entry.kind {
                 Kind::Link => {
-                    self.check_owner(&next, entry.uid, false)?;
+                    // The user's or root's only: the overflow uid is trusted for directories.
+                    if entry.uid != self.euid && entry.uid != 0 {
+                        return Err(refusal(&self.target, &next, entry.uid, self.euid, self.ns));
+                    }
                     self.links += 1;
                     if self.links > LINK_LIMIT {
                         anyhow::bail!(
@@ -970,6 +982,56 @@ mod tests {
             text.contains(&format!(": / belongs to the user {x}")),
             "{text}"
         );
+        std::fs::remove_dir_all(&t).ok();
+    }
+
+    // Linux only, as above: the walk reaches the real /var/tmp.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_link_that_shows_the_overflow_uid_is_refused_at_a_fixed_path() {
+        let x = other();
+        let look = |path: &Path| {
+            let mut entry = lstat_entry(path)?;
+            if ["/", "/var", "/var/tmp"]
+                .iter()
+                .any(|p| path == Path::new(p))
+            {
+                entry.uid = x;
+            }
+            if path == Path::new("/var/tmp") {
+                entry.kind = Kind::Link;
+            }
+            Ok(entry)
+        };
+        let ns = Namespace { overflow: Some(x) };
+        let path = Path::new("/var/tmp/no-such-qex-dir/qex");
+        let text = error(check_owned_dir_as(path, me(), &ns, &look));
+        assert!(
+            text.contains(&format!("/var/tmp belongs to the user {x}")),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_state_directory_that_appears_after_the_walk_is_not_used() {
+        let t = fresh("appears");
+        std::fs::create_dir(t.join("target")).unwrap();
+        mode(&t.join("target"), 0o777);
+        symlink(t.join("target"), t.join("qex")).unwrap();
+        // The walk saw no `qex`: it appeared after the look, made by anyone.
+        let look = |path: &Path| {
+            if path == t.join("qex") {
+                return Err(std::io::ErrorKind::NotFound.into());
+            }
+            lstat_entry(path)
+        };
+        let found = check_state_dir_as(&t.join("qex"), me(), &NO_NS, &look).unwrap();
+        assert!(!found, "a directory the walk did not see is not used");
+        let left = std::fs::metadata(t.join("target"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(left & 0o777, 0o777, "nothing was done through the link");
         std::fs::remove_dir_all(&t).ok();
     }
 

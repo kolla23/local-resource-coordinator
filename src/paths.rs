@@ -46,8 +46,7 @@ pub fn state_dir() -> Result<PathBuf> {
     let mut checked = CHECKED.lock().unwrap_or_else(|e| e.into_inner());
     if checked.as_ref() != Some(&dir) {
         let euid = unsafe { libc::geteuid() };
-        crate::os::check_owned_dir(&dir, euid)?;
-        if crate::os::narrow_owned_dir(&dir, euid)? {
+        if crate::os::check_state_dir(&dir, euid)? {
             *checked = Some(dir.clone());
         }
     }
