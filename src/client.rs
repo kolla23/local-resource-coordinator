@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: daemon.log and spawn.lock are made and kept 0600.
+// Modified by the local-resource-coordinator fork, 2026-11-02: connect_existing_result reports a refused state directory (issue #88).
 //! This module connects the CLI to the coordinator.
 //!
 //! If no coordinator operates, the CLI starts one. Many CLI processes can do
@@ -557,9 +558,8 @@ impl Client {
     /// print `no coordinator operates`: it reports the limit instead, and the
     /// exit code says that qex stopped waiting.
     pub fn connect_existing_result() -> Result<Option<Self>> {
-        let Ok(socket) = paths::socket_path() else {
-            return Ok(None);
-        };
+        // A refused state directory is a fault to report, not an absent coordinator.
+        let socket = paths::socket_path()?;
         match try_connect(&socket)? {
             Some(stream) => Ok(Some(Client::with_stream(stream)?)),
             None => Ok(None),

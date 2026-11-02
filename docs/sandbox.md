@@ -2,6 +2,7 @@
 title: qex inside a sandbox
 description: What qex needs from a sandbox, how to test it, and what to change when an agent reports that qex cannot start.
 ---
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: the state directory of a sandbox goes under /tmp, since qex refuses one below a folder that shows an unmapped owner (issue #88). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -78,22 +79,28 @@ one time.
 ### 2. Give the sandbox the state directory and the socket
 
 With `bwrap`, the state directory must be a real, shared, writable mount, and it
-must be the same one for every command:
+must be the same one for every command. Use a fixed folder under `/tmp`, and
+give every command, inside the sandbox and outside it, the same
+`XDG_STATE_HOME`:
 
 ```sh
+mkdir -p "/tmp/qex-state-$USER"
 bwrap \
   --bind / / \
   --dev /dev \
   --proc /proc \
-  --bind "$HOME/.local/state/qex" "$HOME/.local/state/qex" \
-  --setenv XDG_STATE_HOME "$HOME/.local/state" \
+  --bind "/tmp/qex-state-$USER" "/tmp/qex-state-$USER" \
+  --setenv XDG_STATE_HOME "/tmp/qex-state-$USER" \
   -- your-agent
 ```
 
 The important part is that the directory is **bound**, and not a fresh `tmpfs`
-for each command. A `--tmpfs /tmp` or a private state directory gives each
-command its own queue, and the queue is then useless: no command finds the jobs
-of any other.
+for each command. A `--tmpfs /tmp` without that bind, or a private state
+directory, gives each command its own queue, and the queue is then useless: no
+command finds the jobs of any other.
+
+Many systems empty `/tmp` at a restart, so the queue and the records of past
+jobs do not survive a restart of the machine.
 
 If the sandbox filters system calls, `socket`, `bind`, `connect` and `listen`
 for `AF_UNIX` must be allowed. qex needs no network socket, and it opens none.
@@ -104,13 +111,14 @@ qex follows the XDG variables, so you can move the whole queue into a directory
 that the sandbox shares:
 
 ```sh
-export XDG_STATE_HOME=/workspace/.qex-state
+export XDG_STATE_HOME="/tmp/qex-state-$USER"
 export XDG_CONFIG_HOME=/workspace/.qex-config
 ```
 
-Give the **same** values to every command, and to the agent itself. A directory
-inside the workspace is frequently shared already, because the agent writes
-files there.
+Give the **same** values to every command, and to the agent itself. The state
+goes under `/tmp` because inside a user namespace a folder that root owns on the
+host, such as `/home` or `/workspace`, shows as an unmapped user, and qex refuses
+a state directory below it.
 
 This corrects the state directory only. It does **not** help when the sandbox
 refuses the socket itself; the message names that case exactly.

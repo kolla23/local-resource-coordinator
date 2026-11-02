@@ -2677,6 +2677,20 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// The owner check is on the opened file, so a link to the user's own file works.
+    #[test]
+    fn a_link_to_a_config_file_the_user_owns_is_read() {
+        let dir = a_config_dir("link");
+        std::fs::write(dir.join("repo.toml"), "[budget]\ncpu = \"2\"\n").unwrap();
+        std::os::unix::fs::symlink(dir.join("repo.toml"), dir.join("qex.toml")).unwrap();
+        let read = read_config_at(&dir.join("qex.toml"), || {});
+        assert!(
+            matches!(read, ConfigFile::Text(..)),
+            "the link must read as text"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// The check above must not make every file young: a file that nothing
     /// touched keeps its own age, or no change would ever settle.
     #[test]

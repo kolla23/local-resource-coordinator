@@ -1080,4 +1080,32 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn a_job_record_is_read_only_when_the_user_owns_it() {
+        let dir =
+            crate::testutil::temp_dir().join(format!("qex-own-record-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let me = unsafe { libc::geteuid() };
+        let elsewhere = dir.join("elsewhere.json");
+        std::fs::write(&elsewhere, "{}").unwrap();
+        std::fs::write(dir.join("spec.json"), "{}").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, dir.join("status.json")).unwrap();
+
+        assert_eq!(read_own_record(&dir.join("spec.json"), me).unwrap(), "{}");
+        // Through a link, the owner of the file that is read decides.
+        assert_eq!(read_own_record(&dir.join("status.json"), me).unwrap(), "{}");
+        for (name, err) in [
+            ("spec.json", read_spec_as(&dir, me + 1).unwrap_err()),
+            ("status.json", read_status_as(&dir, me + 1).unwrap_err()),
+        ] {
+            assert!(err.is::<NotOwned>(), "{err:#}");
+            let text = format!("{err:#}");
+            assert!(text.contains(&format!(
+                "{} is not owned by this user",
+                dir.join(name).display()
+            )));
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

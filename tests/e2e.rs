@@ -20907,3 +20907,20 @@ fn a_config_reload_names_why_it_was_refused() {
         "{text}"
     );
 }
+
+/// A refused state directory is not an absent coordinator.
+#[test]
+fn a_question_about_the_coordinator_names_a_refused_state_directory() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Harness::with_default_config("ownask");
+    let state = h.root.join("state");
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let out = h.qex(&["info", "--no-start"]);
+    assert_refused(&out, &state);
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(!said.contains("no coordinator operates"), "{said}");
+    // `qex version` still gives the version.
+    assert!(h.ok(&["version"]).contains("coordinator: none operates"));
+    // The harness asks `info --no-start` when it cannot see the processes.
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+}

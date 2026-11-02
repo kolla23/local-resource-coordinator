@@ -585,6 +585,7 @@ impl<'a> Walk<'a> {
         let root = (self.look)(&at).context("reading /")?;
         self.check_dir(&at, root, false, mode_rule)?;
         let parts: Vec<Component> = path.components().collect();
+        let mut final_seen = false;
         for (i, part) in parts.iter().enumerate() {
             let name = match part {
                 Component::Normal(name) => name,
@@ -635,6 +636,12 @@ impl<'a> Walk<'a> {
                     next.display()
                 ),
             }
+            final_seen |= final_part;
+        }
+        // A path that ends at `/` or in `..` names a directory no step checked as the last.
+        if last && !final_seen {
+            let entry = (self.look)(&at).with_context(|| format!("reading {}", at.display()))?;
+            self.check_dir(&at, entry, true, mode_rule)?;
         }
         Ok(Some(at))
     }
@@ -731,5 +738,311 @@ pub fn terminal_size() -> Option<(usize, usize)> {
         Some((size.ws_row as usize, cols))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    const NO_NS: Namespace = Namespace { overflow: None };
+
+    fn me() -> u32 {
+        unsafe { libc::geteuid() }
+    }
+
+    /// A uid that is neither the test's user nor root.
+    fn other() -> u32 {
+        me() + 1
+    }
+
+    /// A new path right under /tmp, in its real form (macOS reaches /tmp through a link).
+    fn in_tmp(name: &str) -> PathBuf {
+        std::fs::canonicalize(crate::testutil::temp_dir())
+            .unwrap()
+            .join(format!(
+                "qex-own-{name}-{}-{}",
+                std::process::id(),
+                uuid::Uuid::new_v4()
+            ))
+    }
+
+    fn fresh(name: &str) -> PathBuf {
+        let dir = in_tmp(name);
+        std::fs::create_dir(&dir).unwrap();
+        dir
+    }
+
+    fn mode(path: &Path, mode: u32) {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    /// Root owns what it makes, and root's directories pass; give them to a stranger.
+    fn make_foreign(path: &Path) {
+        if me() == 0 {
+            std::os::unix::fs::lchown(path, Some(4242), Some(4242)).unwrap();
+        }
+    }
+
+    fn check(path: &Path, euid: u32) -> Result<()> {
+        check_owned_dir_as(path, euid, &NO_NS, &lstat_entry)
+    }
+
+    fn error(result: Result<()>) -> String {
+        format!("{:#}", result.expect_err("the check must refuse"))
+    }
+
+    /// `lstat_entry`, with the owner of the named paths replaced by `uid`.
+    fn owned_by(paths: Vec<PathBuf>, uid: u32) -> impl Fn(&Path) -> std::io::Result<Entry> {
+        move |path| {
+            let mut entry = lstat_entry(path)?;
+            if paths.iter().any(|p| p == path) {
+                entry.uid = uid;
+            }
+            Ok(entry)
+        }
+    }
+
+    #[test]
+    fn a_state_directory_is_checked_against_its_owner() {
+        let t = fresh("owner");
+        let state = t.join("qex");
+        // Missing: it passes for its parent's owner, and ensure_dir checks it.
+        check(&state, me()).unwrap();
+        make_foreign(&t);
+        let euid = if me() == 0 { 0 } else { other() };
+        assert!(error(check(&state, euid)).contains(&format!("{} belongs", t.display())));
+        std::fs::remove_dir_all(&t).ok();
+
+        let t = fresh("owner2");
+        let state = t.join("qex");
+        std::fs::create_dir(&state).unwrap();
+        check(&state, me()).unwrap();
+        let text = error(check(&state, other()));
+        assert!(
+            text.contains(&format!("belongs to the user {}", me())),
+            "{text}"
+        );
+        assert!(text.contains("XDG_STATE_HOME"), "{text}");
+        // Root's directories pass above the state directory, never as it.
+        if me() != 0 {
+            assert!(error(check(Path::new("/"), me())).contains(": / belongs to the user 0"));
+        }
+
+        // Behind the user's own links, at the state directory and above it.
+        symlink(&state, t.join("link")).unwrap();
+        check(&t.join("link"), me()).unwrap();
+        symlink(&t, t.join("up")).unwrap();
+        check(&t.join("up/qex"), me()).unwrap();
+        std::fs::remove_dir_all(&t).ok();
+    }
+
+    #[test]
+    fn a_directory_above_the_state_directory_must_not_be_open_to_every_user() {
+        let t = fresh("open");
+        let open = t.join("open");
+        std::fs::create_dir_all(open.join("qex")).unwrap();
+        mode(&open, 0o777);
+        assert!(error(check(&open.join("qex"), me())).contains("no sticky bit"));
+        mode(&open, 0o1777);
+        check(&open.join("qex"), me()).unwrap();
+        mode(&open, 0o775);
+        check(&open.join("qex"), me()).unwrap();
+        // The state directory's own mode is narrowed by its caller, not refused here.
+        mode(&open, 0o755);
+        mode(&open.join("qex"), 0o777);
+        check(&open.join("qex"), me()).unwrap();
+        std::fs::remove_dir_all(&t).ok();
+    }
+
+    #[test]
+    fn every_directory_on_the_way_to_a_link_target_is_checked() {
+        let t = fresh("hop");
+        std::fs::create_dir_all(t.join("final")).unwrap();
+        std::fs::create_dir(t.join("open")).unwrap();
+        symlink(t.join("final"), t.join("open/hop")).unwrap();
+        symlink(t.join("open/hop"), t.join("qex")).unwrap();
+        mode(&t.join("open"), 0o777);
+        let text = error(check(&t.join("qex"), me()));
+        assert!(
+            text.contains(&format!("to {},", t.join("open").display())),
+            "{text}"
+        );
+        if me() == 0 {
+            mode(&t.join("open"), 0o755);
+            make_foreign(&t.join("open"));
+            let text = error(check(&t.join("qex"), me()));
+            assert!(text.contains("open belongs to the user 4242"), "{text}");
+        }
+        std::fs::remove_dir_all(&t).ok();
+    }
+
+    #[test]
+    fn a_relative_state_directory_is_checked_from_the_current_directory() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let look = |path: &Path| {
+            seen.borrow_mut().push(path.to_path_buf());
+            lstat_entry(path)
+        };
+        let _ = check_owned_dir_as(Path::new("no-such-dir/qex"), me(), &NO_NS, &look);
+        let cwd = std::env::current_dir().unwrap();
+        let first = cwd.components().nth(1).unwrap();
+        let seen = seen.into_inner();
+        assert!(seen.contains(&Path::new("/").join(first)), "{seen:?}");
+        assert!(!seen.contains(&PathBuf::from("/no-such-dir")), "{seen:?}");
+    }
+
+    #[test]
+    fn more_than_forty_links_are_refused() {
+        let t = fresh("links");
+        std::fs::create_dir(t.join("real")).unwrap();
+        symlink("real", t.join("l40")).unwrap();
+        for i in (0..40).rev() {
+            symlink(format!("l{}", i + 1), t.join(format!("l{i}"))).unwrap();
+        }
+        check(&t.join("l1"), me()).unwrap();
+        assert!(error(check(&t.join("l0"), me())).contains("more than 40 links"));
+        std::fs::remove_dir_all(&t).ok();
+    }
+
+    #[test]
+    fn the_overflow_uid_is_trusted_only_at_fixed_paths_in_a_user_namespace() {
+        let t = fresh("overflow");
+        let sticky = t.join("sticky");
+        std::fs::create_dir_all(sticky.join("qex")).unwrap();
+        mode(&sticky, 0o1777);
+        let x = other();
+        let ns = Namespace { overflow: Some(x) };
+        let look = owned_by(vec![sticky.clone()], x);
+        let text = error(check_owned_dir_as(&sticky.join("qex"), me(), &ns, &look));
+        assert!(
+            text.contains(&format!("sticky belongs to the user {x}")),
+            "{text}"
+        );
+        assert!(text.contains("docs/sandbox.md"), "{text}");
+        let text = error(check_owned_dir_as(&sticky.join("qex"), me(), &NO_NS, &look));
+        assert!(text.contains("sticky belongs"), "{text}");
+        assert!(!text.contains("docs/sandbox.md"), "{text}");
+
+        // Run as the overflow uid, qex can own nothing: refused before any path.
+        let text = error(check_owned_dir_as(
+            &sticky.join("qex"),
+            x,
+            &ns,
+            &lstat_entry,
+        ));
+        assert!(text.contains("does not map"), "{text}");
+        let text = error(check_owned_dir_as(
+            &sticky.join("qex"),
+            x,
+            &NO_NS,
+            &lstat_entry,
+        ));
+        assert!(text.contains(&format!("{}", t.display())), "{text}");
+        let text = error(ensure_dir_as(
+            &t.join("new/run"),
+            0o700,
+            x,
+            &ns,
+            &lstat_entry,
+        ));
+        assert!(text.contains("does not map"), "{text}");
+        assert!(!t.join("new").exists());
+        std::fs::remove_dir_all(&t).ok();
+    }
+
+    // Linux only: macOS has no user namespaces, and its /tmp is a link, which a
+    // faked owner would turn into a foreign link.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn root_directories_that_show_the_overflow_uid_pass_in_a_user_namespace() {
+        let t = fresh("overflow-root");
+        let x = other();
+        let look = owned_by(vec![PathBuf::from("/"), PathBuf::from("/tmp")], x);
+        let ns = Namespace { overflow: Some(x) };
+        check_owned_dir_as(&t.join("qex"), me(), &ns, &look).unwrap();
+        let text = error(check_owned_dir_as(&t.join("qex"), me(), &NO_NS, &look));
+        assert!(
+            text.contains(&format!(": / belongs to the user {x}")),
+            "{text}"
+        );
+        std::fs::remove_dir_all(&t).ok();
+    }
+
+    #[test]
+    fn ensure_dir_refuses_a_level_another_user_owns() {
+        let t = fresh("ensure");
+        mode(&t, 0o755);
+        let text = error(ensure_dir_as(&t, 0o700, other(), &NO_NS, &lstat_entry));
+        assert!(text.contains("belongs to the user"), "{text}");
+        let left = std::fs::metadata(&t).unwrap().permissions().mode();
+        assert_eq!(left & 0o7777, 0o755, "a refused directory keeps its mode");
+
+        // A missing level that another user made first: a directory, then a link.
+        make_foreign(&t);
+        let text = error(ensure_dir_as(
+            &t.join("b/c"),
+            0o700,
+            other(),
+            &NO_NS,
+            &lstat_entry,
+        ));
+        assert!(text.contains(&format!("{} belongs", t.display())), "{text}");
+        assert!(!t.join("b").exists());
+        let elsewhere = fresh("ensure-target");
+        let link = in_tmp("ensure-link");
+        symlink(&elsewhere, &link).unwrap();
+        make_foreign(&link);
+        let text = error(ensure_dir_as(
+            &link.join("b/c"),
+            0o700,
+            other(),
+            &NO_NS,
+            &lstat_entry,
+        ));
+        assert!(
+            text.contains(&format!("{} belongs", link.display())),
+            "{text}"
+        );
+        assert!(!elsewhere.join("b").exists());
+        for path in [&t, &elsewhere, &link] {
+            std::fs::remove_dir_all(path)
+                .or_else(|_| std::fs::remove_file(path))
+                .ok();
+        }
+    }
+
+    #[test]
+    fn a_level_made_by_another_process_first_is_checked() {
+        let made = fresh("eexist");
+        // The first look misses the level, as when it appears just before the mkdir.
+        let missed = std::cell::Cell::new(false);
+        let look = |path: &Path| {
+            if path == made && !missed.replace(true) {
+                return Err(std::io::ErrorKind::NotFound.into());
+            }
+            lstat_entry(path)
+        };
+        ensure_dir_as(&made, 0o700, me(), &NO_NS, &look).unwrap();
+        assert!(missed.get(), "the level was missed once");
+
+        let link = in_tmp("eexist-link");
+        symlink(&made, &link).unwrap();
+        make_foreign(&link);
+        let missed = std::cell::Cell::new(false);
+        let look = |path: &Path| {
+            if path == link && !missed.replace(true) {
+                return Err(std::io::ErrorKind::NotFound.into());
+            }
+            owned_by(vec![made.clone()], other())(path)
+        };
+        let text = error(ensure_dir_as(&link, 0o700, other(), &NO_NS, &look));
+        assert!(
+            text.contains(&format!("{} belongs", link.display())),
+            "{text}"
+        );
+        std::fs::remove_file(&link).ok();
+        std::fs::remove_dir_all(&made).ok();
     }
 }
