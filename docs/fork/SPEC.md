@@ -745,7 +745,7 @@ Include shell quoting, Unicode/space paths, case-sensitive paths, Windows batch 
 
 ### 20.3 Fault and security testing
 
-Inject crashes before/after each durable launch transition, after OS spawn but before acknowledgement, during exit receipt persistence, and during migration. Test reboot reconciliation, stale epoch messages, malformed IPC, forged receipts, endpoint ACL failures, path replacement, environment secrecy, log escapes, quota exhaustion, and corrupted database handling. Verify no unrelated sentinel process is terminated.
+Inject crashes before/after each durable launch transition, after OS spawn but before acknowledgement, during exit receipt persistence, and during a change to the job state file format. Test reboot reconciliation, stale epoch messages, malformed IPC, forged receipts, endpoint ACL failures, path replacement, environment secrecy, log escapes, quota exhaustion, and corrupted database handling. Verify no unrelated sentinel process is terminated.
 
 ### 20.4 Platform and real-workload matrix
 
@@ -892,7 +892,7 @@ Ship versioned standalone binaries with checksums, SBOMs, build provenance, and 
 
 No root install is required for basic operation. Daemon autostart is per-user and on-demand. Optional persistent user-service registration (systemd user unit, launch agent, Windows user-session startup mechanism) is explicit and reversible. Never register a SYSTEM service for ordinary use or silently enable cgroup delegation.
 
-Use semantic versioning for CLI/config guarantees and separately version the IPC/database schema. Upgrades drain or reconnect supervised jobs through a documented compatible path; incompatible upgrades require a drain. Never replace a running supervisor binary in place. Rollback must respect schema compatibility and use a pre-migration backup only with an explicit operator procedure. Uninstall stops admission and requires a deliberate choice about running jobs and retained history; it never deletes source repositories.
+Use semantic versioning for CLI/config guarantees and separately version the IPC protocol and the job state file format. Upgrades drain or reconnect supervised jobs through a documented compatible path; incompatible upgrades require a drain. Never replace a running supervisor binary in place. Rollback must respect schema compatibility and use a pre-migration backup only with an explicit operator procedure. Uninstall stops admission and requires a deliberate choice about running jobs and retained history; it never deletes source repositories.
 
 ## 24. Roadmap and phase gates
 
