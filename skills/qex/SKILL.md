@@ -2,6 +2,7 @@
 name: qex
 description: Run a long local task (a build, a test suite, a training run, a data job) through the qex queue instead of a background command and a polling loop. Use this when a command takes minutes or more, when the machine is shared with other agents or people, when you must wait for work that you started earlier, or when you need the exit code, the output or the measured memory of a task that has already stopped.
 ---
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88). -->
 
 # qex — run long tasks and wait for them correctly
 
@@ -23,7 +24,7 @@ Unix socket that qex needs. qex says so and names the directory.
 
 You cannot correct that yourself: the permissions belong to the person who
 starts you. Give them
-[the sandbox page](https://github.com/stephenc/qex/blob/main/docs/sandbox.md),
+[the sandbox page](https://github.com/kolla23/local-resource-coordinator/blob/main/docs/sandbox.md),
 and stop.
 
 ## The rule

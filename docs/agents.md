@@ -2,6 +2,7 @@
 title: qex for agents
 description: The one page that an agent needs, and the property that makes qex safe to interrupt.
 ---
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -25,7 +26,7 @@ Unix socket that qex needs. qex says so and names the directory.
 
 You cannot correct that yourself: the permissions belong to the person who
 starts you. Give them
-[the sandbox page](https://github.com/stephenc/qex/blob/main/docs/sandbox.md),
+[the sandbox page](https://github.com/kolla23/local-resource-coordinator/blob/main/docs/sandbox.md),
 and stop.
 
 ## The rule
