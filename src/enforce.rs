@@ -205,6 +205,8 @@ fn write_mark(path: &Path) {
         .write(true)
         .truncate(true)
         .mode(0o600)
+        // A link planted at this name fails the open: nothing is made or changed through it.
+        .custom_flags(libc::O_NOFOLLOW)
         .open(path)
     {
         crate::paths::make_private(&file);
