@@ -190,7 +190,7 @@ pub fn job_pid_alive(pid: i32) -> bool {
     unsafe { libc::getpgid(pid) == pid }
 }
 
-/// Tests if a process of THIS USER is alive.
+/// Tests if a process of THIS USER is alive; a zombie is not.
 ///
 /// Unlike `pid_alive`, a refusal of permission does not count as alive. The
 /// supervisor of a job always runs as the user of the coordinator, so a pid
@@ -200,7 +200,40 @@ pub fn own_pid_alive(pid: i32) -> bool {
     if pid <= 0 {
         return false;
     }
-    unsafe { libc::kill(pid, 0) == 0 }
+    unsafe { libc::kill(pid, 0) == 0 && !process_is_zombie(pid) }
+}
+
+/// Says yes when the process ended and its parent has not collected it (state Z or X).
+/// No evidence (no /proc entry, macOS refuses) gives false, so callers keep today's answer.
+pub fn process_is_zombie(pid: i32) -> bool {
+    if pid <= 0 {
+        return false;
+    }
+    #[cfg(target_os = "linux")]
+    if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        if let Some((_, rest)) = stat.rsplit_once(')') {
+            return matches!(rest.split_whitespace().next(), Some("Z") | Some("X"));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        // XNU looks up a zombie for this flavor only when `arg` is nonzero.
+        let rc = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                1,
+                info.as_mut_ptr().cast(),
+                size,
+            )
+        };
+        if rc == size {
+            return unsafe { info.assume_init() }.pbi_status == libc::SZOMB;
+        }
+    }
+    false
 }
 
 /// Tests if the process that holds `pid` NOW is the process that a record

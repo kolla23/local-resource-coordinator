@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: R2a of docs/fork/PORT_PLAN.md, the process identity in src/os/unix.rs.
 // Modified by the local-resource-coordinator fork, 2026-10-06: R2b of docs/fork/PORT_PLAN.md, the process inspection in src/os/.
 // Modified by the local-resource-coordinator fork, 2026-10-06: R4 of docs/fork/PORT_PLAN.md, stdin_is_terminal and terminal_size in src/os/unix.rs.
+// Modified by the local-resource-coordinator fork, 2026-11-02: process_is_zombie forwards to src/os/; a zombie is not an own live process (issue #85).
 //! This module reads the machine capacity and the current machine load.
 //! It also holds the process functions that qex needs.
 //!
@@ -54,6 +55,10 @@ pub fn job_pid_alive(pid: i32) -> bool {
 
 pub fn own_pid_alive(pid: i32) -> bool {
     crate::os::own_pid_alive(pid)
+}
+
+pub fn process_is_zombie(pid: i32) -> bool {
+    crate::os::process_is_zombie(pid)
 }
 
 pub fn same_process_start(pid: i32, recorded: Option<u64>) -> bool {
@@ -249,6 +254,54 @@ mod tests {
             assert!(pid_alive(1));
             assert!(!own_pid_alive(1));
         }
+    }
+
+    /// A child that ended and is not collected yet is a zombie, and no live supervisor (#85).
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_zombie_is_not_an_own_live_process() {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id() as i32;
+        let state = || {
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+            stat.rsplit_once(')').unwrap().1.trim_start().chars().next()
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while state() != Some('Z') && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let (zombie, signalled, alive) =
+            (state(), unsafe { libc::kill(pid, 0) }, own_pid_alive(pid));
+        child.wait().unwrap();
+        assert_eq!(zombie, Some('Z'), "the child must be a zombie");
+        assert_eq!(signalled, 0, "kill(pid, 0) succeeds on a zombie");
+        assert!(!alive, "a zombie is not alive");
+    }
+
+    /// `process_is_zombie` sees an uncollected child, and not a running one (#85).
+    #[test]
+    fn process_is_zombie_sees_an_ended_child_only() {
+        let mut running = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = running.id() as i32;
+        let (zombie, alive) = (process_is_zombie(pid), own_pid_alive(pid));
+        running.kill().unwrap();
+        running.wait().unwrap();
+        assert!(!zombie && alive, "a running process is no zombie");
+
+        let mut ended = std::process::Command::new("true").spawn().unwrap();
+        let pid = ended.id() as i32;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !process_is_zombie(pid) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let (zombie, alive) = (process_is_zombie(pid), own_pid_alive(pid));
+        ended.wait().unwrap();
+        assert!(zombie, "an ended child that is not collected is a zombie");
+        assert!(!alive, "a zombie is not alive");
+        assert!(!process_is_zombie(-1) && !process_is_zombie(0));
     }
 }
 

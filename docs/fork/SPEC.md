@@ -608,9 +608,9 @@ Pass a private authenticated supervisor-channel reference to descendants. If a r
 
 ## 15. Persistence, IPC, startup, and recovery
 
-Use SQLite with a single coordinator writer, transactional schema migrations, durable launch-state commits, and a bounded append-only event sequence. Use WAL only on a supported local filesystem. Network-shared state directories are unsupported. Tables: `jobs`, `job_events`, `reservations`, `launch_tokens`, `supervisors`, `contexts`, `profiles`, `observations`, `idempotency_keys`, and `schema_migrations`. Foreign keys and monotonic transition validation are mandatory.
+Amended by [DECISION_PERSISTENCE.md](DECISION_PERSISTENCE.md): V1 keeps qex's atomic job state files instead of a SQLite store. Events keep a bounded, append-only sequence (§11.2, §27.2). Network-shared state directories are unsupported. Durable launch-state commits and monotonic transition validation remain mandatory.
 
-Supervisors write private per-job receipts/spool files atomically, with restrictive permissions and durable replacement where required. They never become concurrent SQLite writers. The coordinator reconciles receipts by job ID, token, boot identity, and supervisor identity. Schema migrations take an exclusive lock, make a recoverable backup, and never run implicitly from an older binary against a newer schema.
+Supervisors write private per-job receipts/spool files atomically, with restrictive permissions and durable replacement where required. A job's state file is written only by the coordinator or by that job's own supervisor, with no other writer, always to a private temporary file that is renamed into place; a writer re-reads the file before replacing a final result. The coordinator reconciles receipts by job ID, token, boot identity, and supervisor identity. A change to the format of the job state files takes an exclusive lock, makes a recoverable backup, and never runs implicitly from an older binary against files in a newer format.
 
 IPC uses user-private Unix domain sockets on Linux/macOS and local-only ACL-restricted named pipes on Windows. No TCP listener in V1. Authenticate OS peer identity plus supervisor capabilities where applicable; do not trust a PID supplied in JSON. Use length-prefixed, versioned messages, a 1 MiB request limit, bounded stream frames, timeouts, and backpressure. Major protocol mismatch refuses mutating calls with upgrade guidance.
 
@@ -710,7 +710,7 @@ A successful shell exit is evidence about that shell command, not proof that eve
 | Daemon dies during launch handshake | Reconcile token/receipt; ambiguous work becomes LOST, never replayed. |
 | Supervisor disappears | Verify and clean up only owned remnants; preserve unresolved accounting. |
 | PID recycled | Reject stale identity; do not signal replacement. |
-| Disk full/database corruption | Stop admission; protect running supervision; preserve files for repair; no reset-on-error. |
+| Disk full/job state file corruption | Stop admission; protect running supervision; preserve files for repair; no reset-on-error. |
 | Output flood/slow reader | Bounded spool, continued drain, explicit truncation. |
 | Git unavailable/metadata races | Mark unknown/unstable context; execute unless an explicit precondition fails. |
 | cwd deleted or executable replaced | Fail nonexistent cwd; revalidate executable identity at launch and update context/estimate when changed. |
@@ -745,7 +745,7 @@ Include shell quoting, Unicode/space paths, case-sensitive paths, Windows batch 
 
 ### 20.3 Fault and security testing
 
-Inject crashes before/after each durable launch transition, after OS spawn but before acknowledgement, during exit receipt persistence, and during migration. Test reboot reconciliation, stale epoch messages, malformed IPC, forged receipts, endpoint ACL failures, path replacement, environment secrecy, log escapes, quota exhaustion, and corrupted database handling. Verify no unrelated sentinel process is terminated.
+Inject crashes before/after each durable launch transition, after OS spawn but before acknowledgement, during exit receipt persistence, and during a change to the job state file format. Test reboot reconciliation, stale epoch messages, malformed IPC, forged receipts, endpoint ACL failures, path replacement, environment secrecy, log escapes, quota exhaustion, and corrupted job state file handling. Verify no unrelated sentinel process is terminated.
 
 ### 20.4 Platform and real-workload matrix
 
@@ -892,7 +892,7 @@ Ship versioned standalone binaries with checksums, SBOMs, build provenance, and 
 
 No root install is required for basic operation. Daemon autostart is per-user and on-demand. Optional persistent user-service registration (systemd user unit, launch agent, Windows user-session startup mechanism) is explicit and reversible. Never register a SYSTEM service for ordinary use or silently enable cgroup delegation.
 
-Use semantic versioning for CLI/config guarantees and separately version the IPC/database schema. Upgrades drain or reconnect supervised jobs through a documented compatible path; incompatible upgrades require a drain. Never replace a running supervisor binary in place. Rollback must respect schema compatibility and use a pre-migration backup only with an explicit operator procedure. Uninstall stops admission and requires a deliberate choice about running jobs and retained history; it never deletes source repositories.
+Use semantic versioning for CLI/config guarantees and separately version the IPC protocol and the job state file format. Upgrades drain or reconnect supervised jobs through a documented compatible path; incompatible upgrades require a drain. Never replace a running supervisor binary in place. Rollback must respect job state file format compatibility and use the backup made before a format change only with an explicit operator procedure. Uninstall stops admission and requires a deliberate choice about running jobs and retained history; it never deletes source repositories.
 
 ## 24. Roadmap and phase gates
 
@@ -906,7 +906,7 @@ Complete durable queue/supervisor receipts, crash reconciliation, CLI/IPC schema
 
 ### V1 beta to GA
 
-Complete native platform matrix, WSL2 domain documentation, opt-in hard limits on capable platforms, fault/security testing, benchmarks, soak tests, packaging, migration tests, operator documentation, and signed releases. No platform may be labelled fully supported merely because its binary builds. Publish limitations alongside installation instructions.
+Complete native platform matrix, WSL2 domain documentation, opt-in hard limits on capable platforms, fault/security testing, benchmarks, soak tests, packaging, job state file format-change tests, operator documentation, and signed releases. No platform may be labelled fully supported merely because its binary builds. Publish limitations alongside installation instructions.
 
 ### V2 candidates, each separately specified
 
