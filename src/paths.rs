@@ -4,7 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: two tests wait out a lock that a forked child of a different test holds for a moment.
 // Modified by the local-resource-coordinator fork, 2026-10-06: the bodies of ensure_dir and make_private move to src/os/unix.rs; these forward (R3a of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-11-02: state_dir checks the owner of the state directory and the directories above it, and makes it private (issue #88).
-// Modified by the local-resource-coordinator fork, 2026-11-02: the three opens of a pid file use O_NOFOLLOW (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-02: the three opens of a pid file use O_NOFOLLOW, with a test that the sweep does not claim a linked pid file (issue #88).
 //! This module gives the location of each file that qex uses.
 //!
 //! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
@@ -1911,6 +1911,27 @@ mod tests {
              that starts here meets the same lock"
         );
         drop(claim);
+    }
+
+    /// The sweep does not claim a directory whose pid file is a symbolic link,
+    /// and leaves the link's target alone (issue #88).
+    #[test]
+    fn a_pid_file_link_is_not_claimed() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = TestDir::make("qex-claimlink");
+        let outside = TestDir::make("qex-claimtarget");
+        let target = outside.path().join("target");
+        std::fs::write(&target, b"ORIGINAL\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::os::unix::fs::symlink(&target, base.path().join(PID_FILE)).unwrap();
+
+        let claim = claim_unused_dir(base.path(), std::time::Duration::from_millis(50));
+
+        let bytes = std::fs::read(&target).unwrap();
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(bytes, b"ORIGINAL\n", "the target keeps its bytes");
+        assert_eq!(mode, 0o644, "the target keeps its mode");
+        assert!(claim.is_none(), "a directory it cannot lock stays");
     }
 
     /// A kill that a process cannot catch gives the lock back.
