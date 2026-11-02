@@ -614,6 +614,8 @@ Supervisors write private per-job receipts/spool files atomically, with restrict
 
 IPC uses user-private Unix domain sockets on Linux/macOS and local-only ACL-restricted named pipes on Windows. No TCP listener in V1. Authenticate OS peer identity plus supervisor capabilities where applicable; do not trust a PID supplied in JSON. Use length-prefixed, versioned messages, a 1 MiB request limit, bounded stream frames, timeouts, and backpressure. Major protocol mismatch refuses mutating calls with upgrade guidance.
 
+Amended by ADR 1 (framing and the 1 MiB limit): [adr/0001-ipc-transport-and-launch.md](adr/0001-ipc-transport-and-launch.md)
+
 Autostart acquires an OS lock and establishes a leader epoch before binding the endpoint. Concurrent clients attach to the winner. Use process-held locks/mutexes, not a TTL file that can expire while a paused leader remains alive. Supervisors reject stale-epoch control. No production option creates multiple independent budgets for the same domain; isolated test instances must explicitly identify themselves as test mode.
 
 ### 15.1 Recovery sequence
@@ -962,6 +964,8 @@ The schema and prose are jointly normative. The schema checks field shape; the r
 ### 27.1 Framing, types, versioning, and redaction
 
 Each IPC frame is a 4-byte unsigned big-endian payload length followed by one UTF-8 JSON object. Reject frames above 1 MiB before allocation, duplicate object keys, nesting beyond 32 levels, invalid UTF-8, nonfinite numbers, and unknown object fields except explicitly extensible metadata. A partial frame closes only that connection and does not launch a job. Secrets in rejected payloads must not be echoed in an error message or daemon log.
+
+Amended by ADR 1 (framing and the 1 MiB limit): [adr/0001-ipc-transport-and-launch.md](adr/0001-ipc-transport-and-launch.md)
 
 All byte/count integers are in `[0, 2^53-1]` for cross-language JSON precision. Values outside the range fail validation; do not round them. CPU claims are positive finite decimal numbers rounded upward to the next 0.001 core before admission. UTC timestamps use the schema's syntax plus calendar validation. JSON strings preserve Unicode; NUL arguments and native byte sequences that cannot round-trip through this protocol are rejected explicitly. Support for opaque Unix argv bytes requires a later protocol extension, not lossy transcoding.
 

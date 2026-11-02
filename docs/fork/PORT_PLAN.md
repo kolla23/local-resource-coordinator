@@ -26,7 +26,7 @@ Every step is its own PR, planned at about 400 changed lines (not counting logs 
 
 **Shape:**
 - A module `src/os/` with `unix.rs` (code shared by Linux and macOS), `linux.rs` and `macos.rs` now, and `windows.rs` later. Code that is the same on every platform (plain std, such as `cpu_count`) stays where it is. Each moved body goes to exactly one file, so a move is never a copy.
-- Its functions are plain functions chosen at compile time by `cfg`. No trait objects and no plugin framework (SPEC.md:885, "small backend contracts").
+- Its functions are plain functions chosen at compile time by `cfg`. No trait objects and no plugin framework (SPEC.md:887, "small backend contracts").
 - Callers name what they need (`os::available_memory()`, `os::lock_exclusive(&file)`) and never `libc` or `std::os::unix`.
 - Every modified upstream file gets the fork header line.
 
@@ -65,8 +65,8 @@ All ADRs go in `docs/fork/adr/`, one docs-only PR each, written while R2–R6 ar
 
 | Order | ADR | Why here |
 |---|---|---|
-| 1 | **IPC transport and launch protocol**: named pipes, who may start a coordinator, liveness without a socket file; SPEC's framing gap decided at the same time | The largest area (≈800 lines). AGENTS.md requires an ADR before any launch change. Unblocks R7. Sets the pipe security that the acceptance check below tests: the ACL, local-only clients (SPEC.md:615), and protection against another user creating the pipe name first. |
-| 1 (alongside) | **Per-job TEMP** | Depends on no other ADR. Changes Linux behaviour too: it overrides the submitted environment, against SPEC.md:37 and :999, so it is a product decision. |
+| 1 | **IPC transport and launch protocol** ([ADR 1](adr/0001-ipc-transport-and-launch.md)): named pipes, who may start a coordinator, liveness without a socket file; SPEC's framing gap decided at the same time | The largest area (≈800 lines). AGENTS.md requires an ADR before any launch change. Unblocks R7. Sets the pipe security that the acceptance check below tests: the ACL, local-only clients (SPEC.md:615), and protection against another user creating the pipe name first. |
+| 1 (alongside) | **Per-job TEMP** | Depends on no other ADR. Changes Linux behaviour too: it overrides the submitted environment, against SPEC.md:37 and :1003, so it is a product decision. |
 | 2 | **Who may signal a job**: a named Job Object, or a request routed through the supervisor | The routed option needs a channel to the supervisor, which ADR 1 defines. |
 | 3 | **Exit classification, `--signal` and CLI compatibility for signals** | Depends on 2: how a job is stopped decides what its exit code means. Settles HUP, QUIT and USR1/2. |
 | 4 | **Memory metric in history and admission**: commit vs working set, metric-kind labels, the commit ledger and gate, `max_pressure` | Independent of 1–3 and may be drafted alongside them. Changes the on-disk history, so it comes before peers. |
