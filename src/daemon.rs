@@ -3238,7 +3238,11 @@ mod tests {
         let mut stale = JobStatus::new(&spec_with_key("final"));
         stale.state = JobState::Starting;
         let found = latest_record(&dir, stale.clone());
-        assert_eq!((found.state, found.pid), (JobState::Starting, None), "no record");
+        assert_eq!(
+            (found.state, found.pid),
+            (JobState::Starting, None),
+            "no record"
+        );
         for (state, pid) in [
             (JobState::Running, Some(4242)),
             (JobState::Completed, None),
