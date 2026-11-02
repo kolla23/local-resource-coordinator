@@ -526,9 +526,9 @@ impl Namespace {
 /// The most links one path may pass through, like the kernel's limit.
 const LINK_LIMIT: usize = 40;
 
-/// Inside a user namespace, root's directories show the overflow uid; it is
-/// trusted at these paths only, since any unmapped user shows the same uid.
-const OVERFLOW_PATHS: [&str; 3] = ["/", "/tmp", "/var/tmp"];
+/// In a user namespace root's directories show the overflow uid, as any unmapped user's
+/// do; it is trusted above the state directory here only (`/var` to reach `/var/tmp`).
+const OVERFLOW_PATHS: [&str; 4] = ["/", "/tmp", "/var", "/var/tmp"];
 
 const SANDBOX_PAGE: &str = "https://github.com/stephenc/qex/blob/main/docs/sandbox.md";
 
@@ -959,9 +959,12 @@ mod tests {
     fn root_directories_that_show_the_overflow_uid_pass_in_a_user_namespace() {
         let t = fresh("overflow-root");
         let x = other();
-        let look = owned_by(vec![PathBuf::from("/"), PathBuf::from("/tmp")], x);
+        let root_dirs = ["/", "/tmp", "/var", "/var/tmp"];
+        let look = owned_by(root_dirs.iter().map(PathBuf::from).collect(), x);
         let ns = Namespace { overflow: Some(x) };
         check_owned_dir_as(&t.join("qex"), me(), &ns, &look).unwrap();
+        let var_tmp = Path::new("/var/tmp/no-such-qex-dir/qex");
+        check_owned_dir_as(var_tmp, me(), &ns, &look).unwrap();
         let text = error(check_owned_dir_as(&t.join("qex"), me(), &NO_NS, &look));
         assert!(
             text.contains(&format!(": / belongs to the user {x}")),

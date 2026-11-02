@@ -20839,15 +20839,11 @@ fn an_open_state_directory_is_made_private() {
     let state = h.root.join("state/qex");
     std::fs::create_dir(&state).unwrap();
     std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o777)).unwrap();
-    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    // `qex du` makes no directory and starts no coordinator: only the state check narrows it.
+    h.ok(&["du", "--json"]);
     let mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o7777;
     assert_eq!(mode, 0o700);
+    assert!(!state.join("run").exists(), "no coordinator started");
 }
 
 /// Requires a refusal of the config file that names it and the remedy.
