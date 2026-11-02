@@ -1,0 +1,131 @@
+count-check base_0 expected=0/0/0 got=0/0/0 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check abort_set expected=0/0/0 got=0/0/0 ok
+count-check base_100 expected=10/1/89 got=10/1/89 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check cancel_set expected=10/1/89 got=10/1/89 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check kill_set expected=10/1/89 got=10/1/89 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check abort_set expected=10/1/89 got=10/1/89 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check dup expected=10/1/89 got=10/1/89 ok
+count-check dup_after expected=10/1/89 got=10/1/89 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check held expected=1/1/98 got=1/1/98 ok
+count-check held_after expected=1/1/98 got=1/1/98 ok
+count-check base_1000 expected=100/1/899 got=100/1/899 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check cancel_set expected=100/1/899 got=100/1/899 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check kill_set expected=100/1/899 got=100/1/899 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check abort_set expected=100/1/899 got=100/1/899 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check clean_group expected=0/1/999 got=0/1/999 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check cancel_group expected=0/1/999 got=0/1/999 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check dup expected=100/1/899 got=100/1/899 ok
+count-check dup_after expected=100/1/899 got=100/1/899 ok
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check held expected=1/1/998 got=1/1/998 ok
+count-check held_after expected=1/1/998 got=1/1/998 ok
+count-check submit_real_env expected=- got=0/0/0 ok
+submit-real-env env_bytes=2469 request_bytes=3706 chain_len=6
+count-check submit_env_empty expected=- got=1/0/0 ok
+count-check submit_env_1024 expected=- got=1/1/0 ok
+count-check submit_env_65536 expected=- got=2/1/0 ok
+count-check submit_env_131069 expected=- got=3/1/0 ok
+count-check env_many_k1 expected=- got=4/1/0 ok
+count-check env_many_k2 expected=- got=5/1/0 ok
+count-check env_many_k3 expected=- got=6/1/0 ok
+count-check env_many_k4 expected=- got=7/1/0 ok
+count-check env_many_k5 expected=- got=8/1/0 ok
+count-check env_many_k6 expected=- got=9/1/0 ok
+count-check env_many_k7 expected=- got=10/1/0 ok
+count-check env_many_k8 expected=- got=11/1/0 ok
+count-check env_many_k9 expected=- got=12/1/0 ok
+count-check env_many_k10 expected=- got=13/1/0 ok
+count-check env_many_k11 expected=- got=14/1/0 ok
+count-check env_many_k12 expected=- got=16/0/0 ok
+count-check env_many_k13 expected=- got=16/1/0 ok
+count-check env_many_k14 expected=- got=18/0/0 ok
+count-check env_many_k15 expected=- got=19/0/0 ok
+count-check env_many_k16 expected=- got=20/0/0 ok
+e2big env last_ok=15 argv_bytes_ok=1965233 first_fail=16 argv_bytes_fail=2096244 request_bytes_ok=1966480
+count-check argv_many_k1 expected=- got=20/0/0 ok
+count-check argv_many_k2 expected=- got=20/1/0 ok
+count-check argv_many_k3 expected=- got=21/1/0 ok
+count-check argv_many_k4 expected=- got=22/1/0 ok
+count-check argv_many_k5 expected=- got=23/1/0 ok
+count-check argv_many_k6 expected=- got=24/1/0 ok
+count-check argv_many_k7 expected=- got=25/1/0 ok
+count-check argv_many_k8 expected=- got=26/1/0 ok
+count-check argv_many_k9 expected=- got=27/1/0 ok
+count-check argv_many_k10 expected=- got=28/1/0 ok
+count-check argv_many_k11 expected=- got=29/1/0 ok
+count-check argv_many_k12 expected=- got=30/1/0 ok
+count-check argv_many_k13 expected=- got=31/1/0 ok
+count-check argv_many_k14 expected=- got=32/1/0 ok
+count-check argv_many_k15 expected=- got=33/1/0 ok
+count-check argv_many_k16 expected=- got=34/1/0 ok
+e2big argv last_ok=15 argv_bytes_ok=1965092 first_fail=16 argv_bytes_fail=2096093 request_bytes_ok=1966523
+count-check submit_argv_max expected=- got=35/0/0 ok
+single-arg max_ok=131071 first_fail=131072
+count-check escape_ctl expected=- got=35/1/0 ok
+escape ctl os_bytes=131069 rc=0 wire_bytes=786414 factor=6.000
+count-check escape_quote expected=- got=36/1/0 ok
+escape quote os_bytes=131069 rc=0 wire_bytes=262138 factor=2.000
+count-check escape_plain expected=- got=37/1/0 ok
+escape plain os_bytes=131069 rc=0 wire_bytes=131069 factor=1.000
+count-check escape_eacute expected=- got=38/1/0 ok
+escape eacute os_bytes=131068 rc=0 wire_bytes=131068 factor=1.000
+count-check submit_job_file expected=- got=40/0/0 ok
+job-file arg_bytes=2097152 rc=0 request_bytes=2098633 state=failed
+count-check cleanup expected=0/0/0 got=0/0/0 ok
+count-check submit_needs_100 expected=100/0/0 got=100/0/0 ok
+count-check shape_argv16 expected=10/1/89 got=10/1/89 ok
+count-check shape_argv4k expected=10/1/89 got=10/1/89 ok
+count-check shape_argvmax expected=10/1/89 got=10/1/89 ok
+count-check shape_name128 expected=10/1/89 got=10/1/89 ok
+cwd-shape bytes=3838
+count-check shape_cwd expected=10/1/89 got=10/1/89 ok
+count-check pause_queue_P1_r1k expected=0/0/0 got=0/0/0 ok
+pause-check pause_queue_P1_r1k expected=0 got=0 chain_len=0 reason_bytes=1024 ok
+count-check pause_queue_P10_r1k expected=0/0/0 got=0/0/0 ok
+pause-check pause_queue_P10_r1k expected=9 got=9 chain_len=6 reason_bytes=1024 ok
+count-check pause_queue_P100_r1k expected=0/0/0 got=0/0/0 ok
+pause-check pause_queue_P100_r1k expected=99 got=99 chain_len=6 reason_bytes=1024 ok
+count-check pause_queue_P10_rnone expected=0/0/0 got=0/0/0 ok
+pause-check pause_queue_P10_rnone expected=9 got=9 chain_len=6 reason_bytes=0 ok
+count-check pause_queue_P10_r64k expected=0/0/0 got=0/0/0 ok
+pause-check pause_queue_P10_r64k expected=9 got=9 chain_len=6 reason_bytes=65536 ok
+count-check pause_queue_P10_rmax expected=0/0/0 got=0/0/0 ok
+pause-check pause_queue_P10_rmax expected=9 got=9 chain_len=6 reason_bytes=131062 ok
+count-check pause_queue_P100_rmax expected=0/0/0 got=0/0/0 ok
+pause-check pause_queue_P100_rmax expected=99 got=99 chain_len=6 reason_bytes=131062 ok
+count-check pause_lock_many_P1_r1k expected=0/0/0 got=0/0/0 ok
+pause-check pause_lock_many_P1_r1k expected=0 got=0 chain_len=0 reason_bytes=1024 ok
+count-check pause_lock_many_P10_r1k expected=0/0/0 got=0/0/0 ok
+pause-check pause_lock_many_P10_r1k expected=9 got=9 chain_len=6 reason_bytes=1024 ok
+count-check pause_lock_many_P100_r1k expected=0/0/0 got=0/0/0 ok
+pause-check pause_lock_many_P100_r1k expected=99 got=99 chain_len=6 reason_bytes=1024 ok
+count-check pause_lock_many_P10_rnone expected=0/0/0 got=0/0/0 ok
+pause-check pause_lock_many_P10_rnone expected=9 got=9 chain_len=6 reason_bytes=0 ok
+count-check pause_lock_many_P10_r64k expected=0/0/0 got=0/0/0 ok
+pause-check pause_lock_many_P10_r64k expected=9 got=9 chain_len=6 reason_bytes=65536 ok
+count-check pause_lock_many_P10_rmax expected=0/0/0 got=0/0/0 ok
+pause-check pause_lock_many_P10_rmax expected=9 got=9 chain_len=6 reason_bytes=131062 ok
+count-check pause_lock_many_P100_rmax expected=0/0/0 got=0/0/0 ok
+pause-check pause_lock_many_P100_rmax expected=99 got=99 chain_len=6 reason_bytes=131062 ok
+count-check pause_lock_many_P10_rnone_n4k expected=0/0/0 got=0/0/0 ok
+pause-check pause_lock_many_P10_rnone_n4k expected=9 got=9 chain_len=6 reason_bytes=0 ok
+count-check pause_lock_one_P1_r1k expected=0/0/0 got=0/0/0 ok
+pause-check pause_lock_one_P1_r1k expected=0 got=0 chain_len=0 reason_bytes=1024 ok
+count-check pause_lock_one_P10_r1k expected=0/0/0 got=0/0/0 ok
+pause-check pause_lock_one_P10_r1k expected=9 got=9 chain_len=6 reason_bytes=1024 ok
+count-check pause_lock_one_P100_r1k expected=0/0/0 got=0/0/0 ok
+pause-check pause_lock_one_P100_r1k expected=99 got=99 chain_len=6 reason_bytes=1024 ok
+count-check pause_jobs_P1_r1k expected=10/1/89 got=10/1/89 ok
+count-check pause_jobs_P1_rmax expected=10/1/89 got=10/1/89 ok

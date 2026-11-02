@@ -1,0 +1,12 @@
+date_utc 2026-11-02T03:24:17Z
+kernel 5.15.167.4-microsoft-standard-WSL2
+rustc rustc 1.98.1 (48a229cea 2026-09-01)
+qex qex 0.0.0-dev+unknown
+ARG_MAX 2097152
+PAGESIZE 4096
+PATH_MAX 4096
+binfmts.h 11: * execve() system call.  MAX_ARG_STRLEN is essentially random but serves to
+15:#define MAX_ARG_STRLEN (PAGE_SIZE * 32)
+login_env_bytes 2256
+sha256 9c2479cfd047e007f4f03727885b9abca5cc2bfd1b04103ea0d3a9409b2ca4ab  measure.sh
+sha256 18cf76b7e12b8eef5e40a08ce83c70919a8e36c9b27afce28096235fe17142c0  proxy.py
