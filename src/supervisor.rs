@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-01: supervisor.log and the job's output files are set to 0600 when they exist (issue #56).
+// Modified by the local-resource-coordinator fork, 2026-11-02: the watch of a recovered supervisor ends on a zombie (issue #85).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -273,15 +274,15 @@ fn persist_legacy_requeue(dir: &std::path::Path, status: &mut JobStatus) {
 
 /// Waits until a process stops, for a process that is not a child.
 ///
-/// A parent uses `waitpid`. This function is for the other case: a coordinator
-/// that starts again inherits no supervisor, so it tests the process instead.
+/// A parent uses `waitpid`. For a coordinator that starts again and inherits
+/// no supervisor, test the process instead; a zombie counts as gone.
 fn watch_until_gone(pid: i32) {
     // Keep the start time of the process that the watch began with. The
     // machine can give the number to a new process during the watch, and
     // without this test the watch follows that stranger — for days, when the
     // stranger is a service.
     let token = sys::process_start_token(pid);
-    while sys::pid_alive(pid) {
+    while sys::pid_alive(pid) && !sys::process_is_zombie(pid) {
         if token.is_some() && sys::process_start_token(pid) != token {
             return;
         }

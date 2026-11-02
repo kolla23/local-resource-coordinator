@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: a clock step must not settle a config file that just changed (issue #17).
 // Modified by the local-resource-coordinator fork, 2026-10-01: a comment no longer calls `7d` the default (issue #4).
+// Modified by the local-resource-coordinator fork, 2026-11-02: recovery counts a zombie supervisor as gone and keeps a final record written after its first read (issue #85).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1531,12 +1532,10 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound
                 );
             let supervisor_start = status.supervisor_start_token.or(fork_start);
-            // The supervisor runs as this user, so `own_pid_alive`: a pid
-            // that the kernel refuses to signal belongs to somebody else, and
-            // is not the supervisor whatever a permission error suggests. And
-            // the process must have the recorded start time: a stranger that
-            // holds the number must not keep the job `running`, and the watch
-            // that `reap` starts must not follow it.
+            // `own_pid_alive`: a pid that refuses the signal belongs to somebody
+            // else, and a zombie runs nothing. The recorded start time keeps a
+            // stranger with the number from holding the job `running`, and the
+            // watch that `reap` starts from following it.
             let supervisor_alive = same_boot
                 && supervisor_pid
                     .map(|pid| {
@@ -1554,6 +1553,15 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                     let id = status.id;
                     std::thread::spawn(move || crate::supervisor::reap(coord2, id, pid));
                 }
+            } else if let Some(disk) = final_record(&path) {
+                // The supervisor wrote its result after the read above. Keep it, and run the hook
+                // that the supervisor may not have reached, as `reap` does.
+                status = disk;
+                log(&format!(
+                    "job {} ended before recovery; its result stays",
+                    status.id
+                ));
+                crate::hook::fire_detached(&path, &status);
             } else if job_alive {
                 // The supervisor is gone, and the job process continues. No
                 // process will ever write the result: the supervisor was the
@@ -1753,6 +1761,12 @@ fn retire_the_pids(status: &mut crate::job::JobStatus) {
     }
     status.pid_start_token = None;
     status.supervisor_pid = None;
+}
+
+/// Gives the record on disk when it is final. Read it only after the supervisor is
+/// known to be gone, so that nothing can write after it.
+fn final_record(dir: &std::path::Path) -> Option<JobStatus> {
+    job::read_status(dir).ok().filter(|s| s.state.is_terminal())
 }
 
 /// Returns an active record to the queue only when it proves that no job
@@ -3195,6 +3209,27 @@ mod tests {
             !requeue_unstarted(&mut status, true),
             "a supervisor identity means that the spawn path began"
         );
+    }
+
+    /// Recovery must keep a result that the supervisor wrote after the first read (#85).
+    #[test]
+    fn a_final_record_on_disk_wins_over_the_stale_copy() {
+        let dir = crate::testutil::temp_dir().join(format!("qx-final-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(final_record(&dir).is_none(), "no record is no result");
+        let mut status = JobStatus::new(&spec_with_key("final"));
+        for (state, kept) in [
+            (JobState::Starting, false),
+            (JobState::Running, false),
+            (JobState::Completed, true),
+            (JobState::Failed, true),
+        ] {
+            status.state = state;
+            job::write_status(&dir, &status).unwrap();
+            let found = final_record(&dir).map(|s| s.state);
+            assert_eq!(found, kept.then_some(state), "{state:?}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
