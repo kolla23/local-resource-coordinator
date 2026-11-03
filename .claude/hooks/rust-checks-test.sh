@@ -85,6 +85,15 @@ reset
 printf '\n# scratch\n' >> "$tmp/repo/experiments/parallel-workload/Cargo.toml"
 (cd "$tmp/repo" && printf '{"stop_hook_active": false}' | PATH="$tmp/bin:$PATH" bash "$hook" 2>/dev/null)
 check "an edited Cargo.toml under experiments/ does not call cargo" "$([ -e "$tmp/calls" ] && echo called || echo none)" none
+
+reset
+printf '\nfn scratch_experiment() {}\n' >> "$tmp/repo/experiments/parallel-workload/src/main.rs"
+printf 'fn scratch() {}\n' > "$tmp/repo/experiments/parallel-workload/src/scratch_untracked.rs"
+(cd "$tmp/repo" && printf '{"stop_hook_active": false}' | PATH="$tmp/bin:$PATH" bash "$hook" 2>/dev/null)
+check "a .rs change under experiments/ does not call cargo" "$([ -e "$tmp/calls" ] && echo called || echo none)" none
+printf '\nfn scratch_src() {}\n' >> "$tmp/repo/src/main.rs"
+(cd "$tmp/repo" && printf '{"stop_hook_active": false}' | PATH="$tmp/bin:$PATH" bash "$hook" 2>/dev/null)
+check "a src/ .rs change next to it still calls cargo" "$([ -e "$tmp/calls" ] && echo called || echo none)" called
 reset
 
 # The Windows branch, on any host: a fake uname takes it, and a fake wsl.exe records its arguments.

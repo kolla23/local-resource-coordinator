@@ -1159,10 +1159,6 @@ fn p4() {
 const PAST_EOF: &str = "18446744073709551600"; // 0xFFFFFFFF_FFFFFFF0
 
 fn p6() {
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "the root rule guards qex's tests; no test here"
-    )]
     let base = env::temp_dir().join(run_id()).display().to_string();
     let path = format!("{base}-pid");
     fs::write(&path, "9999999999").unwrap();

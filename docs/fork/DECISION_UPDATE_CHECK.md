@@ -21,3 +21,6 @@ For this fork that request is wrong:
 - `src/update.rs`: tests of the message and the record turn the check on explicitly, since the default no longer does.
 - New tests: a unit test that the default config gives no interval, and an e2e test that a coordinator whose config names no `check` writes no update record.
 - The existing tests of an explicit interval (`300s`) and of `never` still apply unchanged.
+
+## Follow-up (2026-11-03, issue #113)
+The default `url` now names this project's releases (`https://api.github.com/repos/kolla23/local-resource-coordinator/releases/latest`), and the text of a newer release points there instead of upstream's page and `cargo install qex`. The default `check` stays `never`. Until the project publishes a release, that address answers 404: the automatic check (when a user turns it on) records the fault and prints nothing, and `qex version --check` says it could not ask and exits 1. The e2e test `a_service_with_no_release_fails_quietly` covers this. The rename (#28) will change the address again.
