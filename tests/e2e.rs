@@ -2036,7 +2036,9 @@ fn a_service_with_no_release_fails_quietly() {
     // QUIET: the next commands succeed and say nothing about the check.
     let submitted = h.qex(&["submit", "--", "true"]);
     assert!(submitted.status.success());
-    let id = String::from_utf8_lossy(&submitted.stdout).trim().to_string();
+    let id = String::from_utf8_lossy(&submitted.stdout)
+        .trim()
+        .to_string();
     assert!(id.parse::<uuid::Uuid>().is_ok(), "submit wrote: {id}");
     let out = h.qex(&["wait", &id]);
     assert_eq!(out.status.code(), Some(0));
