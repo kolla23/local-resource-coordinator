@@ -3,6 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: the watch of a recovered supervisor ends on a zombie (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-02: supervisor.log and the job's output files are opened with O_NOFOLLOW (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
+// Modified by the local-resource-coordinator fork, 2026-11-03: once the system collected a job's leader, recovery and reap check every member of its group before the SIGKILL; after qex's TERM the group gets the rest of the grace; a refused group gets one log line (issue #115).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -218,10 +219,10 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
                             "the supervisor of the job {id} stopped, and the job {pid} \
                              continues; qex stops the job now"
                         ));
-                        stop_process_group(pid, job_start);
+                        stop_process_group(id, pid, job_start);
                         note.push_str("; qex stopped the job process");
                     } else {
-                        kill_what_a_zombie_job_left(pid, job_start);
+                        kill_what_the_job_left(id, pid, job_start);
                     }
                 }
 
@@ -308,20 +309,24 @@ fn watch_until_gone(pid: i32) {
 /// to give its number — even the lead of a group — to a new process, and a
 /// signal to a group is exactly the operation that must never reach a
 /// stranger.
-pub(crate) fn stop_process_group(pid: i32, recorded_start: Option<u64>) {
+pub(crate) fn stop_process_group(id: uuid::Uuid, pid: i32, recorded_start: Option<u64>) {
     let is_the_job = |pid| sys::job_pid_alive(pid) && sys::same_process_start(pid, recorded_start);
     if !is_the_job(pid) {
-        kill_what_a_zombie_job_left(pid, recorded_start);
+        kill_what_the_job_left(id, pid, recorded_start);
         return;
     }
     unsafe {
         libc::killpg(pid, libc::SIGTERM);
     }
     // Give the job a short time to write its files and stop.
-    for _ in 0..20 {
+    for check in 0..20 {
         std::thread::sleep(Duration::from_millis(100));
         if !is_the_job(pid) {
-            kill_what_a_zombie_job_left(pid, recorded_start);
+            // The rest of the group got the TERM too: it gets the rest of the grace to clean up.
+            for _ in check + 1..20 {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            kill_what_the_job_left(id, pid, recorded_start);
             return;
         }
     }
@@ -330,14 +335,77 @@ pub(crate) fn stop_process_group(pid: i32, recorded_start: Option<u64>) {
     }
 }
 
-/// Sends SIGKILL to the group of a job process that ended and is not collected yet; its pid
-/// keeps the group id reserved, as for the sweep after `wait_without_reaping` in `main`.
-pub(crate) fn kill_what_a_zombie_job_left(pid: i32, recorded_start: Option<u64>) {
+/// Sends SIGKILL to what a job left in its group once its leader ended: a zombie leader keeps the
+/// group id reserved, and a collected one leaves group N with pid N free (see `collected_group`).
+pub(crate) fn kill_what_the_job_left(id: uuid::Uuid, pid: i32, recorded_start: Option<u64>) {
     if sys::zombie_group_leader(pid) && sys::same_process_start(pid, recorded_start) {
         unsafe {
             libc::killpg(pid, libc::SIGKILL);
         }
+        return;
     }
+    // Pid N held (0 or EPERM) is the zombie case or another process, never a collected leader.
+    if pid <= 0 || unsafe { libc::kill(pid, 0) } == 0 || !last_error_is(libc::ESRCH) {
+        return;
+    }
+    let verdict = if unsafe { libc::killpg(pid, 0) } == 0 {
+        collected_group(pid, recorded_start)
+    } else if last_error_is(libc::ESRCH) {
+        Ok(false)
+    } else {
+        Err("qex may signal none of its members".to_string())
+    };
+    match verdict {
+        Ok(true) => unsafe {
+            libc::killpg(pid, libc::SIGKILL);
+        },
+        Ok(false) => {}
+        Err(reason) => log(&format!(
+            "job {id}: qex leaves the process group {pid} alone: {reason}"
+        )),
+    }
+}
+
+/// Checks group N of a collected leader: neither Linux nor macOS gives number N to a new process
+/// while group N exists. Ok(false): every member ended; Err: why the group may not be the job's.
+fn collected_group(pid: i32, recorded_start: Option<u64>) -> Result<bool, String> {
+    let Some(start) = recorded_start else {
+        return Err("the record has no start time to compare".to_string());
+    };
+    let members = match sys::group_members(pid) {
+        Some(members) if !members.is_empty() => members,
+        _ => return Err("qex cannot list its members".to_string()),
+    };
+    let user = unsafe { libc::geteuid() };
+    let mut verified = false;
+    for member in members {
+        if unsafe { libc::kill(member, 0) } != 0 {
+            if last_error_is(libc::ESRCH) {
+                continue;
+            }
+            return Err(format!("qex may not signal its member {member}"));
+        }
+        if sys::process_uids(member) != Some((user, user)) {
+            return Err(format!(
+                "its member {member} is not a plain process of this user"
+            ));
+        }
+        // `>=`: a leftover can start in the leader's clock tick; on macOS a clock step can make a
+        // member look earlier, which only leaves the group alone.
+        match sys::process_start_token(member) {
+            Some(token) if token >= start => verified = true,
+            _ => {
+                return Err(format!(
+                    "its member {member} may have started before the job"
+                ))
+            }
+        }
+    }
+    Ok(verified)
+}
+
+fn last_error_is(code: i32) -> bool {
+    std::io::Error::last_os_error().raw_os_error() == Some(code)
 }
 
 /// Runs one job. This function is the body of the `qex supervise` command.

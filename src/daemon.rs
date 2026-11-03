@@ -4,6 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery counts a zombie supervisor as gone and keeps a final record written after its first read (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: recovery skips a symbolic link in jobs/ (issue #129).
+// Modified by the local-resource-coordinator fork, 2026-11-03: recovery passes the job id to stop_process_group and kill_what_the_job_left, which also handle a collected leader (issue #115).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1608,7 +1609,7 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                          continues; qex stops the job now",
                         status.id
                     ));
-                    crate::supervisor::stop_process_group(pid, status.pid_start_token);
+                    crate::supervisor::stop_process_group(status.id, pid, status.pid_start_token);
                     note.push_str("; qex stopped the job process");
                 }
                 status.state = JobState::Failed;
@@ -1646,9 +1647,13 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                      continued"
                         .to_string()
                 });
-                // A zombie job process of this start can still hold its group: kill what it left.
+                // A job process of this start, zombie or collected, can leave a group: kill it.
                 if let Some(pid) = status.pid.filter(|_| same_boot) {
-                    crate::supervisor::kill_what_a_zombie_job_left(pid, status.pid_start_token);
+                    crate::supervisor::kill_what_the_job_left(
+                        status.id,
+                        pid,
+                        status.pid_start_token,
+                    );
                 }
                 retire_the_pids(&mut status);
                 job::write_status(&path, &status).ok();
