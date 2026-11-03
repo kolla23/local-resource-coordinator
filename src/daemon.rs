@@ -3,7 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery skips a job record another user owns; a refused config reload says why; the sandbox link names this fork's page (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery counts a zombie supervisor as gone and keeps a final record written after its first read (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
-// Modified by the local-resource-coordinator fork, 2026-11-03: the start makes the socket directory again when a sweep deleted it before the pid lock, and a debug-only pause tests it (issue #132).
+// Modified by the local-resource-coordinator fork, 2026-11-03: the start makes the socket directory again when a sweep deleted it after its mkdir or before the pid lock, and a debug-only pause tests it (issue #132).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1171,6 +1171,24 @@ fn start_config(read: ConfigFile) -> Result<(Config, u64)> {
 #[cfg(debug_assertions)]
 const PAUSE_BEFORE_PID_LOCK: &str = "QEX_TEST_PAUSE_BEFORE_PID_LOCK_MS";
 
+/// `paths::socket_path`, tried again when a sweep deleted the new directory between
+/// its `mkdir` and its read-back (issue #132); `tries` counts to `PID_LOCK_ATTEMPTS`.
+fn socket_path_after_sweeps(tries: &mut u32) -> Result<std::path::PathBuf> {
+    loop {
+        match paths::socket_path() {
+            Err(e) if *tries < paths::PID_LOCK_ATTEMPTS && a_directory_vanished(&e) => *tries += 1,
+            found => return found,
+        }
+    }
+}
+
+/// The error comes from a file or directory that is not there (`NotFound`).
+fn a_directory_vanished(e: &anyhow::Error) -> bool {
+    e.root_cause()
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+}
+
 /// Runs the coordinator. This function gives control back when the coordinator
 /// stops.
 pub fn run() -> Result<()> {
@@ -1183,7 +1201,8 @@ pub fn run() -> Result<()> {
     paths::ensure_dir(&runtime, 0o700)?;
     paths::ensure_dir(&paths::jobs_dir()?, 0o700)?;
 
-    let mut socket_path = paths::socket_path()?;
+    let mut tries = 1;
+    let mut socket_path = socket_path_after_sweeps(&mut tries)?;
 
     // A test of qex pauses here, after the socket directory exists and before
     // its lock, so a sweep can delete the directory (issue #132). A release
@@ -1219,16 +1238,14 @@ pub fn run() -> Result<()> {
     // and `qex daemon` is a command that a person or a systemd unit starts
     // directly, with no lock at all.
     //
-    // A SWEEP CAN DELETE A NEW SOCKET DIRECTORY BEFORE THIS PROCESS HOLDS ITS
-    // LOCK (issue #132). `socket_path` makes the directory again, with its tests
-    // of the owner, and no sweep can claim a lock that this process holds.
-    let mut tries = 1;
+    // A SWEEP CAN DELETE A NEW SOCKET DIRECTORY BEFORE THIS PROCESS HOLDS ITS LOCK
+    // (issue #132): `socket_path` makes it again; no sweep can claim a held lock.
     let _pid_lock = loop {
         match paths::hold_pid_file(&socket_path, paths::PID_LOCK_PATIENCE) {
             paths::PidHold::Held(lock) => break lock,
             paths::PidHold::DirGone(_) if tries < paths::PID_LOCK_ATTEMPTS => {
                 tries += 1;
-                socket_path = paths::socket_path()?;
+                socket_path = socket_path_after_sweeps(&mut tries)?;
             }
             paths::PidHold::Busy => {
                 log("a different coordinator operates; this process stops");

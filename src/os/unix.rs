@@ -822,9 +822,8 @@ fn make_one_level(path: &Path, mode: u32) -> Result<()> {
     }
 }
 
-/// Names the variable that pauses qex once, after it makes a directory in one
-/// parent, for some milliseconds: `<ms> <parent>`. **This variable exists for
-/// the tests of qex**, and a release build does not read it.
+/// Pauses qex once after a mkdir in one parent: `<ms> <parent>`. **This variable
+/// exists for the tests of qex**, and a release build does not read it.
 #[cfg(debug_assertions)]
 const PAUSE_AFTER_MKDIR_IN: &str = "QEX_TEST_PAUSE_AFTER_MKDIR_IN";
 
