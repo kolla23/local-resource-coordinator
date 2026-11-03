@@ -58,7 +58,7 @@ Upstream ships the same idea: `docs/agents.md`, `skills/qex/SKILL.md` and `qex h
 - **A. Autostart: accepted.** `coord run` may start the daemon on demand, as the SPEC says (L482, L623). The agent never starts it explicitly.
 - **B. Queue timeout: yes.** The recipe passes `--queue-timeout` shorter than the tool limit (e.g. 8m vs 10m), with the tool timeout set explicitly. A killed client while the job is *running* is covered by the client-kill ADR.
 - **C. Unavailable code: yes.** The recipe falls back only on a dedicated "coordinator unavailable" exit code (the unavailable-code ADR), never on a command failure. Because codes can collide, the fallback also needs the result file's proof that no job was accepted.
-- **D. Per-job TEMP/TMP: fix it in the coordinator** via the pending per-job TEMP ADR (evidence: `docs/decision-gate/02-parallel-workload-windows.md`, PRs #9/#10; the SPEC doesn't cover TEMP yet). The recipe doesn't tell agents to set TEMP.
+- **D. Per-job TEMP/TMP: fix it in the coordinator** via the pending (written since: [adr/0001b-per-job-temp.md](../fork/adr/0001b-per-job-temp.md), #106) per-job TEMP ADR (evidence: `docs/decision-gate/02-parallel-workload-windows.md`, PRs #9/#10; the SPEC doesn't cover TEMP yet). The recipe doesn't tell agents to set TEMP.
 - **E. Binary name: keep `coord` as a placeholder. Rename before release.** The recipe can't ship until the name is final (SPEC L6, §25).
 
 ## ADRs this recipe depends on
