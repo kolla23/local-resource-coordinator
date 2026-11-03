@@ -22117,9 +22117,7 @@ fn a_coordinator_starts_when_a_sweep_deletes_its_new_socket_directory() {
 }
 
 /// A coordinator starts when a sweep deletes its new socket directory between
-/// the `mkdir` and the read-back of `ensure_dir` (issue #132).
-///
-/// The pause is in the walk of `ensure_dir`, before the pid file exists.
+/// the `mkdir` and the read-back of `ensure_dir`, before the pid file (#132).
 #[test]
 fn a_coordinator_starts_when_a_sweep_deletes_its_socket_directory_after_the_mkdir() {
     a_coordinator_starts_after_a_sweep_in_its_pause(
@@ -22134,9 +22132,8 @@ fn a_coordinator_starts_when_a_sweep_deletes_its_socket_directory_after_the_mkdi
     );
 }
 
-/// Starts coordinator A with a long state path in a private TMPDIR, paused by
-/// the variable that `pause` gives for that TMPDIR, and starts coordinator B
-/// there, whose sweep deletes the new directory of A. A must then start.
+/// Pauses coordinator A (long state path, private TMPDIR) by `pause`, while the
+/// sweep of coordinator B deletes A's new directory there; A must then start.
 fn a_coordinator_starts_after_a_sweep_in_its_pause(
     name: &str,
     pause: impl Fn(&Path, Duration) -> (&'static str, String),
