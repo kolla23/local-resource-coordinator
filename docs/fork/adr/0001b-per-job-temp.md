@@ -118,7 +118,7 @@ The cleanup is handle-relative, from the `tmp` handle of A2:
 - Hooks: `on_stop` runs with the supervisor's environment plus its own variables (src/hook.rs:420, `variables` at src/hook.rs:654), never the job's, so the feature does not reach hooks.
 - Nested submissions: a `qex submit` inside a job captures that job's environment (`[submit] env_capture`, src/config.rs:657). With the feature off for the inner job, it inherits a TEMP that goes away at the outer attempt's end; with it on, the inner job gets its own.
 - A coordinator autostarted from inside a job inherits that job's TMPDIR, so its long-path socket fallback (`std::env::temp_dir()`, src/paths.rs:118) would land in a folder that goes away. That fallback reads the coordinator's own environment, never a job's.
-- `qex du` counts no subfolder (`directory_size`, src/commands.rs:6907), so a live or kept temp folder is invisible to it (#101).
+- `qex du` and `qex gc` count a job's subfolders, so a live or kept temp folder shows in their sizes; a symbolic link counts as itself, never its target (`directory_size`, src/commands.rs; #101).
 - `qex clean` refuses a job that has not finished (src/lifecycle.rs:192), so a live folder is never swept; the orphan sweep of `qex gc` touches only directories with no record.
 - PORT_PLAN's "Acceptance check for the port" already walks the per-job TEMP folders for their ACL (PORT_PLAN.md:116, PORT_PLAN.md:132).
 
@@ -175,7 +175,6 @@ One row per measurement this ADR uses, from 02's three runs. Failed and passed c
 - The listing gap: a kept folder named `attempts` is not listed until the next attempt's Running write (src/supervisor.rs:649), though `temp_kept` is already true.
 - Nested submissions with the feature off inherit a TEMP that goes away (owner's answer: a known limit only).
 - A coordinator autostarted from inside a job puts its fallback socket folder in that job's TEMP.
-- `qex du` does not count the folders (#101).
 - The elevated Windows cleanup variant is not evaluated until PORT_PLAN's acceptance check runs.
 - The Windows handle-relative delete, the junction cases and the `ActiveProcesses` count rest on Microsoft's pages, Rust's source and the Job Object probe until the Windows backend's tests run; whether Rust's Windows walk treats a junction root correctly was not traced.
 - The Linux subreaper rule is not run in this PR; the implementing PR's escaped-descendant test is its evidence.
