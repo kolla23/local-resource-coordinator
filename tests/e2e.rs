@@ -20,6 +20,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: Drop waits until each process that it signalled has stopped (issue #126).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a link in jobs/ to an outside job record; du, complete, list, status and logs ignore it (issue #129).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a record whose id names a link in jobs/; list, logs, status, rerun and gc ignore the link (issue #135).
+// Modified by the local-resource-coordinator fork, 2026-11-03: two tests that a coordinator starts when a sweep deletes its new socket directory (issue #132).
 // Modified by the local-resource-coordinator fork, 2026-11-03: sixteen tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
 //! End-to-end tests for qex.
 //!
@@ -23103,6 +23104,133 @@ fn a_pid_file_link_stops_the_coordinator_and_leaves_its_target() {
         log.contains("Delete that file if no coordinator operates"),
         "{log}"
     );
+}
+
+/// A coordinator starts when a sweep deletes its new socket directory before it
+/// holds the pid lock (issue #132).
+#[test]
+fn a_coordinator_starts_when_a_sweep_deletes_its_new_socket_directory() {
+    a_coordinator_starts_after_a_sweep_in_its_pause(
+        "swept",
+        |_, pause| {
+            (
+                "QEX_TEST_PAUSE_BEFORE_PID_LOCK_MS",
+                pause.as_millis().to_string(),
+            )
+        },
+        "before the pid lock",
+    );
+}
+
+/// A coordinator starts when a sweep deletes its new socket directory between
+/// the `mkdir` and the read-back of `ensure_dir`, before the pid file (#132).
+#[test]
+fn a_coordinator_starts_when_a_sweep_deletes_its_socket_directory_after_the_mkdir() {
+    a_coordinator_starts_after_a_sweep_in_its_pause(
+        "mkswept",
+        |tmp, pause| {
+            (
+                "QEX_TEST_PAUSE_AFTER_MKDIR_IN",
+                format!("{} {}", pause.as_millis(), tmp.display()),
+            )
+        },
+        "ms after it made",
+    );
+}
+
+/// Pauses coordinator A (long state path, private TMPDIR) by `pause`, while the
+/// sweep of coordinator B deletes A's new directory there; A must then start.
+fn a_coordinator_starts_after_a_sweep_in_its_pause(
+    name: &str,
+    pause: impl Fn(&Path, Duration) -> (&'static str, String),
+    marker: &str,
+) {
+    // The switch that pauses the coordinator exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the coordinator");
+        return;
+    }
+    const PAUSE: Duration = Duration::from_secs(8);
+    let mut a = Harness::with_default_config(name);
+    let tmp = a.root.join("t");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let deep = a
+        .root
+        .join("a-directory-with-a-very-long-name-to-pass-the-limit")
+        .join("another-directory-with-a-long-name-to-pass-the-limit");
+    std::fs::create_dir_all(&deep).unwrap();
+    let (switch, value) = pause(&tmp, PAUSE);
+    for (key, value) in [
+        ("XDG_STATE_HOME", deep.display().to_string()),
+        ("TMPDIR", tmp.display().to_string()),
+        (switch, value),
+    ] {
+        a.extra_env.push((key.into(), value));
+    }
+
+    // The log of A goes to a file, so the test reads it while A runs.
+    let log_path = a.root.join("a.log");
+    let log = std::fs::File::create(&log_path).unwrap();
+    let mut daemon = a
+        .command(&["daemon"])
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .spawn()
+        .expect("qex daemon did not start");
+    let read_log = || std::fs::read_to_string(&log_path).unwrap_or_default();
+    a.until("A pauses", Duration::from_secs(60), || {
+        read_log().contains(marker)
+    });
+    let paused = Instant::now();
+
+    let uid = unsafe { libc::getuid() };
+    let prefix = format!("qex-{uid}-");
+    let dirs: Vec<PathBuf> = std::fs::read_dir(&tmp)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&prefix)
+        })
+        .collect();
+    assert_eq!(dirs.len(), 1, "A made one short socket directory: {dirs:?}");
+    let short = dirs[0].clone();
+
+    // B sweeps the same TMPDIR when it starts.
+    let mut b = Harness::with_default_config("sweeper");
+    b.extra_env
+        .push(("TMPDIR".into(), tmp.display().to_string()));
+    b.coordinator_pid();
+
+    // The race, or the test proves nothing: the directory must go while A
+    // still pauses. A remakes it after the pause.
+    while short.exists() && paused.elapsed() < PAUSE - Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !short.exists(),
+        "the sweep of B did not delete the directory of A during the pause: {}",
+        read_log()
+    );
+
+    a.until("A starts or stops", Duration::from_secs(60), || {
+        read_log().contains("the coordinator started") || !matches!(daemon.try_wait(), Ok(None))
+    });
+    let text = read_log();
+    assert!(
+        text.contains("the coordinator started") && !text.contains("No such file"),
+        "A must start after the sweep deleted its directory: {text}"
+    );
+    assert_eq!(
+        a.coordinator_pid(),
+        daemon.id() as i32,
+        "the coordinator that answers must be A"
+    );
+    daemon.kill().ok();
+    daemon.wait().ok();
 }
 
 /// The pid file of a socket directory in TMPDIR is not made through a link (issue #88).

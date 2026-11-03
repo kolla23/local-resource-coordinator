@@ -5,6 +5,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: the bodies of ensure_dir and make_private move to src/os/unix.rs; these forward (R3a of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-11-02: state_dir checks the owner of the state directory and the directories above it, and makes it private (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the three opens of a pid file use O_NOFOLLOW, with a test that the sweep does not claim a linked pid file (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-03: hold_pid_file gives DirGone when a sweep deleted the socket directory, and a sweep claims nothing through a pid file with no name, with tests (issue #132).
 //! This module gives the location of each file that qex uses.
 //!
 //! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
@@ -144,11 +145,8 @@ fn short_socket_dir(preferred: &std::path::Path) -> Result<PathBuf> {
     // holds it across the deletion of the directory. A directory with no such
     // file gives the two sides no common lock for a time.
     //
-    // THIS FILE MAKES THAT TIME SMALL. It does not remove it: a sweep between
-    // the new directory and this call still finds no file. The CLI calls this
-    // function as well, and it takes no lock, so that time was long before.
-    // `hold_pid_file` closes the window with a test of `st_nlink` after it takes
-    // the lock.
+    // The file does not keep a sweep out: until a coordinator holds the lock, a
+    // sweep can delete the directory, and the coordinator then makes it again.
     //
     // The file holds no number yet. The lock is the evidence, and the lock is
     // free until a coordinator takes it.
@@ -296,8 +294,8 @@ fn sweep_socket_dirs(dir: &std::path::Path, own: &[PathBuf], limit: std::time::D
 /// A LOCK ALONE DOES NOT KEEP THE DIRECTORY FOR A COORDINATOR. This function
 /// can take the lock first, delete the file, and give the lock back. A
 /// coordinator that then takes the lock holds it on a file with no name.
-/// `hold_pid_file` tests `st_nlink` after it takes the lock, and it opens the
-/// path again when the file is gone. The two parts together close the window.
+/// `hold_pid_file` tests `st_nlink` after it takes the lock, and gives `DirGone`
+/// when the directory went too; the coordinator then makes it again (#132).
 ///
 /// The lock on the pid file is the strong test, and it comes first. A process
 /// that holds that lock operates, so the directory stays and the socket needs no
@@ -322,16 +320,31 @@ fn claim_unused_dir(dir: &std::path::Path, limit: std::time::Duration) -> Option
         .custom_flags(libc::O_NOFOLLOW)
         .open(dir.join(PID_FILE))
     {
-        Ok(file) => match try_lock(&file) {
-            // This process holds the lock now, and it keeps the file to hold it.
-            LockTry::Taken => {
-                make_private(&file);
-                Some(file)
-            }
-            LockTry::Held | LockTry::Failed(_) => return None,
-        },
+        Ok(file) => file,
         // qex cannot use the file, so it cannot say that the directory is free.
         Err(_) => return None,
+    };
+    claim_opened(dir, file, limit)
+}
+
+/// The rest of `claim_unused_dir`, on the pid file that it opened (issue #132).
+fn claim_opened(
+    dir: &std::path::Path,
+    file: std::fs::File,
+    limit: std::time::Duration,
+) -> Option<Claim> {
+    let file = match try_lock(&file) {
+        // This process holds the lock now, and it keeps the file to hold it.
+        LockTry::Taken => {
+            // A file with no name is one that another sweep deleted after this open:
+            // its lock guards nothing, and the directory can be a new coordinator's.
+            if !matches!(file.metadata(), Ok(m) if std::os::unix::fs::MetadataExt::nlink(&m) > 0) {
+                return None;
+            }
+            make_private(&file);
+            Some(file)
+        }
+        LockTry::Held | LockTry::Failed(_) => return None,
     };
 
     if !matches!(
@@ -399,7 +412,7 @@ pub enum PidFile {
 /// Each try can meet a sweep that deletes the file after this process locks it.
 /// A small count is sufficient: a sweep deletes a directory one time, and it
 /// then has no more work there.
-const PID_LOCK_ATTEMPTS: u32 = 5;
+pub const PID_LOCK_ATTEMPTS: u32 = 5;
 
 pub const PID_LOCK_PATIENCE: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -439,6 +452,9 @@ pub enum PidHold {
     Busy,
     /// qex cannot use the file. The text says what the reader must do.
     Unusable(String),
+    /// A sweep deleted the directory before this process held the lock. The caller
+    /// makes it again and tries again; the text is for when it gives up.
+    DirGone(String),
 }
 
 /// The result of one try for the lock.
@@ -534,7 +550,7 @@ pub fn hold_pid_file(socket: &std::path::Path, patience: std::time::Duration) ->
             // deletion is a wrong instruction here, and the reader must not get
             // it.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return PidHold::Unusable(format!(
+                return PidHold::DirGone(format!(
                     "qex cannot make the file {}: {e}. Start qex again.",
                     path.display()
                 ))
@@ -1812,6 +1828,72 @@ mod tests {
         );
     }
 
+    /// A sweep that deletes the directory while a coordinator waits for the lock gives
+    /// `DirGone`, so the coordinator makes the directory again (issue #132).
+    #[test]
+    fn a_sweep_that_deletes_the_directory_during_the_wait_gives_dir_gone() {
+        let base = TestDir::make("qex-dirgonetest");
+        let dir = base.path().join("d");
+        std::fs::create_dir(&dir).unwrap();
+        let socket = dir.join("s");
+        std::fs::write(dir.join(PID_FILE), b"").unwrap();
+
+        // A sweep: it holds the lock, deletes the directory, and gives the lock back.
+        let swept = dir.clone();
+        let (ready, holds_the_lock) = std::sync::mpsc::channel();
+        let sweep = std::thread::spawn(move || {
+            let file = a_held_pid_file(&swept);
+            ready.send(()).ok();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::fs::remove_dir_all(&swept).unwrap();
+            drop(file);
+        });
+        holds_the_lock
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("the thread of the test did not take the lock");
+
+        let answer = hold_pid_file(&socket, std::time::Duration::from_secs(5));
+        sweep.join().unwrap();
+        assert!(
+            !dir.exists(),
+            "the sweep of this test deletes the directory"
+        );
+        let PidHold::DirGone(text) = answer else {
+            panic!("a directory that a sweep deleted must give DirGone");
+        };
+        assert!(
+            text.contains("Start qex again"),
+            "the message must give a step that the reader can take: {text}"
+        );
+    }
+
+    /// A sweep whose pid file another sweep deleted after the open claims nothing, so
+    /// it keeps the directory that a new coordinator made at that name (issue #132).
+    #[test]
+    fn a_sweep_does_not_claim_a_directory_through_a_deleted_pid_file() {
+        let base = TestDir::make("qex-stalesweeptest");
+        let dir = base.path().join("d");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join(PID_FILE), b"").unwrap();
+
+        // Sweep B opens the pid file, then sweep C deletes the whole directory.
+        let stale = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.join(PID_FILE))
+            .unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // A coordinator makes the directory again and holds the lock on its new file.
+        std::fs::create_dir(&dir).unwrap();
+        let _held = a_held_pid_file(&dir);
+
+        assert!(
+            claim_opened(&dir, stale, std::time::Duration::from_millis(50)).is_none(),
+            "a sweep must not claim a directory through a pid file with no name"
+        );
+    }
+
     /// A remedy must never name a step that the reader cannot take.
     ///
     /// A file that is not there cannot be deleted. An agent acts on the words
@@ -1824,8 +1906,8 @@ mod tests {
         let socket = base.path().join("no-such-directory").join("s");
 
         let answer = hold_pid_file(&socket, std::time::Duration::from_millis(50));
-        let PidHold::Unusable(text) = answer else {
-            panic!("a directory that is not there must give Unusable");
+        let PidHold::DirGone(text) = answer else {
+            panic!("a directory that is not there must give DirGone");
         };
         assert!(
             !text.contains("Delete that file"),
