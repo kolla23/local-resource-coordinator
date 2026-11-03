@@ -22098,10 +22098,6 @@ fn a_pid_file_link_stops_the_coordinator_and_leaves_its_target() {
 
 /// A coordinator starts when a sweep deletes its new socket directory before it
 /// holds the pid lock (issue #132).
-///
-/// Coordinator A pauses between its new short directory and the lock, through a
-/// variable that exists for this test. Coordinator B starts in that time and
-/// sweeps the private TMPDIR of the two. A then finds no directory.
 #[test]
 fn a_coordinator_starts_when_a_sweep_deletes_its_new_socket_directory() {
     a_coordinator_starts_after_a_sweep_in_its_pause(

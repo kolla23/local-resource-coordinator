@@ -1166,9 +1166,8 @@ fn start_config(read: ConfigFile) -> Result<(Config, u64)> {
     Ok((cfg, seen))
 }
 
-/// Names the variable that pauses the coordinator before it takes its pid
-/// lock, for this many milliseconds. **This variable exists for the tests of
-/// qex**, and a release build does not read it.
+/// Pauses the coordinator before its pid lock, in milliseconds. **This variable
+/// exists for the tests of qex**, and a release build does not read it.
 #[cfg(debug_assertions)]
 const PAUSE_BEFORE_PID_LOCK: &str = "QEX_TEST_PAUSE_BEFORE_PID_LOCK_MS";
 
@@ -1205,9 +1204,8 @@ pub fn run() -> Result<()> {
     let mut tries = 1;
     let mut socket_path = socket_path_after_sweeps(&mut tries)?;
 
-    // A test of qex pauses here, after the socket directory exists and before
-    // its lock, so a sweep can delete the directory (issue #132). A release
-    // build has no such switch, as for `QEX_TEST_CRASH_AFTER_ABORT_PLAN`.
+    // A test pauses here so a sweep can delete the new directory (issue #132); a
+    // release build has no such switch, as for `QEX_TEST_CRASH_AFTER_ABORT_PLAN`.
     #[cfg(debug_assertions)]
     if let Some(ms) = std::env::var(PAUSE_BEFORE_PID_LOCK)
         .ok()
@@ -1238,12 +1236,11 @@ pub fn run() -> Result<()> {
     // The spawn lock does not give this promise. A CLI process holds that lock,
     // and `qex daemon` is a command that a person or a systemd unit starts
     // directly, with no lock at all.
-    //
-    // A SWEEP CAN DELETE A NEW SOCKET DIRECTORY BEFORE THIS PROCESS HOLDS ITS LOCK
-    // (issue #132): `socket_path` makes it again; no sweep can claim a held lock.
     let _pid_lock = loop {
         match paths::hold_pid_file(&socket_path, paths::PID_LOCK_PATIENCE) {
             paths::PidHold::Held(lock) => break lock,
+            // A sweep deleted the new directory before this lock (issue #132): make it
+            // again; no sweep can claim a lock that this process holds.
             paths::PidHold::DirGone(_) if tries < paths::PID_LOCK_ATTEMPTS => {
                 tries += 1;
                 socket_path = socket_path_after_sweeps(&mut tries)?;

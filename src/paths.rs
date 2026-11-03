@@ -437,9 +437,8 @@ pub enum PidHold {
     Busy,
     /// qex cannot use the file. The text says what the reader must do.
     Unusable(String),
-    /// The directory of the file is gone: a sweep deleted it before this
-    /// process held the lock. The caller makes the directory again and tries
-    /// again. The text is for the reader when the caller gives up.
+    /// A sweep deleted the directory before this process held the lock. The caller
+    /// makes it again and tries again; the text is for when it gives up.
     DirGone(String),
 }
 
@@ -1814,11 +1813,8 @@ mod tests {
         );
     }
 
-    /// A sweep that deletes the whole directory while a coordinator waits for
-    /// the lock must not end that coordinator (issue #132).
-    ///
-    /// The coordinator cannot make the file in a directory that is gone. It
-    /// must hear that the directory went, so it makes the directory again.
+    /// A sweep that deletes the directory while a coordinator waits for the lock gives
+    /// `DirGone`, so the coordinator makes the directory again (issue #132).
     #[test]
     fn a_sweep_that_deletes_the_directory_during_the_wait_gives_dir_gone() {
         let base = TestDir::make("qex-dirgonetest");
