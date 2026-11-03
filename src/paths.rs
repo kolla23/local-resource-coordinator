@@ -320,16 +320,26 @@ fn claim_unused_dir(dir: &std::path::Path, limit: std::time::Duration) -> Option
         .custom_flags(libc::O_NOFOLLOW)
         .open(dir.join(PID_FILE))
     {
-        Ok(file) => match try_lock(&file) {
-            // This process holds the lock now, and it keeps the file to hold it.
-            LockTry::Taken => {
-                make_private(&file);
-                Some(file)
-            }
-            LockTry::Held | LockTry::Failed(_) => return None,
-        },
+        Ok(file) => file,
         // qex cannot use the file, so it cannot say that the directory is free.
         Err(_) => return None,
+    };
+    claim_opened(dir, file, limit)
+}
+
+/// The rest of `claim_unused_dir`, on the pid file that it opened (issue #132).
+fn claim_opened(
+    dir: &std::path::Path,
+    file: std::fs::File,
+    limit: std::time::Duration,
+) -> Option<Claim> {
+    let file = match try_lock(&file) {
+        // This process holds the lock now, and it keeps the file to hold it.
+        LockTry::Taken => {
+            make_private(&file);
+            Some(file)
+        }
+        LockTry::Held | LockTry::Failed(_) => return None,
     };
 
     if !matches!(
@@ -1849,6 +1859,33 @@ mod tests {
         assert!(
             text.contains("Start qex again"),
             "the message must give a step that the reader can take: {text}"
+        );
+    }
+
+    /// A sweep whose pid file another sweep deleted after the open claims nothing, so
+    /// it keeps the directory that a new coordinator made at that name (issue #132).
+    #[test]
+    fn a_sweep_does_not_claim_a_directory_through_a_deleted_pid_file() {
+        let base = TestDir::make("qex-stalesweeptest");
+        let dir = base.path().join("d");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join(PID_FILE), b"").unwrap();
+
+        // Sweep B opens the pid file, then sweep C deletes the whole directory.
+        let stale = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.join(PID_FILE))
+            .unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // A coordinator makes the directory again and holds the lock on its new file.
+        std::fs::create_dir(&dir).unwrap();
+        let _held = a_held_pid_file(&dir);
+
+        assert!(
+            claim_opened(&dir, stale, std::time::Duration::from_millis(50)).is_none(),
+            "a sweep must not claim a directory through a pid file with no name"
         );
     }
 
