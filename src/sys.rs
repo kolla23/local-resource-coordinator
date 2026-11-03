@@ -4,6 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: R4 of docs/fork/PORT_PLAN.md, stdin_is_terminal and terminal_size in src/os/unix.rs.
 // Modified by the local-resource-coordinator fork, 2026-11-02: process_is_zombie forwards to src/os/; a zombie is not an own live process (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-02: a zombie group leader is no live job; zombie_group_leader forwards to src/os/ (issue #97).
+// Modified by the local-resource-coordinator fork, 2026-11-03: group_members and process_uids forward to src/os/ (issue #115).
 //! This module reads the machine capacity and the current machine load.
 //! It also holds the process functions that qex needs.
 //!
@@ -72,6 +73,22 @@ pub fn same_process_start(pid: i32, recorded: Option<u64>) -> bool {
 
 pub fn process_start_token(pid: i32) -> Option<u64> {
     crate::os::process_start_token(pid)
+}
+
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the fix of issue #115 calls it")
+)]
+pub fn process_uids(pid: i32) -> Option<(u32, u32)> {
+    crate::os::process_uids(pid)
+}
+
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the fix of issue #115 calls it")
+)]
+pub fn group_members(pgid: i32) -> Option<Vec<i32>> {
+    crate::os::group_members(pgid)
 }
 
 pub fn pid_namespace() -> Option<String> {
@@ -339,6 +356,57 @@ mod tests {
         let _ = (leads, reserved);
         assert!(!alive, "a zombie is not a live job");
         assert!(!zombie_group_leader(-1) && !zombie_group_leader(0));
+    }
+
+    #[test]
+    fn group_members_lists_the_group_of_a_child() {
+        use std::os::unix::process::CommandExt;
+        let mut leader = std::process::Command::new("sh")
+            .args(["-c", "sleep 30 & sleep 30 & wait"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pgid = leader.id() as i32;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut members = group_members(pgid);
+        while members.as_ref().map_or(0, Vec::len) < 3 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            members = group_members(pgid);
+        }
+        let in_group: Vec<bool> = members
+            .iter()
+            .flatten()
+            .map(|&m| unsafe { libc::getpgid(m) } == pgid)
+            .collect();
+        unsafe { libc::killpg(pgid, libc::SIGKILL) };
+        leader.wait().unwrap();
+        let members = members.expect("the group of a child can be listed");
+        assert_eq!(
+            members.len(),
+            3,
+            "the leader and its two children: {members:?}"
+        );
+        assert!(
+            members.contains(&pgid),
+            "the leader is a member: {members:?}"
+        );
+        assert!(!members.contains(&(std::process::id() as i32)));
+        assert!(in_group.iter().all(|&b| b), "every member is in the group");
+        assert!(group_members(-1).is_none() && group_members(0).is_none());
+    }
+
+    #[test]
+    fn process_uids_of_a_child_are_this_process_uids() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let uids = process_uids(child.id() as i32);
+        child.kill().ok();
+        child.wait().unwrap();
+        let mine = unsafe { (libc::getuid(), libc::geteuid()) };
+        assert_eq!(uids, Some(mine), "a child keeps the uids of its parent");
+        assert!(process_uids(-1).is_none() && process_uids(0).is_none());
     }
 }
 

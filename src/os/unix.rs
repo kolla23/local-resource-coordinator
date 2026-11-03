@@ -267,7 +267,7 @@ pub fn same_process_start(pid: i32, recorded: Option<u64>) -> bool {
 /// shows that the recorded process stopped and a stranger holds the number.
 ///
 /// The unit of the value differs between systems. Compare two values for
-/// equality only; never read the value as a time.
+/// equality, or for order within one start of the machine; never read the value as a time.
 pub fn process_start_token(pid: i32) -> Option<u64> {
     if pid <= 0 {
         return None;
@@ -301,6 +301,90 @@ pub fn process_start_token(pid: i32) -> Option<u64> {
     // Without this value, qex loses the reuse test only. It continues to test
     // the process for life.
     None
+}
+
+/// Gives the real and the effective uid of a process. `None` when the system will not say,
+/// which a caller that needs the owner must treat as a stranger.
+pub fn process_uids(pid: i32) -> Option<(u32, u32)> {
+    if pid <= 0 {
+        return None;
+    }
+    #[cfg(target_os = "linux")]
+    if let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) {
+        // The line holds the real, effective, saved and file system uids.
+        let line = status.lines().find_map(|l| l.strip_prefix("Uid:"))?;
+        let mut uids = line.split_whitespace().map(|f| f.parse::<u32>().ok());
+        return Some((uids.next()??, uids.next()??));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        let rc = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                info.as_mut_ptr().cast(),
+                size,
+            )
+        };
+        if rc == size {
+            let info = unsafe { info.assume_init() };
+            return Some((info.pbi_ruid, info.pbi_uid));
+        }
+    }
+    None
+}
+
+/// Lists the pids in the process group `pgid`. `None` when the process table cannot be
+/// read: a caller must not take that for an empty group.
+pub fn group_members(pgid: i32) -> Option<Vec<i32>> {
+    if pgid <= 0 {
+        return None;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let mut members = Vec::new();
+        for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+            let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse().ok()) else {
+                continue;
+            };
+            // A process that ended after the listing has no `stat`; it holds nothing.
+            let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+                continue;
+            };
+            // After the last `)`, field 1 is the state and field 3 is the group.
+            let group = stat.rsplit_once(')').and_then(|(_, rest)| {
+                rest.split_whitespace()
+                    .nth(2)
+                    .and_then(|f| f.parse::<i32>().ok())
+            });
+            if group == Some(pgid) {
+                members.push(pid);
+            }
+        }
+        Some(members)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let result = std::process::Command::new("ps")
+            .args(["-A", "-o", "pid=,pgid="])
+            .output()
+            .ok()
+            .filter(|r| r.status.success())?;
+        let members = String::from_utf8_lossy(&result.stdout)
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.split_whitespace().map(|f| f.parse::<i32>().ok());
+                match (fields.next()?, fields.next()?) {
+                    (Some(pid), Some(group)) if group == pgid => Some(pid),
+                    _ => None,
+                }
+            })
+            .collect();
+        Some(members)
+    }
 }
 
 /// Names the pid namespace of this process.
