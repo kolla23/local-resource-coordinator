@@ -3,6 +3,7 @@ title: qex reference
 description: Every command, option, claim word and configuration field.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-10-01: the update check defaults to never (issue #4). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: the default [update] url names this project's releases (issue #113). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -642,10 +643,12 @@ qex version --check --json   # the same answer for a program
 | Exit code 1 | qex could not ask. The message says why, and nothing changed. |
 | `--json` | The answer of `qex version`, with an `update` object added: `version`, `newest`, `newer`, `development`, `source`, `error`. |
 
-**This build asks nothing by default.** It sets `check = "never"`, because
-the default address is upstream qex's releases, not this project's (see
-`docs/fork/DECISION_UPDATE_CHECK.md`). Set `check` to a time to turn the
-automatic check on; `qex version --check` always asks.
+**This build asks nothing by default.** It sets `check = "never"` (see
+`docs/fork/DECISION_UPDATE_CHECK.md`). The default address is this project's
+releases, and it has published none yet: until it does, the service answers
+"not found", the automatic check records that and says nothing, and
+`qex version --check` says that it could not ask. Set `check` to a time to turn
+the automatic check on; `qex version --check` always asks.
 
 **The coordinator asks, and your command never does.** A check must not delay a
 command and must not fail one, so the network stays out of the path of a
@@ -663,7 +666,7 @@ is unaffected.
 ```toml
 [update]
 check   = "never"     # a time such as `7d`, or `never` (the default)
-url     = "https://api.github.com/repos/stephenc/qex/releases/latest"
+url     = "https://api.github.com/repos/kolla23/local-resource-coordinator/releases/latest"
 timeout = "5s"
 ```
 

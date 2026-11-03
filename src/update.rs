@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests of the line and record turn the check on, since the default is now never (issue #4); tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-02: update.lock is opened with O_NOFOLLOW, with a test (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-03: the text of a newer release names this project's releases (issue #113).
 //! Looks for a newer release of qex, and says so one time.
 //!
 //! # Who asks
@@ -796,8 +797,9 @@ impl Report {
         if self.newer {
             return format!(
                 "A newer release exists: {newest}, from {source}.\n\
-                 Take it from https://github.com/stephenc/qex/releases/latest , or run \
-                 `cargo install qex`.\n\
+                 Take it from \
+                 https://github.com/kolla23/local-resource-coordinator/releases/latest , or \
+                 build it from the source.\n\
                  qex installs nothing by itself."
             );
         }

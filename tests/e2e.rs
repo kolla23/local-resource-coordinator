@@ -3,6 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-02: a zombie counts as a stopped coordinator (issue #30).
 // Modified by the local-resource-coordinator fork, 2026-10-02: the ownership test asks again when a question meets the dying coordinator.
 // Modified by the local-resource-coordinator fork, 2026-10-01: a coordinator with no [update] check writes no update record (issue #4).
+// Modified by the local-resource-coordinator fork, 2026-11-03: a service with no release (404) makes the automatic check fail quietly (issue #113).
 // Modified by the local-resource-coordinator fork, 2026-10-02: the suite needs the test-fixtures feature; nine of the ten sampled tests run the portable `testjob` in place of Unix programs (the /tmp one is unchanged).
 // Modified by the local-resource-coordinator fork, 2026-10-03: two more tests run `testjob`: the record dated before the boot (std `set_modified` in place of `touch`) and the job that starts again (`count`/`if-count-below`/`spin` in place of `sh -c`).
 // Modified by the local-resource-coordinator fork, 2026-10-06: nine tests pin the mode of each path qex makes: the state-directory census, the first start, four directories whose last writer is one call, the pruned history, the tail file and the TMPDIR socket directory (R3 of docs/fork/PORT_PLAN.md).
@@ -1947,6 +1948,120 @@ fn the_default_asks_nothing_and_writes_nothing() {
         std::thread::sleep(Duration::from_millis(250));
     }
     assert!(h.qex(&["info", "--no-start"]).status.success());
+}
+
+/// A project with no release yet: the service answers 404, as GitHub does for
+/// `releases/latest` of a repository that has published none (issue #113).
+///
+/// The automatic check, once a user turns it on, must fail QUIETLY: a job still
+/// runs, no command prints a word about it, and the record keeps the fault for
+/// `qex version --check`, which says that it could not ask and gives 1.
+#[test]
+fn a_service_with_no_release_fails_quietly() {
+    use std::io::{Read, Write};
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    use std::sync::atomic::AtomicUsize;
+
+    // A LOCAL SERVICE THAT ANSWERS AS GITHUB DOES FOR A PROJECT WITH NO RELEASE.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let asked = Arc::new(AtomicUsize::new(0));
+    {
+        let asked = Arc::clone(&asked);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                // Read the request up to the end of its head, then answer.
+                let mut seen = Vec::new();
+                let mut buf = [0u8; 1024];
+                while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => seen.extend_from_slice(&buf[..n]),
+                    }
+                }
+                asked.fetch_add(1, Ordering::SeqCst);
+                let body = r#"{"message":"Not Found","status":"404"}"#;
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+    }
+    let url =
+        format!("http://127.0.0.1:{port}/repos/kolla23/local-resource-coordinator/releases/latest");
+
+    let h = Harness::with_default_config("updatenorelease");
+    h.write_config(&format!(
+        "[peers]\nenabled = false\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [update]\ncheck = \"300s\"\nurl = \"{url}\"\n"
+    ));
+
+    // THE CHECK IS DUE AT ONCE. A fresh install asks nothing in its first
+    // interval (see `a_fresh_install_asks_nothing_and_says_nothing`), so the
+    // record says that qex last asked long ago.
+    let state = h.root.join("state/qex");
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&state)
+        .unwrap();
+    let record = state.join("update.json");
+    std::fs::write(&record, r#"{"last_checked": 1}"#).unwrap();
+    std::fs::set_permissions(&record, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+    let id = h.submit(&["submit", "--", "true"]);
+    let out = h.qex(&["wait", &id]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "a job runs whatever the service says"
+    );
+
+    // The coordinator asked, and kept the fault.
+    let read = || -> serde_json::Value {
+        std::fs::read(&record)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    };
+    h.until(
+        "the coordinator asked and recorded the fault",
+        Duration::from_secs(45),
+        || read()["error"].is_string(),
+    );
+    assert!(asked.load(Ordering::SeqCst) >= 1, "the service was asked");
+    let value = read();
+    assert!(value["newest"].is_null(), "no release was named: {value}");
+
+    // QUIET: the next commands succeed and say nothing about the check.
+    let id = h.submit(&["submit", "--", "true"]);
+    let out = h.qex(&["wait", &id]);
+    assert_eq!(out.status.code(), Some(0));
+    let info = h.qex(&["info"]);
+    assert!(info.status.success());
+    for said in [&out.stderr, &info.stderr] {
+        let said = String::from_utf8_lossy(said);
+        assert!(
+            !said.contains("release") && !said.contains("404") && !said.contains("could not ask"),
+            "a failed automatic check must print nothing to a command: {said}"
+        );
+    }
+
+    // A person who asks learns that qex could not ask, and nothing else broke.
+    let out = h.qex(&["version", "--check"]);
+    assert_eq!(out.status.code(), Some(1), "qex could not ask");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("could not ask"), "got: {said}");
+    assert!(said.contains("Nothing changed"), "got: {said}");
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("panicked"),
+        "a 404 must not crash qex"
+    );
 }
 
 /// The first run of a fresh install asks nothing.
