@@ -187,7 +187,8 @@ pub fn job_pid_alive(pid: i32) -> bool {
     if pid <= 0 {
         return false;
     }
-    unsafe { libc::getpgid(pid) == pid }
+    // A zombie keeps its group and start time, but it is the job that ended (#97).
+    unsafe { libc::getpgid(pid) == pid && !process_is_zombie(pid) }
 }
 
 /// Tests if a process of THIS USER is alive; a zombie is not.
