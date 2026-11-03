@@ -1,5 +1,7 @@
 # Modified by the local-resource-coordinator fork, 2026-10-02: the end-to-end
 # tests run with --features test-fixtures.
+# Modified by the local-resource-coordinator fork, 2026-11-03: the crates.io
+# job comment no longer names the removed Pages deployment (issue #122).
 name: Release
 
 # ONE workflow makes the release, from the tag.
@@ -384,8 +386,8 @@ jobs:
   # second way. The publish job is skipped while the secret CARGO_REGISTRY_TOKEN
   # does not exist, so the workflow is complete before the token arrives.
   #
-  # `environment` makes this publish a deployment, next to github-pages, so the
-  # Deployments page of the repository holds both places that a release goes.
+  # `environment` makes this publish a deployment, so the Deployments page of
+  # the repository links each crates.io release.
   # A job `if` cannot read `secrets`, so a gate job writes whether the token
   # exists. The publish job is skipped when it does not, because a skipped job
   # makes no deployment, and a green job with no publish would.
