@@ -4071,11 +4071,19 @@ fn find_id_on_disk(raw: &str) -> Result<Option<uuid::Uuid>> {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
+        // Only a hyphenated id: callers rebuild jobs/<id> from it, which may be another entry.
+        let Some(id) = name
+            .parse::<uuid::Uuid>()
+            .ok()
+            .filter(|id| id.to_string() == name)
+        else {
+            continue;
+        };
         if name.starts_with(raw) && is_real_dir(&entry) {
             if found.is_some() {
                 bail!("`{raw}` names more than one job. Write more characters of the id.");
             }
-            found = name.parse::<uuid::Uuid>().ok();
+            found = Some(id);
         }
     }
     Ok(found)
