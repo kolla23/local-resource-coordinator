@@ -14,7 +14,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie supervisor under a subreaper; the recovery test no longer waits for the reaper (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-02: eight tests plant a symbolic link at a state or coordinator file and expect its target untouched (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: seven tests plant a symbolic link at a job file and expect its target untouched (issue #88).
-// Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie job process; recovery and reap must not stop it (issue #97).
+// Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie job process; recovery and reap must not stop it; five tests check what its group left (issue #97).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -4810,6 +4810,277 @@ fn reap_counts_a_zombie_job_process_as_ended() {
         error.starts_with("the supervisor stopped without a result")
             && !error.contains("qex stopped the job process"),
         "reap must count the zombie job process as ended: {error}"
+    );
+}
+
+/// The job of the leftover tests: its `sh` leader leaves a `sleep 600` that ignores TERM in its
+/// group and writes that pid to `$1`. 600 s outlasts every wait of a test.
+#[cfg(target_os = "linux")]
+const LEFTOVER_JOB: &str = r#"trap '' TERM; sleep 600 & echo $! > "$1"; trap - TERM; wait"#;
+
+/// Kills a leftover on drop, also when a test panics; made after the `Holder`, so it drops first
+/// and the pid is still reserved.
+#[cfg(target_os = "linux")]
+struct Leftover(i32);
+
+#[cfg(target_os = "linux")]
+impl Drop for Leftover {
+    fn drop(&mut self) {
+        unsafe { libc::kill(self.0, libc::SIGKILL) };
+    }
+}
+
+/// A held leftover job, running, with the pids the tests act on.
+#[cfg(target_os = "linux")]
+struct LeftoverJob {
+    id: String,
+    leader: i32,
+    supervisor: i32,
+    held: i32,
+}
+
+#[cfg(target_os = "linux")]
+impl Harness {
+    /// Submits `LEFTOVER_JOB` under a `Holder` and waits until it runs and its leftover exists.
+    fn held_leftover_job(&self) -> (Holder, LeftoverJob, Leftover) {
+        let file = self.root.join("leftover.pid");
+        let file_text = file.to_str().unwrap().to_string();
+        let (holder, id) = self.held_submit(&["sh", "-c", LEFTOVER_JOB, "sh", &file_text]);
+        self.until("the job operates", Duration::from_secs(45), || {
+            let s = self.status_json(&id);
+            s["state"].as_str() == Some("running")
+                && s["supervisor_pid"].as_i64().is_some()
+                && s["pid"].as_i64().is_some()
+        });
+        let mut leftover = 0;
+        self.until(
+            "the job names its leftover",
+            Duration::from_secs(30),
+            || {
+                let text = std::fs::read_to_string(&file).unwrap_or_default();
+                leftover = text.trim().parse().unwrap_or(0);
+                leftover > 0
+            },
+        );
+        let guard = Leftover(leftover);
+        let s = self.status_json(&id);
+        let job = LeftoverJob {
+            leader: s["pid"].as_i64().unwrap() as i32,
+            supervisor: s["supervisor_pid"].as_i64().unwrap() as i32,
+            held: holder.0.id() as i32,
+            id,
+        };
+        assert_eq!(
+            unsafe { libc::getpgid(leftover) },
+            job.leader,
+            "the leftover is in the group of the job"
+        );
+        assert!(
+            Harness::term_bit(leftover, "SigIgn:"),
+            "the leftover ignores TERM"
+        );
+        (holder, job, guard)
+    }
+
+    /// Says whether the SIGTERM bit is set in one signal mask line of `/proc/<pid>/status`.
+    fn term_bit(pid: i32, field: &str) -> bool {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+        let line = status.lines().find(|l| l.starts_with(field)).unwrap();
+        let mask = u64::from_str_radix(line[field.len()..].trim(), 16).unwrap();
+        mask & (1 << (libc::SIGTERM - 1)) != 0
+    }
+
+    /// Kills the coordinator, then the supervisor, so the holder adopts the live job leader.
+    /// Runs no qex command: the next one starts recovery.
+    fn orphan_the_job(&self, job: &LeftoverJob) {
+        let coordinator = self.coordinator_pid();
+        unsafe { libc::kill(coordinator, libc::SIGKILL) };
+        self.until(
+            "the holder adopts the supervisor",
+            Duration::from_secs(30),
+            || {
+                Harness::state_in_proc(coordinator) == Some('Z')
+                    && Harness::parent_in_proc(job.supervisor) == Some(job.held)
+            },
+        );
+        unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+        self.until(
+            "the holder adopts the job process",
+            Duration::from_secs(30),
+            || Harness::parent_in_proc(job.leader) == Some(job.held),
+        );
+    }
+
+    /// `orphan_the_job`, then kills the leader, so recovery finds it a zombie of the holder.
+    fn zombie_leader_before_recovery(&self, job: &LeftoverJob, leftover: i32) {
+        self.orphan_the_job(job);
+        unsafe { libc::kill(job.leader, libc::SIGKILL) };
+        self.until(
+            "the leader is a zombie and the holder adopts the leftover",
+            Duration::from_secs(30),
+            || {
+                Harness::state_in_proc(job.leader) == Some('Z')
+                    && Harness::parent_in_proc(leftover) == Some(job.held)
+            },
+        );
+        assert_eq!(unsafe { libc::getpgid(job.leader) }, job.leader);
+        assert!(!Harness::stopped(leftover), "the leftover runs");
+    }
+
+    /// Rewrites one field of a job record without a qex command.
+    fn plant_in_status(&self, id: &str, edit: impl FnOnce(&mut serde_json::Value)) {
+        let path = self.job_dir(id).join("status.json");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        edit(&mut value);
+        std::fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
+    }
+}
+
+/// Recovery kills what a zombie job leader left in its group (#97).
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_stops_the_leftovers_of_a_zombie_job_process() {
+    let h = Harness::with_default_config("leftrec");
+    let (_holder, job, leftover) = h.held_leftover_job();
+    h.zombie_leader_before_recovery(&job, leftover.0);
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    h.until("the leftover is killed", Duration::from_secs(20), || {
+        Harness::stopped(leftover.0)
+    });
+}
+
+/// A leader that TERM ends becomes a zombie; what it left that ignores TERM is still killed (#97).
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_stops_leftovers_that_ignore_term_when_the_job_process_ends() {
+    let h = Harness::with_default_config("leftterm");
+    let (_holder, job, leftover) = h.held_leftover_job();
+    h.orphan_the_job(&job);
+    assert!(
+        !Harness::term_bit(job.leader, "SigIgn:") && !Harness::term_bit(job.leader, "SigCgt:"),
+        "TERM must end the leader"
+    );
+    assert!(!Harness::stopped(leftover.0), "the leftover runs");
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.status_json(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("; qex stopped the job process"),
+        "recovery must stop the live job process: {error}"
+    );
+    h.until("the leftover is killed", Duration::from_secs(20), || {
+        Harness::stopped(leftover.0)
+    });
+}
+
+/// `reap` kills what a zombie job leader left in its group (#97).
+#[test]
+#[cfg(target_os = "linux")]
+fn reap_stops_the_leftovers_of_a_zombie_job_process() {
+    let h = Harness::with_default_config("leftreap");
+    let (_holder, job, leftover) = h.held_leftover_job();
+    // A stopped supervisor cannot collect the leader, so the leader ends as its zombie.
+    unsafe { libc::kill(job.supervisor, libc::SIGSTOP) };
+    h.until("the supervisor is stopped", Duration::from_secs(30), || {
+        Harness::state_in_proc(job.supervisor) == Some('T')
+    });
+    unsafe { libc::kill(job.leader, libc::SIGKILL) };
+    h.until(
+        "the leader is a zombie and the holder adopts the leftover",
+        Duration::from_secs(30),
+        || {
+            Harness::state_in_proc(job.leader) == Some('Z')
+                && Harness::parent_in_proc(leftover.0) == Some(job.held)
+        },
+    );
+    assert!(!Harness::stopped(leftover.0), "the leftover runs");
+    unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.status_json(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.starts_with("the supervisor stopped without a result"),
+        "reap must give its cause: {error}"
+    );
+    h.until("the leftover is killed", Duration::from_secs(20), || {
+        Harness::stopped(leftover.0)
+    });
+}
+
+/// A record from an earlier start of the machine gets no signal to its group (#97).
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_leaves_the_group_alone_for_a_record_from_an_earlier_start() {
+    let h = Harness::with_default_config("leftboot");
+    let (_holder, job, leftover) = h.held_leftover_job();
+    h.zombie_leader_before_recovery(&job, leftover.0);
+    h.plant_in_status(&job.id, |v| {
+        assert!(v["boot_id"].is_string(), "the record has a boot id: {v}");
+        v["boot_id"] = serde_json::Value::String("an-earlier-start".to_string());
+    });
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.status_json(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("the machine restarted"),
+        "the earlier-start branch must run: {error}"
+    );
+    // Recovery signals before it writes the failed record, so a sweep would have run by now.
+    assert_eq!(h.qex(&["wait", &job.id]).status.code(), Some(121));
+    assert!(
+        !Harness::stopped(leftover.0),
+        "a record from an earlier start must not have its group signalled"
+    );
+}
+
+/// A leader with another start time than the record names gets no signal to its group (#97).
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_leaves_the_group_alone_when_the_start_time_differs() {
+    let h = Harness::with_default_config("leftstart");
+    let (_holder, job, leftover) = h.held_leftover_job();
+    h.zombie_leader_before_recovery(&job, leftover.0);
+    h.plant_in_status(&job.id, |v| {
+        let token = v["pid_start_token"].as_u64();
+        assert!(token.is_some(), "the record has a start time: {v}");
+        v["pid_start_token"] = serde_json::Value::from(token.unwrap() + 1);
+    });
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.status_json(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert_eq!(
+        error, "the coordinator stopped, and neither the job nor its supervisor continued",
+        "the same-boot final branch must run"
+    );
+    // Recovery signals before it writes the failed record, so a sweep would have run by now.
+    assert_eq!(h.qex(&["wait", &job.id]).status.code(), Some(121));
+    assert!(
+        !Harness::stopped(leftover.0),
+        "a leader with another start time must not have its group signalled"
     );
 }
 
