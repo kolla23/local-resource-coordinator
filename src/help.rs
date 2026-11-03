@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: config template shows check = "never" (issue #4).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100).
+// Modified by the local-resource-coordinator fork, 2026-11-03: the default [update] url names this project's releases (issue #113).
 //! This module holds the text for the `qex help <topic>` command.
 //!
 //! An agent reads this text to learn the tool. Each topic is thus short and
@@ -846,7 +847,7 @@ that qex uses now.
 
     [update]
     check   = \"never\"     # how often qex looks for a newer release, e.g. `7d`
-    url     = \"https://api.github.com/repos/stephenc/qex/releases/latest\"
+    url     = \"https://api.github.com/repos/kolla23/local-resource-coordinator/releases/latest\"
     timeout = \"5s\"        # how long qex waits for that service
 
 A newer qex
@@ -856,9 +857,11 @@ qex can look for a newer release of itself, and it says one line when it finds
 one. It never installs anything: the person who installed qex chose how, and a
 package manager can own that file.
 
-This build does not look by default: `check` is `never`, because the default
-address is upstream qex's releases. Set `check` to a time such as `7d` to turn
-the automatic check on.
+This build does not look by default: `check` is `never`. The default address is
+this project's releases, and it has published none yet: until it does, a check
+finds nothing, the automatic check says nothing, and `qex version --check` says
+that it could not ask. Set `check` to a time such as `7d` to turn the automatic
+check on.
 
 `[update] check = \"never\"` stops the AUTOMATIC check completely. qex then opens
 no connection of its own, writes no file for it, and says nothing about a
