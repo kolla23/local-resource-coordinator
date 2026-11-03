@@ -16,7 +16,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: eight tests plant a symbolic link at a state or coordinator file and expect its target untouched (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: seven tests plant a symbolic link at a job file and expect its target untouched (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie job process; recovery and reap must not stop it; five tests check what its group left (issue #97).
-// Modified by the local-resource-coordinator fork, 2026-11-03: five tests for qex du and qex gc on job subfolders and on symbolic links in a job or in jobs/ (issue #101).
+// Modified by the local-resource-coordinator fork, 2026-11-03: six tests for qex du and qex gc on job subfolders and on symbolic links in a job, in jobs/ or at the state directory (issue #101).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -8589,6 +8589,27 @@ fn du_and_gc_do_not_walk_or_delete_through_a_link_in_jobs() {
     assert_eq!(
         std::fs::read(outside.join("inner/small")).unwrap(),
         vec![b'y'; 4_000]
+    );
+}
+
+/// `other_bytes` still counts the files of a state directory behind the user's own link (#101).
+#[test]
+fn du_counts_the_other_files_of_a_state_directory_behind_a_link() {
+    let h = Harness::with_default_config("du-state-link");
+    let elsewhere = h.root.join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, h.root.join("state/qex")).unwrap();
+    du_job_with_no_coordinator(&h);
+    let before = du_json(&h);
+
+    std::fs::create_dir_all(elsewhere.join("run")).unwrap();
+    std::fs::write(elsewhere.join("run/blob"), vec![b'x'; 50_000]).unwrap();
+    let after = du_json(&h);
+
+    assert_eq!(
+        du_bytes(&after, "other_bytes") - du_bytes(&before, "other_bytes"),
+        50_000,
+        "before {before}, after {after}"
     );
 }
 
