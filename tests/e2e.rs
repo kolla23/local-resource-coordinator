@@ -19,7 +19,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: six tests for qex du and qex gc on job subfolders and on symbolic links in a job, in jobs/ or at the state directory (issue #101).
 // Modified by the local-resource-coordinator fork, 2026-11-03: Drop waits until each process that it signalled has stopped (issue #126).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a link in jobs/ to an outside job record; du, complete, list, status and logs ignore it (issue #129).
-// Modified by the local-resource-coordinator fork, 2026-11-03: five tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: eleven tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -5054,15 +5054,6 @@ impl Harness {
         assert_eq!(unsafe { libc::getpgid(job.leader) }, job.leader);
         assert!(!Harness::stopped(leftover), "the leftover runs");
     }
-
-    /// Rewrites one field of a job record without a qex command.
-    fn plant_in_status(&self, id: &str, edit: impl FnOnce(&mut serde_json::Value)) {
-        let path = self.job_dir(id).join("status.json");
-        let text = std::fs::read_to_string(&path).unwrap();
-        let mut value: serde_json::Value = serde_json::from_str(&text).unwrap();
-        edit(&mut value);
-        std::fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
-    }
 }
 
 /// Recovery kills what a zombie job leader left in its group (#97).
@@ -5229,6 +5220,112 @@ impl Harness {
         let job = self.submit_unheld_job(&["sh", "-c", LEFTOVER_JOB, "sh", &file_text]);
         let guard = self.leftover_in_group(&file, job.leader);
         (job, guard)
+    }
+
+    /// Rewrites one field of a job record without a qex command.
+    fn plant_in_status(&self, id: &str, edit: impl FnOnce(&mut serde_json::Value)) {
+        let path = self.job_dir(id).join("status.json");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        edit(&mut value);
+        std::fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
+    }
+
+    /// The start token in the job record on disk.
+    fn recorded_start(&self, id: &str) -> Option<u64> {
+        let text = std::fs::read_to_string(self.job_dir(id).join("status.json")).unwrap();
+        serde_json::from_str::<serde_json::Value>(&text).unwrap()["pid_start_token"].as_u64()
+    }
+
+    /// A process's start token, read from the sources qex reads, so a test can place a value
+    /// between two of them.
+    fn start_token(pid: i32) -> Option<u64> {
+        #[cfg(target_os = "linux")]
+        {
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+            let (_, rest) = stat.rsplit_once(')')?;
+            rest.split_whitespace().nth(19)?.parse().ok()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+            let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+            let rc = unsafe {
+                libc::proc_pidinfo(
+                    pid,
+                    libc::PROC_PIDTBSDINFO,
+                    0,
+                    info.as_mut_ptr().cast(),
+                    size,
+                )
+            };
+            if rc != size {
+                return None;
+            }
+            let info = unsafe { info.assume_init() };
+            Some(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+        }
+    }
+
+    /// Kills the coordinator and the supervisor, waiting for each to be gone, and gives the
+    /// coordinator's pid; runs no qex command after that, so the next one starts recovery.
+    fn kill_coordinator_and_supervisor(&self, job: &UnheldJob) -> i32 {
+        let coordinator = self.coordinator_pid();
+        unsafe { libc::kill(coordinator, libc::SIGKILL) };
+        self.until("the coordinator is gone", Duration::from_secs(30), || {
+            Harness::stopped(coordinator)
+        });
+        unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+        self.until("the supervisor is gone", Duration::from_secs(30), || {
+            Harness::stopped(job.supervisor)
+        });
+        coordinator
+    }
+
+    /// `kill_coordinator_and_supervisor`, then kills the leader and waits until the system
+    /// collected it while each of `leftovers` holds its group.
+    fn kill_all_but(&self, job: &UnheldJob, leftovers: &[i32]) {
+        self.kill_coordinator_and_supervisor(job);
+        unsafe { libc::kill(job.leader, libc::SIGKILL) };
+        for &leftover in leftovers {
+            self.leader_collected(job.leader, leftover);
+        }
+    }
+
+    /// Starts recovery, waits until it failed the job, and gives the record's error.
+    fn recovered_as_failed(&self, id: &str) -> String {
+        self.until("the job is failed", Duration::from_secs(20), || {
+            self.state_of(id) == "failed"
+        });
+        // Recovery signals before it writes the failed record, so a KILL would have come by now.
+        assert_eq!(self.qex(&["wait", id]).status.code(), Some(121));
+        self.status_json(id)["error"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// The coordinator log's lines that leave a group alone.
+    fn refusal_lines(&self) -> Vec<String> {
+        let log = std::fs::read_to_string(self.root.join("state/qex/run/daemon.log"))
+            .expect("the coordinator writes its log");
+        let lines: Vec<String> = log
+            .lines()
+            .filter(|l| l.contains("qex leaves the process group"))
+            .map(str::to_string)
+            .collect();
+        eprintln!("refusal lines: {lines:?}");
+        lines
+    }
+
+    /// How many lines of the coordinator log leave group `group` of job `id` alone.
+    fn refusals_of(&self, id: &str, group: i32) -> usize {
+        let id: uuid::Uuid = id.parse().unwrap();
+        let token = format!("job {id}: qex leaves the process group {group} alone: ");
+        self.refusal_lines()
+            .iter()
+            .filter(|l| l.contains(&token))
+            .count()
     }
 
     /// Submits a job with no holder and waits until it runs.
@@ -5415,6 +5512,10 @@ fn recovery_stops_the_leftovers_of_a_collected_job_process() {
     h.until("the leftover is killed", Duration::from_secs(20), || {
         Harness::stopped(leftover.0)
     });
+    assert!(
+        h.refusal_lines().is_empty(),
+        "a group that passed its checks gets no refusal line"
+    );
 }
 
 /// Recovery TERMs a live leader, the system collects it while the coordinator is stopped, and
@@ -5586,6 +5687,207 @@ fn recovery_kills_a_leader_that_ignores_term_at_the_end_of_the_grace() {
         error.contains("; qex stopped the job process"),
         "recovery must stop the live job process: {error}"
     );
+}
+
+/// The error of recovery's final branch, the one that calls `kill_what_the_job_left`.
+#[cfg(unix)]
+const FINAL_BRANCH: &str =
+    "the coordinator stopped, and neither the job nor its supervisor continued";
+
+/// A collected leader's group whose members all started before the record's start gets no
+/// KILL (#115).
+#[test]
+#[cfg(unix)]
+fn recovery_leaves_a_collected_leaders_group_alone_when_the_record_names_a_later_start() {
+    let h = Harness::with_default_config("leftlater");
+    let (job, leftover) = h.unheld_leftover_job();
+    h.kill_all_but(&job, &[leftover.0]);
+    h.plant_in_status(&job.id, |v| {
+        let token = v["pid_start_token"]
+            .as_u64()
+            .expect("the record has a start time");
+        v["pid_start_token"] = serde_json::Value::from(token + 1_000_000_000_000);
+    });
+
+    assert_eq!(h.recovered_as_failed(&job.id), FINAL_BRANCH);
+    assert!(
+        Harness::runs(leftover.0),
+        "a later recorded start leaves the group alone"
+    );
+}
+
+/// A collected leader's group gets no KILL when the record has no start to compare (#115).
+#[test]
+#[cfg(unix)]
+fn recovery_leaves_a_collected_leaders_group_alone_without_a_recorded_start() {
+    let h = Harness::with_default_config("leftnostart");
+    let (job, leftover) = h.unheld_leftover_job();
+    h.kill_all_but(&job, &[leftover.0]);
+    h.plant_in_status(&job.id, |v| {
+        let token = v.as_object_mut().unwrap().remove("pid_start_token");
+        assert!(
+            token.is_some_and(|t| t.is_u64()),
+            "the record has a start time"
+        );
+    });
+
+    assert_eq!(h.recovered_as_failed(&job.id), FINAL_BRANCH);
+    assert!(
+        Harness::runs(leftover.0),
+        "a record with no start leaves the group alone"
+    );
+}
+
+/// The collected case keeps the `same_boot` guard: a record from an earlier start gets no
+/// signal to its group (#115).
+#[test]
+#[cfg(unix)]
+fn recovery_leaves_a_collected_leaders_group_alone_for_a_record_from_an_earlier_start() {
+    let h = Harness::with_default_config("leftgoneboot");
+    let (job, leftover) = h.unheld_leftover_job();
+    h.kill_all_but(&job, &[leftover.0]);
+    h.plant_in_status(&job.id, |v| {
+        assert!(v["boot_id"].is_string(), "the record has a boot id: {v}");
+        v["boot_id"] = serde_json::Value::String("an-earlier-start".to_string());
+    });
+
+    let error = h.recovered_as_failed(&job.id);
+    assert!(
+        error.contains("the machine restarted"),
+        "the earlier-start branch must run: {error}"
+    );
+    assert!(
+        Harness::runs(leftover.0),
+        "a record from an earlier start leaves the group alone"
+    );
+}
+
+/// `reap` leaves a collected leader's group alone when the record names a later start, and says
+/// so in the coordinator log (#115).
+#[test]
+#[cfg(unix)]
+fn reap_leaves_a_collected_leaders_group_alone_when_the_record_names_a_later_start() {
+    let h = Harness::with_default_config("leftlaterreap");
+    let (job, leftover) = h.unheld_leftover_job();
+    let coordinator = h.coordinator_pid();
+    // A stopped coordinator collects no supervisor, so `reap` looks only after the leader is gone.
+    unsafe { libc::kill(coordinator, libc::SIGSTOP) };
+    unsafe { libc::kill(job.supervisor, libc::SIGSTOP) };
+    Harness::poll_until("both are stopped", Duration::from_secs(30), || {
+        Harness::state_by_ps(coordinator) == Some('T')
+            && Harness::state_by_ps(job.supervisor) == Some('T')
+    });
+    unsafe { libc::kill(job.leader, libc::SIGKILL) };
+    Harness::poll_until("the leader is a zombie", Duration::from_secs(30), || {
+        Harness::state_by_ps(job.leader) == Some('Z')
+    });
+    unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+    h.leader_collected(job.leader, leftover.0);
+    h.plant_in_status(&job.id, |v| {
+        let token = v["pid_start_token"]
+            .as_u64()
+            .expect("the record has a start time");
+        v["pid_start_token"] = serde_json::Value::from(token + 1_000_000_000_000);
+    });
+    unsafe { libc::kill(coordinator, libc::SIGCONT) };
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.status_json(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.starts_with("the supervisor stopped without a result")
+            && !error.contains("; qex stopped the job process"),
+        "reap's branch for an ended leader must run: {error}"
+    );
+    h.qex(&["wait", &job.id]);
+    assert!(
+        Harness::runs(leftover.0),
+        "a later recorded start leaves the group alone"
+    );
+    assert_eq!(h.refusals_of(&job.id, job.leader), 1, "one refusal line");
+}
+
+/// The job of the every-member test: leftover A, then one second later leftover B.
+#[cfg(unix)]
+const TWO_LEFTOVER_JOB: &str =
+    r#"sleep 600 & echo $! > "$1"; sleep 1; sleep 600 & echo $! > "$2"; wait"#;
+
+/// One member that started before the record's start refuses the whole group, even when another
+/// started after it (#115).
+#[test]
+#[cfg(unix)]
+fn recovery_leaves_a_collected_leaders_group_alone_when_one_member_started_before_the_record() {
+    let h = Harness::with_default_config("leftorder");
+    let (fa, fb) = (h.root.join("a.pid"), h.root.join("b.pid"));
+    let (ta, tb) = (fa.to_str().unwrap(), fb.to_str().unwrap());
+    let job = h.submit_unheld_job(&["sh", "-c", TWO_LEFTOVER_JOB, "sh", ta, tb]);
+    let a = h.leftover_in_group(&fa, job.leader);
+    let b = h.leftover_in_group(&fb, job.leader);
+    let token = |pid| Harness::start_token(pid).expect("the test reads a start token");
+    assert_eq!(
+        Some(token(job.leader)),
+        h.recorded_start(&job.id),
+        "the test reads the token as qex does"
+    );
+    let (ta, tb) = (token(a.0), token(b.0));
+    assert!(ta + 2 <= tb, "A started well before B: {ta} {tb}");
+    h.kill_all_but(&job, &[a.0, b.0]);
+    h.plant_in_status(&job.id, |v| {
+        v["pid_start_token"] = serde_json::Value::from(ta + (tb - ta) / 2);
+    });
+
+    assert_eq!(h.recovered_as_failed(&job.id), FINAL_BRANCH);
+    assert!(
+        Harness::runs(a.0),
+        "A started before the record: the group is left alone"
+    );
+    assert!(
+        Harness::runs(b.0),
+        "B passed its checks, but A refused the group"
+    );
+}
+
+/// After qex's TERM, a collected leader's group with no recorded start gets no KILL at the end
+/// of the grace, and the coordinator log says so (#115).
+#[test]
+#[cfg(unix)]
+fn recovery_leaves_a_collected_leaders_group_alone_after_term_without_a_recorded_start() {
+    let h = Harness::with_default_config("leftgonetermstart");
+    let (job, leftover) = h.term_stop_job();
+    let coordinator = h.kill_coordinator_and_supervisor(&job);
+    assert!(!Harness::stopped(job.leader), "the leader runs");
+    assert!(!Harness::stopped(leftover.0), "the leftover runs");
+    h.plant_in_status(&job.id, |v| {
+        let token = v.as_object_mut().unwrap().remove("pid_start_token");
+        assert!(
+            token.is_some_and(|t| t.is_u64()),
+            "the record has a start time"
+        );
+    });
+    let mut stopped = h.term_stops_the_coordinator(&job, leftover.0, coordinator);
+    unsafe { libc::kill(stopped.pid, libc::SIGCONT) };
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.status_json(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("; qex stopped the job process"),
+        "recovery must TERM the live job process: {error}"
+    );
+    assert!(
+        Harness::runs(leftover.0),
+        "a record with no start leaves the group alone"
+    );
+    assert_eq!(h.refusals_of(&job.id, job.leader), 1, "one refusal line");
+    let _ = stopped.child.wait();
 }
 
 /// A record from an earlier start of the machine is dead, whatever its pids
