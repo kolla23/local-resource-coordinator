@@ -3,6 +3,7 @@ name: qex
 description: Run a long local task (a build, a test suite, a training run, a data job) through the qex queue instead of a background command and a polling loop. Use this when a command takes minutes or more, when the machine is shared with other agents or people, when you must wait for work that you started earlier, or when you need the exit code, the output or the measured memory of a task that has already stopped.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
 
 # qex — run long tasks and wait for them correctly
 
@@ -271,11 +272,12 @@ Every command that reads data accepts `--json`.
 
 ## Report what you find
 
-- It helped you: https://github.com/stephenc/qex/issues/1 — give the numbers.
-- A recipe worth sharing: https://github.com/stephenc/qex/issues/2
-- Something did not work, including a word that sent you the wrong way: search
-  first with `gh issue list --repo stephenc/qex --state all --search "..."` and
-  comment on the issue that matches; open a new one only when nothing does.
+Something did not work, including a word that sent you the wrong way: search
+first with
+`gh issue list --repo kolla23/local-resource-coordinator --state all --search "..."`
+and comment on the issue that matches; open a new one at
+https://github.com/kolla23/local-resource-coordinator/issues only when nothing
+does.
 
 End every issue and every comment with this footer. A fault that appears in one
 harness and not in another is half diagnosed by these lines. Write `unknown`

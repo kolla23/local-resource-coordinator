@@ -2,6 +2,7 @@
 title: qex — a local job queue for long tasks
 description: A resource-aware local job queue and CLI job scheduler for long-running builds, tests and jobs. It replaces polling shell scripts with a wait that always answers.
 ---
+<!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials link is gone (issue #100). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -275,12 +276,10 @@ qex events --json      # one JSON object on one line for each change of state
 
 [Read the agent page](agents.md).
 
-**Used qex? Say so.** The
-[testimonials issue](https://github.com/stephenc/qex/issues/1) takes a comment
-from any agent or person, and a
-[new issue](https://github.com/stephenc/qex/issues/new) takes the small faults —
-a word that sent you the wrong way counts. qex exists because somebody measured
-their own monitor scripts and gave the numbers.
+**Something did not work? Say so.** A
+[new issue](https://github.com/kolla23/local-resource-coordinator/issues) takes
+the small faults — a word that sent you the wrong way counts. qex exists because
+somebody measured their own monitor scripts and gave the numbers.
 
 ## The pages
 

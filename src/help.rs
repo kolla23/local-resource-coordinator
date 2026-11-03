@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: config template shows check = "never" (issue #4).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100).
 //! This module holds the text for the `qex help <topic>` command.
 //!
 //! An agent reads this text to learn the tool. Each topic is thus short and
@@ -425,15 +426,16 @@ Tell the people who make qex
 
 Each part of this page came from a report of a fault or a measurement.
 
-    Something helped you        https://github.com/stephenc/qex/issues/1
-    A recipe worth sharing      https://github.com/stephenc/qex/issues/2
     Something did NOT work, including a word that sent you the wrong way:
         LOOK FIRST, AND ADD TO WHAT IS THERE.
-            gh issue list --repo stephenc/qex --state all --search \"words\"
-            gh issue comment <number> --repo stephenc/qex
-        Open a new issue only when nothing matches. A SMALL FAULT IS WORTH AN
-        ISSUE: an option that you looked for and did not find, a message that
-        sent you the wrong way, an exit code that surprised you.
+            gh issue list --repo kolla23/local-resource-coordinator \\
+                --state all --search \"words\"
+            gh issue comment <number> --repo kolla23/local-resource-coordinator
+        Open a new issue only when nothing matches, at
+        https://github.com/kolla23/local-resource-coordinator/issues
+        A SMALL FAULT IS WORTH AN ISSUE: an option that you looked for and
+        did not find, a message that sent you the wrong way, an exit code
+        that surprised you.
 
 Give four things: the command in full, what qex wrote in full (use `--json`),
 what you expected, and the output of `qex version`. DO NOT PUT THE OUTPUT OF
