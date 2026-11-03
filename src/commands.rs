@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-11-01: the follower sets 0600 on a log file that exists (issue #56) and refuses a symlinked one.
 // Modified by the local-resource-coordinator fork, 2026-11-02: qex version answers when the state directory is refused (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-03: qex du and qex gc count job subfolders and never follow a symbolic link (issue #101).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -6804,7 +6805,7 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
     if let Ok(entries) = std::fs::read_dir(paths::jobs_dir()?) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() {
+            if !is_real_dir(&entry) {
                 continue;
             }
             let known = entry
@@ -6896,16 +6897,46 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
     Ok(0)
 }
 
-/// Gives the number of bytes that one directory holds.
+/// Gives the number of bytes that one directory holds, its subfolders included.
 fn directory_size(path: &std::path::Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(path) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .filter_map(|e| e.metadata().ok())
-        .map(|m| if m.is_dir() { 0 } else { m.len() })
-        .sum()
+    tree_size(path, None)
+}
+
+/// Sums the sizes in a tree, leaving out the subtree `skip`. A symbolic link counts
+/// as itself and is never followed; a folder that cannot be read counts 0.
+fn tree_size(root: &std::path::Path, skip: Option<&std::path::Path>) -> u64 {
+    match std::fs::symlink_metadata(root) {
+        Ok(m) if m.is_dir() => {}
+        Ok(m) => return m.len(),
+        Err(_) => return 0,
+    }
+    let mut total = 0u64;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            // DirEntry::metadata does not follow a link on Unix.
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            let path = entry.path();
+            if meta.is_dir() {
+                if skip != Some(path.as_path()) {
+                    stack.push(path);
+                }
+            } else {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
+/// Says whether an entry is a directory itself; a link to one is not.
+fn is_real_dir(entry: &std::fs::DirEntry) -> bool {
+    entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
 }
 
 /// Gives the records that a job which has not stopped still needs.
@@ -6953,7 +6984,7 @@ pub fn du(args: cli::DuArgs) -> Result<i32> {
     if let Ok(entries) = std::fs::read_dir(&jobs_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() {
+            if !is_real_dir(&entry) {
                 continue;
             }
             let size = directory_size(&path);
@@ -6982,8 +7013,8 @@ pub fn du(args: cli::DuArgs) -> Result<i32> {
     }
 
     // The files beside the jobs: the record of the ids, the measurements, the
-    // log of the coordinator.
-    let other = directory_size(&state) + directory_size(&paths::runtime_dir()?);
+    // log of the coordinator. `run/` lies inside the state directory; `jobs/` is counted above.
+    let other = tree_size(&state, Some(&jobs_dir));
     let total = total_jobs + other;
     let reclaimable: u64 = per_job
         .iter()

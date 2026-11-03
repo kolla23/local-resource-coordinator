@@ -8453,11 +8453,11 @@ fn du_counts_a_link_in_a_job_subfolder_as_itself() {
     assert_eq!(
         job(&after) - job(&before),
         links,
-        "the links count as themselves, their 2 MB of targets not at all: before {before}, after {after}"
+        "links count as themselves, not their 2 MB of targets: before {before}, after {after}"
     );
 }
 
-/// Each byte counts once: `other_bytes` takes the subfolders outside `jobs/`, not `jobs/` (issue #101).
+/// Each byte counts once: `other_bytes` takes subfolders outside `jobs/`, never `jobs/` (#101).
 #[test]
 fn du_counts_each_byte_once_across_jobs_and_other() {
     let h = Harness::with_default_config("du-once");
@@ -8488,7 +8488,7 @@ fn du_counts_each_byte_once_across_jobs_and_other() {
     }
 }
 
-/// `qex gc --dry-run` counts the bytes in a job's subfolders among those it would free (issue #101).
+/// `qex gc --dry-run` counts the bytes in a job's subfolders among those it frees (#101).
 #[test]
 fn gc_dry_run_counts_the_bytes_in_a_job_subfolder() {
     let h = Harness::with_default_config("gc-subfolder");
@@ -8568,7 +8568,7 @@ fn du_and_gc_do_not_walk_or_delete_through_a_link_in_jobs() {
         assert_eq!(
             du_bytes(&gc_after, key),
             du_bytes(&gc_before, key),
-            "`qex gc --dry-run` walked the link in jobs/: {key}: before {gc_before}, after {gc_after}"
+            "`qex gc --dry-run` walked the link in jobs/: {key}: {gc_before} then {gc_after}"
         );
     }
 
