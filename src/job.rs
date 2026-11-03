@@ -2,7 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: a job record is read only when the user owns it (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: read_all_from_disk skips a symbolic link in jobs/ (issue #129).
 // Modified by the local-resource-coordinator fork, 2026-11-03: read_all_from_disk skips a record whose id is not its folder's name (issue #135).
-// Modified by the local-resource-coordinator fork, 2026-11-03: the record names the pid namespace of its pid, pid_ns (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: the record names the pid namespace of its pid, pid_ns and pid_ns_init_start (issue #115).
 //! This module holds the job state that qex writes to the disk.
 //!
 //! The file `status.json` is the primary record of a job result. The supervisor
@@ -458,10 +458,12 @@ pub struct JobStatus {
     /// life nor group leadership alone proves that a pid is the job.
     #[serde(default)]
     pub pid_start_token: Option<u64>,
-    /// The pid namespace of `pid`, written and cleared with it; a coordinator in another
-    /// namespace reads the number as a stranger's. See `sys::pid_namespace`.
+    /// The pid namespace of `pid` and its pid 1's start, written and cleared with `pid`: another
+    /// namespace reads the number as a stranger's (`sys::pid_namespace_identity`).
     #[serde(default)]
     pub pid_ns: Option<String>,
+    #[serde(default)]
+    pub pid_ns_init_start: Option<u64>,
     /// The pid that the job HAD, kept after the job stops.
     ///
     /// This value is for a person who reads a log of the machine. NEVER SEND A
@@ -680,6 +682,7 @@ impl JobStatus {
             pid: None,
             pid_start_token: None,
             pid_ns: None,
+            pid_ns_init_start: None,
             last_pid: None,
             supervisor_pid: None,
             // From its birth, so no active record is ever without a

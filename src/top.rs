@@ -1,5 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
-// Modified by the local-resource-coordinator fork, 2026-11-03: a test record sets the new pid_ns field (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: a test record sets the new pid_ns fields (issue #115).
 //! This module holds the `qex top` command.
 //!
 //! The command shows the queue and refreshes it. For each job it shows the
@@ -1475,6 +1475,7 @@ mod tests {
             pid: Some(std::process::id() as i32),
             pid_start_token: None,
             pid_ns: None,
+            pid_ns_init_start: None,
             last_pid: None,
             supervisor_pid: None,
             boot_id: None,

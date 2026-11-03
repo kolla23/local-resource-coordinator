@@ -7,8 +7,9 @@ pub use unix::group_usage;
 pub use unix::{
     boot_id, boot_time_secs, chain_from, check_state_dir, clock_text, ensure_dir, group_members,
     job_pid_alive, make_private, near_stamp_text, own_pid_alive, pid_alive, pid_namespace,
-    process_exe, process_is_zombie, process_start_token, process_uids, rfc3339, same_process_start,
-    stamp_text, stdin_is_terminal, submitter_chain, terminal_size, zombie_group_leader,
+    pid_namespace_identity, process_exe, process_is_zombie, process_start_token, process_uids,
+    rfc3339, same_process_start, stamp_text, stdin_is_terminal, submitter_chain, terminal_size,
+    zombie_group_leader,
 };
 
 #[cfg(target_os = "linux")]

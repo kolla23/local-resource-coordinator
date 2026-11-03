@@ -3,7 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: qex du and qex gc count job subfolders and never follow a symbolic link (issue #101).
 // Modified by the local-resource-coordinator fork, 2026-11-03: find_id_on_disk skips a symbolic link in jobs/ (issue #129).
 // Modified by the local-resource-coordinator fork, 2026-11-03: qex gc counts a folder whose record names another id as one with no record (issue #135).
-// Modified by the local-resource-coordinator fork, 2026-11-03: a test record sets the new pid_ns field (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: a test record sets the new pid_ns fields (issue #115).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -7174,6 +7174,7 @@ mod tests {
             pid: Some(1),
             pid_start_token: None,
             pid_ns: None,
+            pid_ns_init_start: None,
             last_pid: None,
             supervisor_pid: None,
             boot_id: None,

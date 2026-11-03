@@ -5,7 +5,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: process_is_zombie forwards to src/os/; a zombie is not an own live process (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-02: a zombie group leader is no live job; zombie_group_leader forwards to src/os/ (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: group_members and process_uids forward to src/os/ (issue #115).
-// Modified by the local-resource-coordinator fork, 2026-11-03: the two forwarders lose their lint expectation, since the fix calls them (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: the two forwarders lose their lint expectation, since the fix calls them; pid_namespace_identity forwards to src/os/ (issue #115).
 //! This module reads the machine capacity and the current machine load.
 //! It also holds the process functions that qex needs.
 //!
@@ -86,6 +86,10 @@ pub fn group_members(pgid: i32) -> Option<Vec<i32>> {
 
 pub fn pid_namespace() -> Option<String> {
     crate::os::pid_namespace()
+}
+
+pub fn pid_namespace_identity() -> Option<(String, u64)> {
+    crate::os::pid_namespace_identity()
 }
 
 /// What qex reads about one process for the chain of a submission.

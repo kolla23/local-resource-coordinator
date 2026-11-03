@@ -20,7 +20,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: Drop waits until each process that it signalled has stopped (issue #126).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a link in jobs/ to an outside job record; du, complete, list, status and logs ignore it (issue #129).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a record whose id names a link in jobs/; list, logs, status, rerun and gc ignore the link (issue #135).
-// Modified by the local-resource-coordinator fork, 2026-11-03: fifteen tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: sixteen tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -5232,10 +5232,15 @@ impl Harness {
         std::fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
     }
 
+    /// The job record on disk, read without a qex command.
+    fn record(&self, id: &str) -> serde_json::Value {
+        let text = std::fs::read_to_string(self.job_dir(id).join("status.json")).unwrap();
+        serde_json::from_str(&text).unwrap()
+    }
+
     /// The start token in the job record on disk.
     fn recorded_start(&self, id: &str) -> Option<u64> {
-        let text = std::fs::read_to_string(self.job_dir(id).join("status.json")).unwrap();
-        serde_json::from_str::<serde_json::Value>(&text).unwrap()["pid_start_token"].as_u64()
+        self.record(id)["pid_start_token"].as_u64()
     }
 
     /// A process's start token, read from the sources qex reads, so a test can place a value
@@ -5506,6 +5511,8 @@ fn recovery_stops_the_leftovers_of_a_collected_job_process() {
     });
     unsafe { libc::kill(job.leader, libc::SIGKILL) };
     h.leader_collected(job.leader, leftover.0);
+    #[cfg(target_os = "linux")]
+    assert_the_record_names_this_namespace(&h.record(&job.id));
 
     h.until("the job is failed", Duration::from_secs(20), || {
         h.state_of(&job.id) == "failed"
@@ -5763,28 +5770,61 @@ fn recovery_leaves_a_collected_leaders_group_alone_for_a_record_from_an_earlier_
     );
 }
 
+/// Checks that a job record names this test's pid namespace and the start of its pid 1.
+#[cfg(target_os = "linux")]
+fn assert_the_record_names_this_namespace(v: &serde_json::Value) {
+    let here = std::fs::read_link("/proc/self/ns/pid").unwrap();
+    assert_eq!(
+        v["pid_ns"].as_str(),
+        here.to_str(),
+        "the record's pid namespace: {v}"
+    );
+    assert_eq!(
+        v["pid_ns_init_start"].as_u64(),
+        Harness::start_token(1),
+        "the start of the namespace's pid 1: {v}"
+    );
+}
+
+/// Recovers a collected leader's job after `plant` changed the record's pid namespace: the
+/// group is left alone, with one refusal line.
+#[cfg(target_os = "linux")]
+fn a_planted_namespace_leaves_the_group_alone(
+    name: &str,
+    plant: impl FnOnce(&mut serde_json::Value),
+) {
+    let h = Harness::with_default_config(name);
+    let (job, leftover) = h.unheld_leftover_job();
+    h.kill_all_but(&job, &[leftover.0]);
+    h.plant_in_status(&job.id, |v| {
+        assert_the_record_names_this_namespace(v);
+        plant(v);
+    });
+
+    assert_eq!(h.recovered_as_failed(&job.id), FINAL_BRANCH);
+    assert!(Harness::runs(leftover.0), "the group is left alone");
+    assert_eq!(h.refusals_of(&job.id, job.leader), 1, "one refusal line");
+}
+
 /// A record written in another pid namespace names a number that is a stranger's here: the
 /// collected case leaves that group alone, and the coordinator log says so (#115).
 #[test]
 #[cfg(target_os = "linux")]
 fn recovery_leaves_a_collected_leaders_group_alone_for_a_record_of_another_pid_namespace() {
-    let h = Harness::with_default_config("leftgonens");
-    let (job, leftover) = h.unheld_leftover_job();
-    h.kill_all_but(&job, &[leftover.0]);
-    h.plant_in_status(&job.id, |v| {
-        assert!(
-            v["pid_ns"].is_string(),
-            "the record names its pid namespace: {v}"
-        );
+    a_planted_namespace_leaves_the_group_alone("leftgonens", |v| {
         v["pid_ns"] = serde_json::Value::String("pid:[1]".to_string());
     });
+}
 
-    assert_eq!(h.recovered_as_failed(&job.id), FINAL_BRANCH);
-    assert!(
-        Harness::runs(leftover.0),
-        "a record of another pid namespace leaves the group alone"
-    );
-    assert_eq!(h.refusals_of(&job.id, job.leader), 1, "one refusal line");
+/// A namespace that reuses the record's namespace name has a pid 1 of another start: the group
+/// is left alone (#115).
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_leaves_a_collected_leaders_group_alone_when_the_namespaces_pid_1_started_later() {
+    a_planted_namespace_leaves_the_group_alone("leftgonensinit", |v| {
+        let start = v["pid_ns_init_start"].as_u64().unwrap();
+        v["pid_ns_init_start"] = serde_json::Value::from(start + 1);
+    });
 }
 
 /// `reap` leaves a collected leader's group alone when the record names a later start, and says

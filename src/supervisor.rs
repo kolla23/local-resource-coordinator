@@ -3,7 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: the watch of a recovered supervisor ends on a zombie (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-02: supervisor.log and the job's output files are opened with O_NOFOLLOW (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
-// Modified by the local-resource-coordinator fork, 2026-11-03: once the system collected a job's leader, recovery and reap check every member of its group before the SIGKILL; after qex's TERM the group gets the rest of the grace; a refused group gets one log line; the record's pid_ns, written with the pid, must name this pid namespace (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: once the system collected a job's leader, recovery and reap check every member of its group before the SIGKILL; after qex's TERM the group gets the rest of the grace; a refused group gets one log line; the record's pid_ns and pid_ns_init_start, written with the pid, must name this pid namespace (issue #115).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -193,13 +193,14 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
                 // the identity, and a pid of one write with the start time of
                 // another names nothing.
                 let (job_pid, job_start, job_ns) = match other.ok().filter(|s| s.pid.is_some()) {
-                    Some(s) => (s.pid, s.pid_start_token, s.pid_ns),
+                    Some(s) => (s.pid, s.pid_start_token, s.pid_ns.zip(s.pid_ns_init_start)),
                     None => (
                         job.status.pid,
                         job.status.pid_start_token,
-                        job.status.pid_ns.clone(),
+                        job.status.pid_ns.clone().zip(job.status.pid_ns_init_start),
                     ),
                 };
+                let job_ns = job_ns.as_ref().map(|(ns, init)| (ns.as_str(), *init));
                 let mut note = "the supervisor stopped without a result".to_string();
 
                 // Give the words of the supervisor itself.
@@ -223,10 +224,10 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
                             "the supervisor of the job {id} stopped, and the job {pid} \
                              continues; qex stops the job now"
                         ));
-                        stop_process_group(id, pid, job_start, job_ns.as_deref());
+                        stop_process_group(id, pid, job_start, job_ns);
                         note.push_str("; qex stopped the job process");
                     } else {
-                        kill_what_the_job_left(id, pid, job_start, job_ns.as_deref());
+                        kill_what_the_job_left(id, pid, job_start, job_ns);
                     }
                 }
 
@@ -240,6 +241,7 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
                 }
                 job.status.pid_start_token = None;
                 job.status.pid_ns = None;
+                job.status.pid_ns_init_start = None;
                 job.status.supervisor_pid = None;
                 // A job that failed waits for nothing, so this text belongs in
                 // the error field.
@@ -318,7 +320,7 @@ pub(crate) fn stop_process_group(
     id: uuid::Uuid,
     pid: i32,
     recorded_start: Option<u64>,
-    recorded_ns: Option<&str>,
+    recorded_ns: Option<(&str, u64)>,
 ) {
     let is_the_job = |pid| sys::job_pid_alive(pid) && sys::same_process_start(pid, recorded_start);
     if !is_the_job(pid) {
@@ -351,7 +353,7 @@ pub(crate) fn kill_what_the_job_left(
     id: uuid::Uuid,
     pid: i32,
     recorded_start: Option<u64>,
-    recorded_ns: Option<&str>,
+    recorded_ns: Option<(&str, u64)>,
 ) {
     if sys::zombie_group_leader(pid) && sys::same_process_start(pid, recorded_start) {
         unsafe {
@@ -386,14 +388,16 @@ pub(crate) fn kill_what_the_job_left(
 fn collected_group(
     pid: i32,
     recorded_start: Option<u64>,
-    recorded_ns: Option<&str>,
+    recorded_ns: Option<(&str, u64)>,
 ) -> Result<bool, String> {
     let Some(start) = recorded_start else {
         return Err("the record has no start time to compare".to_string());
     };
-    // The kernel rule holds within one pid namespace; on Linux a record must name this one.
-    let here = sys::pid_namespace();
-    if recorded_ns != here.as_deref() || (cfg!(target_os = "linux") && recorded_ns.is_none()) {
+    // The kernel rule holds within one pid namespace, and a namespace's name is reused once it
+    // ends, so the record names the namespace and its pid 1's start; on Linux both must match.
+    let here = sys::pid_namespace_identity();
+    let here = here.as_ref().map(|(ns, init)| (ns.as_str(), *init));
+    if recorded_ns != here || (cfg!(target_os = "linux") && here.is_none()) {
         return Err("the record names no pid namespace or another one".to_string());
     }
     let members = match sys::group_members(pid) {
@@ -748,7 +752,9 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     // name: the machine uses the number again, and a coordinator that starts
     // again must not take the new holder for the job.
     status.pid_start_token = sys::process_start_token(pid);
-    status.pid_ns = sys::pid_namespace();
+    let ns = sys::pid_namespace_identity();
+    status.pid_ns_init_start = ns.as_ref().map(|(_, init)| *init);
+    status.pid_ns = ns.map(|(name, _)| name);
     // Record this process as the supervisor.
     //
     // The coordinator also writes this value, but this process writes the file
@@ -932,6 +938,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     status.pid = None;
     status.pid_start_token = None;
     status.pid_ns = None;
+    status.pid_ns_init_start = None;
     status.last_pid = Some(pid);
 
     // Report a kill for memory. qex does not act on one.

@@ -408,6 +408,33 @@ pub fn pid_namespace() -> Option<String> {
     }
 }
 
+/// The pid namespace's name and its pid 1's start, which a later namespace reusing the name
+/// lacks; `None` on macOS, when /proc is not this namespace's own, or when a read fails.
+pub fn pid_namespace_identity() -> Option<(String, u64)> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        if !nspid_is_own(&status) {
+            return None;
+        }
+        Some((pid_namespace()?, process_start_token(1)?))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// Says whether a `/proc/self/status` text comes from this namespace's own /proc: its `NSpid:`
+/// line has one entry more for each namespace between that /proc's and this one.
+#[cfg(any(target_os = "linux", test))]
+fn nspid_is_own(status: &str) -> bool {
+    status
+        .lines()
+        .find_map(|l| l.strip_prefix("NSpid:"))
+        .is_some_and(|pids| pids.split_whitespace().count() == 1)
+}
+
 /// Gives the chain of processes above this process, from its parent up to
 /// the first process of the machine.
 ///
@@ -883,6 +910,23 @@ pub fn terminal_size() -> Option<(usize, usize)> {
 mod tests {
     use super::*;
     use std::os::unix::fs::{symlink, PermissionsExt};
+
+    // A unit test: making a pid namespace that sees its parent's /proc needs a user namespace,
+    // which a test machine may refuse, and no qex command shows the recorded value's source.
+    #[test]
+    fn only_a_single_nspid_entry_is_this_namespaces_own_proc() {
+        let status = |nspid: &str| format!("Name:\tqex\nPid:\t42\nNSpid:{nspid}\nPPid:\t1\n");
+        assert!(nspid_is_own(&status("\t42")));
+        assert!(
+            !nspid_is_own(&status("\t4242\t42")),
+            "two entries: the parent's /proc"
+        );
+        assert!(!nspid_is_own(&status("")), "no entry");
+        assert!(
+            !nspid_is_own("Name:\tqex\nPid:\t42\n"),
+            "no NSpid line (an old kernel)"
+        );
+    }
 
     const NO_NS: Namespace = Namespace { overflow: None };
 
