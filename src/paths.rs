@@ -5,7 +5,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: the bodies of ensure_dir and make_private move to src/os/unix.rs; these forward (R3a of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-11-02: state_dir checks the owner of the state directory and the directories above it, and makes it private (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the three opens of a pid file use O_NOFOLLOW, with a test that the sweep does not claim a linked pid file (issue #88).
-// Modified by the local-resource-coordinator fork, 2026-11-03: hold_pid_file gives DirGone when a sweep deleted the socket directory, with a test (issue #132).
+// Modified by the local-resource-coordinator fork, 2026-11-03: hold_pid_file gives DirGone when a sweep deleted the socket directory, and a sweep claims nothing through a pid file with no name, with tests (issue #132).
 //! This module gives the location of each file that qex uses.
 //!
 //! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
@@ -336,6 +336,11 @@ fn claim_opened(
     let file = match try_lock(&file) {
         // This process holds the lock now, and it keeps the file to hold it.
         LockTry::Taken => {
+            // A file with no name is one that another sweep deleted after this open:
+            // its lock guards nothing, and the directory can be a new coordinator's.
+            if !matches!(file.metadata(), Ok(m) if std::os::unix::fs::MetadataExt::nlink(&m) > 0) {
+                return None;
+            }
             make_private(&file);
             Some(file)
         }
