@@ -1,5 +1,9 @@
-# The site at https://stephenc.github.io/qex
-title: qex
+# Modified by the local-resource-coordinator fork, 2026-11-03: no longer names
+# upstream's site; this fork publishes no site, and the Pages workflow is gone.
+#
+# Jekyll settings for `docs`, kept for a site that the project may publish
+# later. Nothing builds or deploys a site from this directory now.
+title: local-resource-coordinator
 description: Queued EXecutor — a resource-aware job queue for the long tasks that coding agents start.
 theme: jekyll-theme-cayman
 show_downloads: false

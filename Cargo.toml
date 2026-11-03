@@ -1,5 +1,7 @@
 # Modified by the local-resource-coordinator fork, 2026-10-02: the portable
 # test job `testjob` and the `test-fixtures` feature that the e2e suite needs.
+# Modified by the local-resource-coordinator fork, 2026-11-03: repository,
+# homepage and documentation name this fork's repository, not upstream's site.
 [package]
 name = "qex"
 # NOT the version of a release. `main` holds this number for ever, and no pull
@@ -10,9 +12,9 @@ version = "0.0.0-dev"
 edition = "2021"
 description = "Queued EXecutor — shared admission control for independent local agents"
 license = "Apache-2.0"
-repository = "https://github.com/stephenc/qex"
-homepage = "https://stephenc.github.io/qex"
-documentation = "https://stephenc.github.io/qex"
+repository = "https://github.com/kolla23/local-resource-coordinator"
+homepage = "https://github.com/kolla23/local-resource-coordinator"
+documentation = "https://github.com/kolla23/local-resource-coordinator/tree/main/docs"
 readme = "README.md"
 keywords = ["queue", "scheduler", "jobs", "agents", "cli"]
 categories = ["command-line-utilities", "development-tools"]
