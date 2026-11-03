@@ -738,6 +738,8 @@ impl<'a> Walk<'a> {
                         return Ok(None);
                     };
                     make_one_level(&next, mode)?;
+                    #[cfg(debug_assertions)]
+                    pause_after_mkdir(&next);
                     (self.look)(&next).with_context(|| format!("reading {}", next.display()))?
                 }
                 found => found.with_context(|| format!("reading {}", next.display()))?,
@@ -818,6 +820,37 @@ fn make_one_level(path: &Path, mode: u32) -> Result<()> {
         }
         _ => Ok(()),
     }
+}
+
+/// Pauses qex once after a mkdir in one parent: `<ms> <parent>`. **This variable
+/// exists for the tests of qex**, and a release build does not read it.
+#[cfg(debug_assertions)]
+const PAUSE_AFTER_MKDIR_IN: &str = "QEX_TEST_PAUSE_AFTER_MKDIR_IN";
+
+/// A test of qex pauses here, between a new directory and its read-back, so a
+/// sweep can delete the directory (issue #132).
+#[cfg(debug_assertions)]
+fn pause_after_mkdir(made: &Path) {
+    static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let Ok(value) = std::env::var(PAUSE_AFTER_MKDIR_IN) else {
+        return;
+    };
+    let Some((ms, parent)) = value.split_once(' ') else {
+        return;
+    };
+    let Ok(ms) = ms.parse::<u64>() else {
+        return;
+    };
+    if made.parent() != Some(Path::new(parent))
+        || PAUSED.swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        return;
+    }
+    eprintln!(
+        "qex pauses {ms} ms after it made {} because {PAUSE_AFTER_MKDIR_IN} is set",
+        made.display()
+    );
+    std::thread::sleep(std::time::Duration::from_millis(ms));
 }
 
 /// A plain error with no `io::Error` inside, so the sandbox remedy is added
