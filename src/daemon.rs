@@ -4,6 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery counts a zombie supervisor as gone and keeps a final record written after its first read (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: recovery skips a symbolic link in jobs/ (issue #129).
+// Modified by the local-resource-coordinator fork, 2026-11-03: recovery skips a record whose ids differ from its folder's name (issue #135).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1485,6 +1486,16 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
             // it. It must not stop the start of the coordinator.
             _ => continue,
         };
+        // Later lookups rebuild jobs/<id> from the id, so a record elsewhere is no job.
+        if !job::names_folder(status.id, &path) || spec.id != status.id {
+            log(&format!(
+                "the job directory {} is skipped: its status names the job {} and its spec {}",
+                path.display(),
+                status.id,
+                spec.id
+            ));
+            continue;
+        }
 
         // A job that says "running" can be dead. Its supervisor stopped with
         // the coordinator, or the machine restarted.

@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: qex version answers when the state directory is refused (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: qex du and qex gc count job subfolders and never follow a symbolic link (issue #101).
 // Modified by the local-resource-coordinator fork, 2026-11-03: find_id_on_disk skips a symbolic link in jobs/ (issue #129).
+// Modified by the local-resource-coordinator fork, 2026-11-03: qex gc counts a folder whose record names another id as one with no record (issue #135).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -6825,7 +6826,9 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
                 .and_then(|n| n.parse::<uuid::Uuid>().ok())
                 .map(|id| jobs.iter().any(|j| j.id == id))
                 .unwrap_or(false);
-            if !known && crate::job::read_status(&path).is_err() {
+            // A record that names another id is no job's record either (#135).
+            let record = crate::job::read_status(&path);
+            if !known && !record.is_ok_and(|s| crate::job::names_folder(s.id, &path)) {
                 orphans.push((path.clone(), directory_size(&path)));
             }
         }

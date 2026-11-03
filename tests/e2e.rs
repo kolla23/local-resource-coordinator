@@ -19,7 +19,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: six tests for qex du and qex gc on job subfolders and on symbolic links in a job, in jobs/ or at the state directory (issue #101).
 // Modified by the local-resource-coordinator fork, 2026-11-03: Drop waits until each process that it signalled has stopped (issue #126).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a link in jobs/ to an outside job record; du, complete, list, status and logs ignore it (issue #129).
-// Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a record whose id names a link in jobs/; logs, status and rerun must not read through it (issue #135).
+// Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a record whose id names a link in jobs/; list, logs, status, rerun and gc ignore the link (issue #135).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -8754,10 +8754,41 @@ fn a_record_whose_id_differs_from_its_folder_reads_nothing_through_a_link() {
     }
     std::os::unix::fs::symlink(&outside, jobs.join(link_id)).unwrap();
 
-    // Each command that names link_id while a coordinator runs; collect what leaked.
-    let mut leaks = Vec::new();
+    let read_outside = || -> Vec<(String, Vec<u8>)> {
+        let mut out: Vec<_> = std::fs::read_dir(&outside)
+            .unwrap()
+            .flatten()
+            .map(|e| {
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    std::fs::read(e.path()).unwrap(),
+                )
+            })
+            .collect();
+        out.sort();
+        out
+    };
+    let outside_before = read_outside();
+
+    // With no coordinator, `__complete ids` reads the records on the disk.
+    let complete = h.ok(&["__complete", "ids"]);
+    assert!(
+        !complete.contains(link_id),
+        "`qex __complete ids` must not offer {link_id}: {complete}"
+    );
+    // No coordinator runs, so `qex list` starts one, and its recovery reads jobs/.
     let list = h.ok(&["list", "--all", "--json"]);
-    eprintln!("list: {list}");
+    assert!(
+        !list.contains(link_id),
+        "`qex list` must not show {link_id}: {list}"
+    );
+    let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log")).unwrap();
+    let names = format!("status names the job {link_id} and its spec {link_id}");
+    assert!(
+        log.lines()
+            .any(|l| l.contains(&format!("jobs/{real_id} is skipped")) && l.contains(&names)),
+        "recovery must log the folder and both ids in one line: {log}"
+    );
     for args in [
         vec!["logs", link_id],
         vec!["logs", link_id, "--stdout"],
@@ -8767,40 +8798,38 @@ fn a_record_whose_id_differs_from_its_folder_reads_nothing_through_a_link() {
         vec!["rerun", link_id],
     ] {
         let out = h.qex(&args);
-        let text = format!(
-            "{}{}",
+        let (stdout, stderr) = (
             String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
+            String::from_utf8_lossy(&out.stderr),
         );
-        eprintln!("qex {} -> {:?}\n{text}", args.join(" "), out.status.code());
-        if text.contains("outside-") {
-            leaks.push(format!("`qex {}` read through the link", args.join(" ")));
-        }
-        if args[0] == "rerun" && out.status.success() {
-            let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            h.qex(&["wait", &id, "--timeout", "45s"]);
-        }
-    }
-    if marker.exists() {
-        leaks.push("`qex rerun` ran the command from the spec behind the link".into());
-    }
-    let gc = h.qex(&["gc", "--older-than", "0s", "--json"]);
-    eprintln!(
-        "gc -> {:?}\n{}",
-        gc.status.code(),
-        String::from_utf8_lossy(&gc.stdout)
-    );
-    let left: Vec<_> = std::fs::read_dir(&outside).unwrap().flatten().collect();
-    if left.len() != 3 {
-        leaks.push(format!(
-            "`qex gc` changed the folder behind the link: {left:?}"
-        ));
+        assert!(
+            out.status.code() == Some(127) && stderr.contains("there is no job"),
+            "`qex {}` must say there is no such job: {out:?}",
+            args.join(" ")
+        );
+        assert!(
+            !stdout.contains("outside-") && !stderr.contains("outside-"),
+            "`qex {}` read through the link: {out:?}",
+            args.join(" ")
+        );
     }
     assert!(
-        leaks.is_empty(),
-        "through jobs/{link_id}:\n{}",
-        leaks.join("\n")
+        !marker.exists(),
+        "`qex rerun` ran the command behind the link"
     );
+
+    // gc deletes the real folder as one with no record, and nothing behind the link.
+    let gc = h.ok(&["gc", "--older-than", "0s", "--json"]);
+    assert!(
+        !jobs.join(&real_id).exists(),
+        "`qex gc` must delete jobs/{real_id}: {gc}"
+    );
+    assert_eq!(
+        read_outside(),
+        outside_before,
+        "qex changed the folder behind the link in jobs/"
+    );
+    assert!(!marker.exists(), "the command behind the link ran");
 }
 
 /// A deep directory must not stop qex. The socket path must fit in `sun_path`,
