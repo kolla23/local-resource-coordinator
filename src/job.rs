@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-02: a job record is read only when the user owns it (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: read_all_from_disk skips a symbolic link in jobs/ (issue #129).
+// Modified by the local-resource-coordinator fork, 2026-11-03: read_all_from_disk skips a record whose id is not its folder's name (issue #135).
 //! This module holds the job state that qex writes to the disk.
 //!
 //! The file `status.json` is the primary record of a job result. The supervisor
@@ -879,6 +880,12 @@ pub fn write_status_unsynced(dir: &Path, status: &JobStatus) -> Result<()> {
     write_atomic_unsynced(&dir.join("status.json"), &bytes, 0o600)
 }
 
+/// True when `id`, hyphenated, is the name of the folder `dir`. Callers rebuild
+/// `jobs/<id>` from a record's id, so a record elsewhere would send them to another entry.
+pub fn names_folder(id: uuid::Uuid, dir: &Path) -> bool {
+    dir.file_name().and_then(|n| n.to_str()) == Some(id.to_string().as_str())
+}
+
 /// Reads the record of every job from the state directory.
 ///
 /// A command that watches the queue uses this function when no coordinator
@@ -896,7 +903,11 @@ pub fn read_all_from_disk() -> Vec<JobStatus> {
         .flatten()
         // The entry's own type: a link in jobs/ is no job, and nothing is read through it.
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .filter_map(|e| read_status(&e.path()).ok())
+        .filter_map(|e| {
+            read_status(&e.path())
+                .ok()
+                .filter(|s| names_folder(s.id, &e.path()))
+        })
         .collect();
 
     jobs.sort_by_key(|j| (j.submitted_at, j.sequence));

@@ -19,6 +19,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: six tests for qex du and qex gc on job subfolders and on symbolic links in a job, in jobs/ or at the state directory (issue #101).
 // Modified by the local-resource-coordinator fork, 2026-11-03: Drop waits until each process that it signalled has stopped (issue #126).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a link in jobs/ to an outside job record; du, complete, list, status and logs ignore it (issue #129).
+// Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a record whose id names a link in jobs/; list, logs, status, rerun and gc ignore the link (issue #135).
 // Modified by the local-resource-coordinator fork, 2026-11-03: two tests that a coordinator starts when a sweep deletes its new socket directory (issue #132).
 //! End-to-end tests for qex.
 //!
@@ -8716,6 +8717,120 @@ fn a_link_in_jobs_to_an_outside_record_is_no_job() {
         outside_before,
         "qex changed the folder behind the link in jobs/"
     );
+}
+
+/// A real job folder whose records name another id, with a link at `jobs/<that id>`:
+/// no command reads, writes or runs anything through the link (#135).
+#[test]
+fn a_record_whose_id_differs_from_its_folder_reads_nothing_through_a_link() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Harness::with_default_config("record-id-mismatch");
+    let real_id = du_job_with_no_coordinator(&h);
+    let link_id = "00000000-0000-4000-8000-000000000135";
+    let jobs = h.root.join("state/qex/jobs");
+
+    // The real folder's own records now name link_id; the job stays completed.
+    for name in ["spec.json", "status.json"] {
+        let file = jobs.join(&real_id).join(name);
+        let text = std::fs::read_to_string(&file).unwrap();
+        std::fs::write(&file, text.replace(&real_id, link_id)).unwrap();
+    }
+    // Behind the link: a log, a spec with a secret and a command that leaves a marker.
+    let outside = h.root.join("outside-the-state-directory");
+    std::fs::create_dir(&outside).unwrap();
+    let marker = h.root.join("ran-the-outside-command");
+    let text = std::fs::read_to_string(jobs.join(&real_id).join("spec.json")).unwrap();
+    let mut spec: serde_json::Value = serde_json::from_str(&text).unwrap();
+    spec["env"]["OUTSIDE_SECRET"] = serde_json::json!("outside-secret-135");
+    let touch = format!("echo ran > '{}'", marker.display());
+    spec["command"] = serde_json::json!(["sh", "-c", touch]);
+    for (name, bytes) in [
+        ("spec.json", serde_json::to_vec_pretty(&spec).unwrap()),
+        ("stdout.log", b"outside-log-135\n".to_vec()),
+        ("stderr.log", b"outside-err-135\n".to_vec()),
+    ] {
+        std::fs::write(outside.join(name), bytes).unwrap();
+        let mode = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(outside.join(name), mode).unwrap();
+    }
+    std::os::unix::fs::symlink(&outside, jobs.join(link_id)).unwrap();
+
+    let read_outside = || -> Vec<(String, Vec<u8>)> {
+        let mut out: Vec<_> = std::fs::read_dir(&outside)
+            .unwrap()
+            .flatten()
+            .map(|e| {
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    std::fs::read(e.path()).unwrap(),
+                )
+            })
+            .collect();
+        out.sort();
+        out
+    };
+    let outside_before = read_outside();
+
+    // With no coordinator, `__complete ids` reads the records on the disk.
+    let complete = h.ok(&["__complete", "ids"]);
+    assert!(
+        !complete.contains(link_id),
+        "`qex __complete ids` must not offer {link_id}: {complete}"
+    );
+    // No coordinator runs, so `qex list` starts one, and its recovery reads jobs/.
+    let list = h.ok(&["list", "--all", "--json"]);
+    assert!(
+        !list.contains(link_id),
+        "`qex list` must not show {link_id}: {list}"
+    );
+    let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log")).unwrap();
+    let names = format!("status names the job {link_id} and its spec {link_id}");
+    assert!(
+        log.lines()
+            .any(|l| l.contains(&format!("jobs/{real_id} is skipped")) && l.contains(&names)),
+        "recovery must log the folder and both ids in one line: {log}"
+    );
+    for args in [
+        vec!["logs", link_id],
+        vec!["logs", link_id, "--stdout"],
+        vec!["logs", link_id, "--stderr"],
+        vec!["status", link_id, "--show-env"],
+        vec!["status", link_id, "--json", "--show-env"],
+        vec!["rerun", link_id],
+    ] {
+        let out = h.qex(&args);
+        let (stdout, stderr) = (
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        );
+        assert!(
+            out.status.code() == Some(127) && stderr.contains("there is no job"),
+            "`qex {}` must say there is no such job: {out:?}",
+            args.join(" ")
+        );
+        assert!(
+            !stdout.contains("outside-") && !stderr.contains("outside-"),
+            "`qex {}` read through the link: {out:?}",
+            args.join(" ")
+        );
+    }
+    assert!(
+        !marker.exists(),
+        "`qex rerun` ran the command behind the link"
+    );
+
+    // gc deletes the real folder as one with no record, and nothing behind the link.
+    let gc = h.ok(&["gc", "--older-than", "0s", "--json"]);
+    assert!(
+        !jobs.join(&real_id).exists(),
+        "`qex gc` must delete jobs/{real_id}: {gc}"
+    );
+    assert_eq!(
+        read_outside(),
+        outside_before,
+        "qex changed the folder behind the link in jobs/"
+    );
+    assert!(!marker.exists(), "the command behind the link ran");
 }
 
 /// A deep directory must not stop qex. The socket path must fit in `sun_path`,
