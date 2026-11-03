@@ -3,7 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: R2b of docs/fork/PORT_PLAN.md, the process inspection in src/os/.
 // Modified by the local-resource-coordinator fork, 2026-10-06: R4 of docs/fork/PORT_PLAN.md, stdin_is_terminal and terminal_size in src/os/unix.rs.
 // Modified by the local-resource-coordinator fork, 2026-11-02: process_is_zombie forwards to src/os/; a zombie is not an own live process (issue #85).
-// Modified by the local-resource-coordinator fork, 2026-11-02: a zombie group leader is no live job (issue #97).
+// Modified by the local-resource-coordinator fork, 2026-11-02: a zombie group leader is no live job; zombie_group_leader forwards to src/os/ (issue #97).
 //! This module reads the machine capacity and the current machine load.
 //! It also holds the process functions that qex needs.
 //!
@@ -60,6 +60,10 @@ pub fn own_pid_alive(pid: i32) -> bool {
 
 pub fn process_is_zombie(pid: i32) -> bool {
     crate::os::process_is_zombie(pid)
+}
+
+pub fn zombie_group_leader(pid: i32) -> bool {
+    crate::os::zombie_group_leader(pid)
 }
 
 pub fn same_process_start(pid: i32, recorded: Option<u64>) -> bool {
@@ -318,18 +322,23 @@ mod tests {
         while !process_is_zombie(pid) && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        let (zombie, leads, alive) = (
+        let (zombie, leads, alive, reserved) = (
             process_is_zombie(pid),
             unsafe { libc::getpgid(pid) } == pid,
             job_pid_alive(pid),
+            zombie_group_leader(pid),
         );
         ended.wait().unwrap();
         assert!(zombie, "an ended child that is not collected is a zombie");
         // Linux keeps the group of a zombie; without that, this test tests nothing there.
         #[cfg(target_os = "linux")]
-        assert!(leads, "a zombie keeps its process group");
-        let _ = leads;
+        {
+            assert!(leads, "a zombie keeps its process group");
+            assert!(reserved, "a zombie that leads its group reserves it");
+        }
+        let _ = (leads, reserved);
         assert!(!alive, "a zombie is not a live job");
+        assert!(!zombie_group_leader(-1) && !zombie_group_leader(0));
     }
 }
 
