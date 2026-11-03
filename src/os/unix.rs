@@ -266,8 +266,8 @@ pub fn same_process_start(pid: i32, recorded: Option<u64>) -> bool {
 /// different times, so a recorded value that differs from the current value
 /// shows that the recorded process stopped and a stranger holds the number.
 ///
-/// The unit of the value differs between systems. Compare two values for
-/// equality, or for order within one start of the machine; never read the value as a time.
+/// The unit differs between systems; on macOS it is wall-clock time, which a clock step moves.
+/// Compare for equality, or for order on Linux within one boot; never read it as a time.
 pub fn process_start_token(pid: i32) -> Option<u64> {
     if pid <= 0 {
         return None;
@@ -346,21 +346,22 @@ pub fn group_members(pgid: i32) -> Option<Vec<i32>> {
     #[cfg(target_os = "linux")]
     {
         let mut members = Vec::new();
-        for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        for entry in std::fs::read_dir("/proc").ok()? {
+            let entry = entry.ok()?;
             let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse().ok()) else {
                 continue;
             };
-            // A process that ended after the listing has no `stat`; it holds nothing.
-            let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
-                continue;
+            let stat = match std::fs::read(entry.path().join("stat")) {
+                Ok(stat) => stat,
+                // A process that ended after the listing has no `stat`; it holds nothing.
+                Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ESRCH)) => continue,
+                Err(_) => return None,
             };
-            // After the last `)`, field 1 is the state and field 3 is the group.
-            let group = stat.rsplit_once(')').and_then(|(_, rest)| {
-                rest.split_whitespace()
-                    .nth(2)
-                    .and_then(|f| f.parse::<i32>().ok())
-            });
-            if group == Some(pgid) {
+            // The name may hold any bytes. After the last `)`, field 3 is the group.
+            let close = stat.iter().rposition(|&b| b == b')')?;
+            let rest = std::str::from_utf8(&stat[close + 1..]).ok()?;
+            let group = rest.split_whitespace().nth(2)?.parse::<i32>().ok()?;
+            if group == pgid {
                 members.push(pid);
             }
         }

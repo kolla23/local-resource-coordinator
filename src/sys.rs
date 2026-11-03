@@ -395,6 +395,46 @@ mod tests {
         assert!(group_members(-1).is_none() && group_members(0).is_none());
     }
 
+    /// Linux puts the command name, which may hold any bytes, in `/proc/<pid>/stat`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn group_members_lists_a_member_whose_name_is_not_utf8() {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::process::CommandExt;
+        let sleep = ["/bin/sleep", "/usr/bin/sleep"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .expect("a sleep program");
+        let dir = crate::testutil::temp_dir().join(format!("qex-not-utf8-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let link = dir.join(std::ffi::OsStr::from_bytes(b"sl\xffep"));
+        std::os::unix::fs::symlink(sleep, &link).unwrap();
+        let mut child = std::process::Command::new(&link)
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id() as i32;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let named = || std::fs::read(format!("/proc/{pid}/comm")).is_ok_and(|c| c.contains(&0xff));
+        while !named() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let (was_named, members) = (named(), group_members(pid));
+        child.kill().ok();
+        child.wait().unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(
+            was_named,
+            "the child runs under the name with the 0xff byte"
+        );
+        assert_eq!(
+            members,
+            Some(vec![pid]),
+            "a member with that name is listed"
+        );
+    }
+
     #[test]
     fn process_uids_of_a_child_are_this_process_uids() {
         let mut child = std::process::Command::new("sleep")
