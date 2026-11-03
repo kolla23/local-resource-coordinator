@@ -4,8 +4,9 @@
 input=$(cat)
 printf '%s' "$input" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true' && exit 0
 cd "$(git rev-parse --show-toplevel)" || exit 0
-# Root-level manifests only: the experiments/ crates are separate packages that cargo at the root never reads.
-triggers=('*.rs' Cargo.toml Cargo.lock clippy.toml)
+# Root-level manifests only, and no experiments/ files: those crates are separate packages that
+# cargo at the root never reads (#90).
+triggers=('*.rs' Cargo.toml Cargo.lock clippy.toml ':(exclude)experiments')
 [ -z "$(git diff --name-only HEAD -- "${triggers[@]}"; git ls-files --others --exclude-standard -- "${triggers[@]}")" ] && exit 0
 
 cargo_run() {
