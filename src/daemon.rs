@@ -3,6 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery skips a job record another user owns; a refused config reload says why; the sandbox link names this fork's page (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery counts a zombie supervisor as gone and keeps a final record written after its first read (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
+// Modified by the local-resource-coordinator fork, 2026-11-03: a debug-only pause before the pid lock, for a test of a sweep that deletes a new socket directory (issue #132).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1164,6 +1165,12 @@ fn start_config(read: ConfigFile) -> Result<(Config, u64)> {
     Ok((cfg, seen))
 }
 
+/// Names the variable that pauses the coordinator before it takes its pid
+/// lock, for this many milliseconds. **This variable exists for the tests of
+/// qex**, and a release build does not read it.
+#[cfg(debug_assertions)]
+const PAUSE_BEFORE_PID_LOCK: &str = "QEX_TEST_PAUSE_BEFORE_PID_LOCK_MS";
+
 /// Runs the coordinator. This function gives control back when the coordinator
 /// stops.
 pub fn run() -> Result<()> {
@@ -1177,6 +1184,20 @@ pub fn run() -> Result<()> {
     paths::ensure_dir(&paths::jobs_dir()?, 0o700)?;
 
     let socket_path = paths::socket_path()?;
+
+    // A test of qex pauses here, after the socket directory exists and before
+    // its lock, so a sweep can delete the directory (issue #132). A release
+    // build has no such switch, as for `QEX_TEST_CRASH_AFTER_ABORT_PLAN`.
+    #[cfg(debug_assertions)]
+    if let Some(ms) = std::env::var(PAUSE_BEFORE_PID_LOCK)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        log(&format!(
+            "qex pauses {ms} ms before the pid lock because {PAUSE_BEFORE_PID_LOCK} is set"
+        ));
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
 
     // TAKE THE LOCK ON THE PID FILE FIRST, AND BEFORE ANY TEST OF THE SOCKET
     // FILE.

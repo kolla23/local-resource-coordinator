@@ -5,6 +5,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: the bodies of ensure_dir and make_private move to src/os/unix.rs; these forward (R3a of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-11-02: state_dir checks the owner of the state directory and the directories above it, and makes it private (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the three opens of a pid file use O_NOFOLLOW, with a test that the sweep does not claim a linked pid file (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-03: a test of a sweep that deletes the socket directory while a coordinator waits for its lock (issue #132).
 //! This module gives the location of each file that qex uses.
 //!
 //! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
@@ -1809,6 +1810,45 @@ mod tests {
             lock.ino(),
             std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&path).unwrap()),
             "the coordinator must hold the lock on the file that the path names now"
+        );
+    }
+
+    /// A sweep that deletes the whole directory while a coordinator waits for
+    /// the lock must not end that coordinator (issue #132).
+    ///
+    /// The coordinator cannot make the file in a directory that is gone. It
+    /// must hear that the directory went, so it makes the directory again.
+    #[test]
+    fn a_sweep_that_deletes_the_directory_during_the_wait_gives_dir_gone() {
+        let base = TestDir::make("qex-dirgonetest");
+        let dir = base.path().join("d");
+        std::fs::create_dir(&dir).unwrap();
+        let socket = dir.join("s");
+        std::fs::write(dir.join(PID_FILE), b"").unwrap();
+
+        // A sweep: it holds the lock, deletes the directory, and gives the lock back.
+        let swept = dir.clone();
+        let (ready, holds_the_lock) = std::sync::mpsc::channel();
+        let sweep = std::thread::spawn(move || {
+            let file = a_held_pid_file(&swept);
+            ready.send(()).ok();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::fs::remove_dir_all(&swept).unwrap();
+            drop(file);
+        });
+        holds_the_lock
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("the thread of the test did not take the lock");
+
+        let answer = hold_pid_file(&socket, std::time::Duration::from_secs(5));
+        sweep.join().unwrap();
+        assert!(
+            !dir.exists(),
+            "the sweep of this test deletes the directory"
+        );
+        assert!(
+            !matches!(answer, PidHold::Unusable(_)),
+            "a directory that a sweep deleted must not end the coordinator"
         );
     }
 
