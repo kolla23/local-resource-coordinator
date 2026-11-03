@@ -3,6 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery skips a job record another user owns; a refused config reload says why; the sandbox link names this fork's page (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery counts a zombie supervisor as gone and keeps a final record written after its first read (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
+// Modified by the local-resource-coordinator fork, 2026-11-03: recovery skips a symbolic link in jobs/ (issue #129).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the start makes the socket directory again when a sweep deleted it after its mkdir or before the pid lock, and a debug-only pause tests it (issue #132).
 //! This module holds the coordinator.
 //!
@@ -1515,7 +1516,8 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() {
+        // The entry's own type: a link in jobs/ is no job, so recovery never writes through it.
+        if !entry.file_type().is_ok_and(|t| t.is_dir()) {
             continue;
         }
 

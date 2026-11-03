@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-02: a job record is read only when the user owns it (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-03: read_all_from_disk skips a symbolic link in jobs/ (issue #129).
 //! This module holds the job state that qex writes to the disk.
 //!
 //! The file `status.json` is the primary record of a job result. The supervisor
@@ -893,7 +894,8 @@ pub fn read_all_from_disk() -> Vec<JobStatus> {
 
     let mut jobs: Vec<JobStatus> = entries
         .flatten()
-        .filter(|e| e.path().is_dir())
+        // The entry's own type: a link in jobs/ is no job, and nothing is read through it.
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
         .filter_map(|e| read_status(&e.path()).ok())
         .collect();
 
