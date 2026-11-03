@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-02: a job record is read only when the user owns it (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: read_all_from_disk skips a symbolic link in jobs/ (issue #129).
+// Modified by the local-resource-coordinator fork, 2026-11-03: the record names the pid namespace of its pid, pid_ns (issue #115).
 //! This module holds the job state that qex writes to the disk.
 //!
 //! The file `status.json` is the primary record of a job result. The supervisor
@@ -456,6 +457,10 @@ pub struct JobStatus {
     /// life nor group leadership alone proves that a pid is the job.
     #[serde(default)]
     pub pid_start_token: Option<u64>,
+    /// The pid namespace of `pid`, written and cleared with it; a coordinator in another
+    /// namespace reads the number as a stranger's. See `sys::pid_namespace`.
+    #[serde(default)]
+    pub pid_ns: Option<String>,
     /// The pid that the job HAD, kept after the job stops.
     ///
     /// This value is for a person who reads a log of the machine. NEVER SEND A
@@ -673,6 +678,7 @@ impl JobStatus {
             submitter: Vec::new(),
             pid: None,
             pid_start_token: None,
+            pid_ns: None,
             last_pid: None,
             supervisor_pid: None,
             // From its birth, so no active record is ever without a

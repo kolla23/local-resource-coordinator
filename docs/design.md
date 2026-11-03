@@ -157,8 +157,9 @@ each start, which limits the damage, but an accurate claim is better.
 
 **After a supervisor dies, qex can stop a group that is not the job's.** qex
 stops what the job left in its process group, also after the system collected
-the job process. It first checks that every process in the group belongs to
-this user and started no earlier than the job. One rare chain passes those
+the job process. It first checks that the job ran in the pid namespace of the
+coordinator that looks, and that every process in the group belongs to this
+user and started no earlier than the job. One rare chain passes those
 checks: the whole group ended, a new process of this user got the same number,
 made its own group with it, and left processes in that group, all before qex
 looked. qex then stops that group. For a coordinator that runs as root, this

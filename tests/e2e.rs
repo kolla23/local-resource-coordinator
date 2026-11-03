@@ -19,7 +19,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: six tests for qex du and qex gc on job subfolders and on symbolic links in a job, in jobs/ or at the state directory (issue #101).
 // Modified by the local-resource-coordinator fork, 2026-11-03: Drop waits until each process that it signalled has stopped (issue #126).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a link in jobs/ to an outside job record; du, complete, list, status and logs ignore it (issue #129).
-// Modified by the local-resource-coordinator fork, 2026-11-03: fourteen tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: fifteen tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -5760,6 +5760,30 @@ fn recovery_leaves_a_collected_leaders_group_alone_for_a_record_from_an_earlier_
         Harness::runs(leftover.0),
         "a record from an earlier start leaves the group alone"
     );
+}
+
+/// A record written in another pid namespace names a number that is a stranger's here: the
+/// collected case leaves that group alone, and the coordinator log says so (#115).
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_leaves_a_collected_leaders_group_alone_for_a_record_of_another_pid_namespace() {
+    let h = Harness::with_default_config("leftgonens");
+    let (job, leftover) = h.unheld_leftover_job();
+    h.kill_all_but(&job, &[leftover.0]);
+    h.plant_in_status(&job.id, |v| {
+        assert!(
+            v["pid_ns"].is_string(),
+            "the record names its pid namespace: {v}"
+        );
+        v["pid_ns"] = serde_json::Value::String("pid:[1]".to_string());
+    });
+
+    assert_eq!(h.recovered_as_failed(&job.id), FINAL_BRANCH);
+    assert!(
+        Harness::runs(leftover.0),
+        "a record of another pid namespace leaves the group alone"
+    );
+    assert_eq!(h.refusals_of(&job.id, job.leader), 1, "one refusal line");
 }
 
 /// `reap` leaves a collected leader's group alone when the record names a later start, and says

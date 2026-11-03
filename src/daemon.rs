@@ -4,7 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery counts a zombie supervisor as gone and keeps a final record written after its first read (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: recovery skips a symbolic link in jobs/ (issue #129).
-// Modified by the local-resource-coordinator fork, 2026-11-03: recovery passes the job id to stop_process_group and kill_what_the_job_left, which also handle a collected leader (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: recovery passes the job id and the record's pid_ns to stop_process_group and kill_what_the_job_left, which also handle a collected leader, and clears pid_ns with the pid (issue #115).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1609,7 +1609,12 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                          continues; qex stops the job now",
                         status.id
                     ));
-                    crate::supervisor::stop_process_group(status.id, pid, status.pid_start_token);
+                    crate::supervisor::stop_process_group(
+                        status.id,
+                        pid,
+                        status.pid_start_token,
+                        status.pid_ns.as_deref(),
+                    );
                     note.push_str("; qex stopped the job process");
                 }
                 status.state = JobState::Failed;
@@ -1653,6 +1658,7 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                         status.id,
                         pid,
                         status.pid_start_token,
+                        status.pid_ns.as_deref(),
                     );
                 }
                 retire_the_pids(&mut status);
@@ -1791,6 +1797,7 @@ fn retire_the_pids(status: &mut crate::job::JobStatus) {
         status.last_pid = Some(pid);
     }
     status.pid_start_token = None;
+    status.pid_ns = None;
     status.supervisor_pid = None;
 }
 

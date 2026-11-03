@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: qex version answers when the state directory is refused (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: qex du and qex gc count job subfolders and never follow a symbolic link (issue #101).
 // Modified by the local-resource-coordinator fork, 2026-11-03: find_id_on_disk skips a symbolic link in jobs/ (issue #129).
+// Modified by the local-resource-coordinator fork, 2026-11-03: a test record sets the new pid_ns field (issue #115).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -7169,6 +7170,7 @@ mod tests {
             submitter: Vec::new(),
             pid: Some(1),
             pid_start_token: None,
+            pid_ns: None,
             last_pid: None,
             supervisor_pid: None,
             boot_id: None,
