@@ -15,7 +15,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: eight tests plant a symbolic link at a state or coordinator file and expect its target untouched (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: seven tests plant a symbolic link at a job file and expect its target untouched (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie job process; recovery and reap must not stop it; five tests check what its group left (issue #97).
-// Modified by the local-resource-coordinator fork, 2026-11-03: two tests check what a job's group left after the system collected its leader (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: three tests check what a job's group left after the system collected its leader (issue #115).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -5178,6 +5178,46 @@ fn recovery_stops_the_leftovers_of_a_collected_job_process() {
     h.until("the job is failed", Duration::from_secs(20), || {
         h.state_of(&job.id) == "failed"
     });
+    h.until("the leftover is killed", Duration::from_secs(20), || {
+        Harness::stopped(leftover.0)
+    });
+}
+
+/// Recovery TERMs a live leader, the system collects it, and what it left that ignores TERM is
+/// still killed (#115).
+#[test]
+#[cfg(unix)]
+fn recovery_stops_leftovers_that_ignore_term_once_the_leader_is_collected() {
+    let h = Harness::with_default_config("leftgoneterm");
+    let (job, leftover) = h.unheld_leftover_job();
+    let coordinator = h.coordinator_pid();
+    unsafe { libc::kill(coordinator, libc::SIGKILL) };
+    h.until("the coordinator is gone", Duration::from_secs(30), || {
+        Harness::stopped(coordinator)
+    });
+    unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+    h.until("the supervisor is gone", Duration::from_secs(30), || {
+        Harness::stopped(job.supervisor)
+    });
+    assert!(!Harness::stopped(job.leader), "the leader runs");
+    assert!(!Harness::stopped(leftover.0), "the leftover runs");
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.status_json(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("; qex stopped the job process"),
+        "recovery must stop the live job process: {error}"
+    );
+    h.until(
+        "the system collected the leader",
+        Duration::from_secs(30),
+        || (unsafe { libc::kill(job.leader, 0) }) != 0,
+    );
     h.until("the leftover is killed", Duration::from_secs(20), || {
         Harness::stopped(leftover.0)
     });
