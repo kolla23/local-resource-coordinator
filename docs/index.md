@@ -4,6 +4,7 @@ description: A resource-aware local job queue and CLI job scheduler for long-run
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials link is gone (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: install by building from the source, in place of upstream's downloads, and the source link names this repository (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: the install section gives the clone address, and says that building needs Rust 1.85 or later (issue #118). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -203,10 +204,12 @@ a SIGTERM stops the command that waits for it.
 
 ## Install
 
-This project has no releases yet, so build it from the source. In a clone of
-the source, with Rust 1.85 or later:
+This project has no releases yet, so build it from the source. Building needs
+Rust 1.85 or later. Clone this repository and build in the clone:
 
 ```sh
+git clone https://github.com/kolla23/local-resource-coordinator.git
+cd local-resource-coordinator
 cargo build --release --locked
 ```
 
@@ -227,8 +230,9 @@ show a file in `~/.local/bin`. If it shows nothing, add `~/.local/bin` to the
 path of this shell. If it shows a different file, that file is the one the
 shell will run.
 
-qex builds for Linux and macOS. The first qex command starts the coordinator
-for you, and there is no service to configure. On Windows, use WSL2.
+qex builds for Linux and macOS, with Rust 1.85 or later. The first qex command
+starts the coordinator for you, and there is no service to configure. On
+Windows, use WSL2.
 
 ## For coding agents
 

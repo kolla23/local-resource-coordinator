@@ -2,6 +2,7 @@
 <!-- Modified by the local-resource-coordinator fork, 2026-10-02: the test command needs --features test-fixtures. -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: no upstream CI, release or crates.io badges, the install section builds from the source, and the documentation link names docs/ (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: the install section gives the clone address, and says that building needs Rust 1.85 or later (issue #118). -->
 
 qex gives independent agents and harnesses one shared resource scheduler for one
 machine.
@@ -70,10 +71,12 @@ queue.
 
 ## Install
 
-This project has no releases yet, so build it from the source. In a clone of
-this repository, with Rust 1.85 or later:
+This project has no releases yet, so build it from the source. Building needs
+Rust 1.85 or later. Clone this repository and build in the clone:
 
 ```sh
+git clone https://github.com/kolla23/local-resource-coordinator.git
+cd local-resource-coordinator
 cargo build --release --locked
 ```
 
@@ -94,8 +97,9 @@ show a file in `~/.local/bin`. If it shows nothing, add `~/.local/bin` to the
 path of this shell. If it shows a different file, that file is the one the
 shell will run.
 
-qex needs Linux or macOS. It has no other requirement. The first qex command
-starts the background coordinator for you, and you configure no service.
+qex needs Linux or macOS. Building it needs Rust 1.85 or later; running it
+needs nothing else. The first qex command starts the background coordinator
+for you, and you configure no service.
 
 **On Windows, use WSL2** — qex builds and runs there unchanged, and the jobs an
 agent starts (`make`, `cargo`, `uv`) usually live in WSL2 anyway. A native
