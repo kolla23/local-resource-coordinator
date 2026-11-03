@@ -5,11 +5,15 @@ title: ''
 labels: ''
 assignees: ''
 ---
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: the search goes to this repository, and security faults go to its advisories (issue #109). -->
 
 <!--
+A SECURITY FAULT DOES NOT GO HERE. Report it privately at
+https://github.com/kolla23/local-resource-coordinator/security/advisories/new
+
 LOOK FOR THIS FAULT FIRST, INCLUDING THE CLOSED ISSUES:
 
-    gh issue list --repo stephenc/qex --state all --search "your words"
+    gh issue list --repo kolla23/local-resource-coordinator --state all --search "your words"
 
 If one matches, comment on it instead of opening this. A second report of one
 fault is useful and a second issue for it is not: it divides the answer between

@@ -1,11 +1,12 @@
+# Modified by the local-resource-coordinator fork, 2026-11-03: the links go to this repository; the testimonials link is gone and a security link is added (issue #109).
 blank_issues_enabled: true
 contact_links:
-  - name: qex helped me
-    url: https://github.com/stephenc/qex/issues/1
-    about: Leave a comment with what qex did for you, and the number if you have one.
   - name: Look for your fault first
-    url: https://github.com/stephenc/qex/issues?q=is%3Aissue
+    url: https://github.com/kolla23/local-resource-coordinator/issues?q=is%3Aissue
     about: Search the open AND closed issues, and comment on the one that matches.
+  - name: A security fault
+    url: https://github.com/kolla23/local-resource-coordinator/security/advisories/new
+    about: Report it privately in a security advisory. Do not open a public issue.
   - name: The documentation
-    url: https://stephenc.github.io/qex
+    url: https://github.com/kolla23/local-resource-coordinator/tree/main/docs
     about: The agent page, the reference, the design and the security page.
