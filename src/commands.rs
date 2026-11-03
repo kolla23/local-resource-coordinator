@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-01: the follower sets 0600 on a log file that exists (issue #56) and refuses a symlinked one.
 // Modified by the local-resource-coordinator fork, 2026-11-02: qex version answers when the state directory is refused (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: qex du and qex gc count job subfolders and never follow a symbolic link (issue #101).
+// Modified by the local-resource-coordinator fork, 2026-11-03: find_id_on_disk skips a symbolic link in jobs/ (issue #129).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -4055,7 +4056,9 @@ fn resolve_id(client: &mut Client, raw: &str) -> Result<uuid::Uuid> {
 /// with a correct but unknown id waits for a status file that never arrives.
 fn find_id_on_disk(raw: &str) -> Result<Option<uuid::Uuid>> {
     if let Ok(id) = raw.parse::<uuid::Uuid>() {
-        return Ok(paths::job_dir(&id)?.is_dir().then_some(id));
+        // The folder's own type, not its target's: a link in jobs/ is no job.
+        let dir = std::fs::symlink_metadata(paths::job_dir(&id)?);
+        return Ok(dir.is_ok_and(|m| m.is_dir()).then_some(id));
     }
 
     let dir = paths::jobs_dir()?;
@@ -4068,7 +4071,7 @@ fn find_id_on_disk(raw: &str) -> Result<Option<uuid::Uuid>> {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if name.starts_with(raw) {
+        if name.starts_with(raw) && is_real_dir(&entry) {
             if found.is_some() {
                 bail!("`{raw}` names more than one job. Write more characters of the id.");
             }
