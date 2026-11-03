@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-01: supervisor.log and the job's output files are set to 0600 when they exist (issue #56).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the watch of a recovered supervisor ends on a zombie (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-02: supervisor.log and the job's output files are opened with O_NOFOLLOW (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -219,6 +220,8 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
                         ));
                         stop_process_group(pid, job_start);
                         note.push_str("; qex stopped the job process");
+                    } else {
+                        kill_what_a_zombie_job_left(pid, job_start);
                     }
                 }
 
@@ -308,6 +311,7 @@ fn watch_until_gone(pid: i32) {
 pub(crate) fn stop_process_group(pid: i32, recorded_start: Option<u64>) {
     let is_the_job = |pid| sys::job_pid_alive(pid) && sys::same_process_start(pid, recorded_start);
     if !is_the_job(pid) {
+        kill_what_a_zombie_job_left(pid, recorded_start);
         return;
     }
     unsafe {
@@ -317,11 +321,22 @@ pub(crate) fn stop_process_group(pid: i32, recorded_start: Option<u64>) {
     for _ in 0..20 {
         std::thread::sleep(Duration::from_millis(100));
         if !is_the_job(pid) {
+            kill_what_a_zombie_job_left(pid, recorded_start);
             return;
         }
     }
     unsafe {
         libc::killpg(pid, libc::SIGKILL);
+    }
+}
+
+/// Sends SIGKILL to the group of a job process that ended and is not collected yet; its pid
+/// keeps the group id reserved, as for the sweep after `wait_without_reaping` in `main`.
+pub(crate) fn kill_what_a_zombie_job_left(pid: i32, recorded_start: Option<u64>) {
+    if sys::zombie_group_leader(pid) && sys::same_process_start(pid, recorded_start) {
+        unsafe {
+            libc::killpg(pid, libc::SIGKILL);
+        }
     }
 }
 
