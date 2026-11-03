@@ -1,12 +1,7 @@
 # qex — Queued EXecutor
 <!-- Modified by the local-resource-coordinator fork, 2026-10-02: the test command needs --features test-fixtures. -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
-
-[![CI on main](https://img.shields.io/github/actions/workflow/status/stephenc/qex/ci.yml?branch=main&label=CI)](https://github.com/stephenc/qex/actions/workflows/ci.yml?query=branch%3Amain)
-[![Latest release](https://img.shields.io/github/v/release/stephenc/qex?label=release)](https://github.com/stephenc/qex/releases/latest)
-[![Version on crates.io](https://img.shields.io/crates/v/qex)](https://crates.io/crates/qex)
-[![Earliest Rust that qex needs](https://img.shields.io/crates/msrv/qex)](https://crates.io/crates/qex)
-[![Licence: Apache 2.0](https://img.shields.io/crates/l/qex)](LICENSE)
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: no upstream CI, release or crates.io badges, the install section builds from the source, and the documentation link names docs/ (issue #100). -->
 
 qex gives independent agents and harnesses one shared resource scheduler for one
 machine.
@@ -75,59 +70,21 @@ queue.
 
 ## Install
 
-With [mise](https://mise.jdx.dev/), which needs no build:
+This project has no releases yet, so build it from the source. In a clone of
+this repository, with Rust 1.85 or later:
 
 ```sh
-mise x ubi:stephenc/qex -- qex --version   # run it, and change no configuration
-mise use ubi:stephenc/qex                  # for this project: writes mise.toml here
-mise use -g ubi:stephenc/qex               # for this account, and every project in it
+cargo build --release --locked
 ```
 
-Start with the first line. It changes no file that you keep, and mise holds the
-program in its cache. The other two write a configuration file: `mise use`
-writes `mise.toml` in the directory that you are in, and `-g` changes the
-configuration of the account, which every project of that account and every
-person who signs in as it then gets.
-
-**`mise use` alone does not put qex on your path.** mise must be active in the
-shell, or its shims must be on the path; `mise doctor` says whether it is. Until
-then, `mise x ubi:stephenc/qex -- qex …` runs qex, and
-`mise x ubi:stephenc/qex -- sh -c 'command -v qex'` gives the full name of the
-file that mise holds.
-
-The `ubi` backend reads the releases of this repository and takes the file for
-the machine that it runs on, so the four systems that qex supports (Linux and
-macOS, x86-64 and arm64) need no more configuration. mise can hold a release
-back until it has existed for some time (the `minimum_release_age` setting), so
-you can get an older qex than the newest one; mise says so when it does. Name
-the version to get an exact one: `mise use -g ubi:stephenc/qex@0.25.0`.
-
-Or take the file for your machine from [the latest
-release](https://github.com/stephenc/qex/releases/latest):
+The binary is `target/release/qex`. Run it by that path, or copy it to a
+directory on your path:
 
 ```sh
-dir=$(mktemp -d) &&
-archive="qex-$(uname -s)-$(uname -m).tar.gz" &&
-curl -fsSL -o "$dir/$archive" \
-  "https://github.com/stephenc/qex/releases/latest/download/$archive" &&
-curl -fsSL -o "$dir/$archive.sha256" \
-  "https://github.com/stephenc/qex/releases/latest/download/$archive.sha256" &&
-if command -v sha256sum >/dev/null
-then (cd "$dir" && sha256sum -c "$archive.sha256")
-else (cd "$dir" && shasum -a 256 -c "$archive.sha256")
-fi &&
-tar -xzf "$dir/$archive" -C "$dir" qex &&
 mkdir -p ~/.local/bin &&
-install -m 755 "$dir/qex" ~/.local/bin/qex
-[ -n "$dir" ] && rm -rf "$dir"
+install -m 755 target/release/qex ~/.local/bin/qex
 command -v qex
 ```
-
-These commands write into a temporary directory, and they do not write into
-the directory that you are in. The two `curl` lines take the archive and the
-`.sha256` file that the release holds beside it. The check compares the two.
-The `&&` after each write means a line that fails stops the writes that follow.
-The `rm` line still runs, and it removes the temporary directory.
 
 `mkdir` makes `~/.local/bin` when that directory is not there. `install` puts
 `qex` in that directory, and it REPLACES a `qex` that is already there.
@@ -137,14 +94,8 @@ show a file in `~/.local/bin`. If it shows nothing, add `~/.local/bin` to the
 path of this shell. If it shows a different file, that file is the one the
 shell will run.
 
-Or build it from the source:
-
-```sh
-cargo install --path .
-```
-
-qex needs Linux or macOS. It has no other requirement. The first command starts
-the background coordinator for you, and you configure no service.
+qex needs Linux or macOS. It has no other requirement. The first qex command
+starts the background coordinator for you, and you configure no service.
 
 **On Windows, use WSL2** — qex builds and runs there unchanged, and the jobs an
 agent starts (`make`, `cargo`, `uv`) usually live in WSL2 anyway. A native
@@ -386,8 +337,7 @@ answer: read the `usage` field of the record and compare it with the claim.
 
 ## The documentation
 
-The full documentation is at
-[stephenc.github.io/qex](https://stephenc.github.io/qex).
+The full documentation is in the [`docs`](docs/index.md) directory.
 
 | Page | What it holds |
 | ---- | ------------- |

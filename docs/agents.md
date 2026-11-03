@@ -4,6 +4,7 @@ description: The one page that an agent needs, and the property that makes qex s
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: install by building from the source, and copy the skill from a clone, in place of upstream's downloads (issue #100). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -12,10 +13,10 @@ description: The one page that an agent needs, and the property that makes qex s
 You cannot see the work that another agent is about to start, and it cannot see
 yours. qex holds the work of every agent on this machine in one queue. It starts
 each job when the claim of the job fits the machine, records the result on the
-disk, and gives you one command that waits for it. Install it with
-`cargo install qex`, or take a binary from the
-[releases](https://github.com/stephenc/qex/releases/latest). The first command
-starts the coordinator, and there is no service to configure.
+disk, and gives you one command that waits for it. This project has no
+releases yet: `cargo build --release --locked` in a clone of its source builds
+the binary at `target/release/qex`. The first command starts the coordinator,
+and there is no service to configure.
 
 This page is also in the binary: run `qex help agents` to read it with no
 network, or [install it as a skill](#install-this-page-as-a-skill).
@@ -337,10 +338,11 @@ system:  macOS or Linux, and `sandbox` if your commands run in one
 
 ## Install this page as a skill
 
+In a clone of the source:
+
 ```sh
 mkdir -p ~/.claude/skills/qex
-curl -fsSL https://raw.githubusercontent.com/stephenc/qex/main/skills/qex/SKILL.md \
-  -o ~/.claude/skills/qex/SKILL.md
+cp skills/qex/SKILL.md ~/.claude/skills/qex/SKILL.md
 ```
 
 The page is ordinary Markdown, so it goes into `AGENTS.md`, a rule file or a
