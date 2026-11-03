@@ -4,7 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery counts a zombie supervisor as gone and keeps a final record written after its first read (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: recovery skips a symbolic link in jobs/ (issue #129).
-// Modified by the local-resource-coordinator fork, 2026-11-03: recovery skips a record whose ids differ from its folder's name (issue #135).
+// Modified by the local-resource-coordinator fork, 2026-11-03: recovery skips a record whose ids differ from its folder's name, and its second read keeps the checked record when the disk one names another job (issue #135).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1800,10 +1800,13 @@ fn retire_the_pids(status: &mut crate::job::JobStatus) {
     status.supervisor_pid = None;
 }
 
-/// Gives the record on disk, or `stale` when it cannot be read. Read it only after the
-/// supervisor is known to be gone, so that nothing can write after it.
+/// Gives the record on disk, or `stale` when it cannot be read or names another job (#135).
+/// Read it only after the supervisor is known to be gone, so that nothing can write after it.
 fn latest_record(dir: &std::path::Path, stale: JobStatus) -> JobStatus {
-    job::read_status(dir).unwrap_or(stale)
+    job::read_status(dir)
+        .ok()
+        .filter(|s| s.id == stale.id)
+        .unwrap_or(stale)
 }
 
 /// Returns an active record to the queue only when it proves that no job
@@ -3273,6 +3276,17 @@ mod tests {
             let found = latest_record(&dir, stale.clone());
             assert_eq!((found.state, found.pid), (state, pid), "{state:?}");
         }
+        // A record rewritten to name another job between recovery's two reads (#135).
+        let mut other = stale.clone();
+        other.id = uuid::Uuid::new_v4();
+        other.state = JobState::Completed;
+        job::write_status(&dir, &other).unwrap();
+        let found = latest_record(&dir, stale.clone());
+        assert_eq!(
+            (found.id, found.state),
+            (stale.id, JobState::Starting),
+            "another job's record"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
