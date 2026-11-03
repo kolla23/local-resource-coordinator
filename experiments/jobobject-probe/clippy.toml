@@ -1,0 +1,2 @@
+# Fork file (local-resource-coordinator, 2026-11-03). Stops clippy from reading the
+# root clippy.toml, whose rules guard qex's tests, not this probe (issue #89).
