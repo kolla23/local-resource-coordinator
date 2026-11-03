@@ -8397,7 +8397,15 @@ fn du_bytes(v: &serde_json::Value, key: &str) -> u64 {
 /// `qex du` counts the files in the subfolders of a job directory (issue #101).
 #[test]
 fn du_counts_the_bytes_in_a_job_subfolder() {
-    let h = Harness::with_default_config("du-subfolder");
+    // du compares whole seconds, so `keep = "0.5s"` makes the job old at once; "0s" means none.
+    let h = Harness::new(
+        "du-subfolder",
+        "[peers]\nenabled = false\n\
+         [budget]\ncpu = \"3\"\n\
+         [defaults]\nmem = \"256MB\"\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [gc]\nkeep = \"0.5s\"\n",
+    );
     let id = du_job_with_no_coordinator(&h);
     let before = du_json(&h);
 
@@ -8417,11 +8425,7 @@ fn du_counts_the_bytes_in_a_job_subfolder() {
     for key in ["jobs_bytes", "total_bytes", "reclaimable_bytes"] {
         assert_eq!(
             du_bytes(&after, key) - du_bytes(&before, key),
-            if key == "reclaimable_bytes" {
-                0
-            } else {
-                301_000
-            },
+            301_000,
             "{key}: before {before}, after {after}"
         );
     }
