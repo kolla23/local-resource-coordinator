@@ -3,7 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery skips a job record another user owns; a refused config reload says why; the sandbox link names this fork's page (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: recovery counts a zombie supervisor as gone and keeps a final record written after its first read (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
-// Modified by the local-resource-coordinator fork, 2026-11-03: a debug-only pause before the pid lock, for a test of a sweep that deletes a new socket directory (issue #132).
+// Modified by the local-resource-coordinator fork, 2026-11-03: the start makes the socket directory again when a sweep deleted it before the pid lock, and a debug-only pause tests it (issue #132).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1183,7 +1183,7 @@ pub fn run() -> Result<()> {
     paths::ensure_dir(&runtime, 0o700)?;
     paths::ensure_dir(&paths::jobs_dir()?, 0o700)?;
 
-    let socket_path = paths::socket_path()?;
+    let mut socket_path = paths::socket_path()?;
 
     // A test of qex pauses here, after the socket directory exists and before
     // its lock, so a sweep can delete the directory (issue #132). A release
@@ -1218,15 +1218,26 @@ pub fn run() -> Result<()> {
     // The spawn lock does not give this promise. A CLI process holds that lock,
     // and `qex daemon` is a command that a person or a systemd unit starts
     // directly, with no lock at all.
-    let _pid_lock = match paths::hold_pid_file(&socket_path, paths::PID_LOCK_PATIENCE) {
-        paths::PidHold::Held(lock) => lock,
-        paths::PidHold::Busy => {
-            log("a different coordinator operates; this process stops");
-            return Ok(());
-        }
-        paths::PidHold::Unusable(why) => {
-            log(&format!("{why} This process stops."));
-            return Ok(());
+    //
+    // A SWEEP CAN DELETE A NEW SOCKET DIRECTORY BEFORE THIS PROCESS HOLDS ITS
+    // LOCK (issue #132). `socket_path` makes the directory again, with its tests
+    // of the owner, and no sweep can claim a lock that this process holds.
+    let mut tries = 1;
+    let _pid_lock = loop {
+        match paths::hold_pid_file(&socket_path, paths::PID_LOCK_PATIENCE) {
+            paths::PidHold::Held(lock) => break lock,
+            paths::PidHold::DirGone(_) if tries < paths::PID_LOCK_ATTEMPTS => {
+                tries += 1;
+                socket_path = paths::socket_path()?;
+            }
+            paths::PidHold::Busy => {
+                log("a different coordinator operates; this process stops");
+                return Ok(());
+            }
+            paths::PidHold::Unusable(why) | paths::PidHold::DirGone(why) => {
+                log(&format!("{why} This process stops."));
+                return Ok(());
+            }
         }
     };
 
