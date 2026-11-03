@@ -3,6 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: R2b of docs/fork/PORT_PLAN.md, the process inspection in src/os/.
 // Modified by the local-resource-coordinator fork, 2026-10-06: R4 of docs/fork/PORT_PLAN.md, stdin_is_terminal and terminal_size in src/os/unix.rs.
 // Modified by the local-resource-coordinator fork, 2026-11-02: process_is_zombie forwards to src/os/; a zombie is not an own live process (issue #85).
+// Modified by the local-resource-coordinator fork, 2026-11-02: a zombie group leader is no live job (issue #97).
 //! This module reads the machine capacity and the current machine load.
 //! It also holds the process functions that qex needs.
 //!
@@ -302,6 +303,33 @@ mod tests {
         assert!(zombie, "an ended child that is not collected is a zombie");
         assert!(!alive, "a zombie is not alive");
         assert!(!process_is_zombie(-1) && !process_is_zombie(0));
+    }
+
+    /// A group leader that ended and is not collected yet is no live job (#97).
+    #[test]
+    fn a_zombie_group_leader_is_not_a_live_job() {
+        use std::os::unix::process::CommandExt;
+        let mut ended = std::process::Command::new("true")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = ended.id() as i32;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !process_is_zombie(pid) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let (zombie, leads, alive) = (
+            process_is_zombie(pid),
+            unsafe { libc::getpgid(pid) } == pid,
+            job_pid_alive(pid),
+        );
+        ended.wait().unwrap();
+        assert!(zombie, "an ended child that is not collected is a zombie");
+        // Linux keeps the group of a zombie; without that, this test tests nothing there.
+        #[cfg(target_os = "linux")]
+        assert!(leads, "a zombie keeps its process group");
+        let _ = leads;
+        assert!(!alive, "a zombie is not a live job");
     }
 }
 

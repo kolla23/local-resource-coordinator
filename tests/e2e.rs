@@ -14,6 +14,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie supervisor under a subreaper; the recovery test no longer waits for the reaper (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-02: eight tests plant a symbolic link at a state or coordinator file and expect its target untouched (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: seven tests plant a symbolic link at a job file and expect its target untouched (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie job process; recovery and reap must not stop it (issue #97).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -4710,6 +4711,106 @@ fn a_zombie_supervisor_ends_the_watch_of_a_recovered_job() {
     let info = h.ok(&["info", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&info).unwrap();
     assert_eq!(v["cpu_claimed"].as_u64(), Some(0));
+}
+
+/// Recovery counts a zombie job process as ended, and does not stop it (#97).
+/// Linux only: macOS has no subreaper.
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_counts_a_zombie_job_process_as_ended() {
+    let h = Harness::with_default_config("zombiejobrec");
+    let (holder, id) = h.held_submit(&["sleep", "60"]);
+    h.until("the job operates", Duration::from_secs(45), || {
+        h.state_of(&id) == "running" && h.status_json(&id)["supervisor_pid"].as_i64().is_some()
+    });
+    let job_pid = h.status_json(&id)["pid"].as_i64().unwrap() as i32;
+    let supervisor = h.status_json(&id)["supervisor_pid"].as_i64().unwrap() as i32;
+    let coordinator = h.coordinator_pid();
+    let held = holder.0.id() as i32;
+
+    // No qex command runs until the job process is a zombie: the next one starts recovery.
+    unsafe { libc::kill(coordinator, libc::SIGKILL) };
+    h.until(
+        "the holder adopts the supervisor",
+        Duration::from_secs(30),
+        || {
+            Harness::state_in_proc(coordinator) == Some('Z')
+                && Harness::parent_in_proc(supervisor) == Some(held)
+        },
+    );
+    unsafe { libc::kill(supervisor, libc::SIGKILL) };
+    h.until(
+        "the holder adopts the job process",
+        Duration::from_secs(30),
+        || Harness::parent_in_proc(job_pid) == Some(held),
+    );
+    unsafe { libc::kill(job_pid, libc::SIGKILL) };
+    h.until(
+        "the job process is a zombie",
+        Duration::from_secs(30),
+        || Harness::state_in_proc(job_pid) == Some('Z'),
+    );
+    assert_eq!(
+        unsafe { libc::getpgid(job_pid) },
+        job_pid,
+        "the zombie keeps its process group"
+    );
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&id) == "failed"
+    });
+    let error = h.status_json(&id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert_eq!(
+        error, "the coordinator stopped, and neither the job nor its supervisor continued",
+        "recovery must count the zombie job process as ended"
+    );
+    assert_eq!(h.qex(&["wait", &id]).status.code(), Some(121));
+}
+
+/// `reap` counts a zombie job process as ended, and does not stop it (#97).
+/// Linux only: macOS has no subreaper.
+#[test]
+#[cfg(target_os = "linux")]
+fn reap_counts_a_zombie_job_process_as_ended() {
+    let h = Harness::with_default_config("zombiejobreap");
+    let (holder, id) = h.held_submit(&["sleep", "60"]);
+    h.until("the job operates", Duration::from_secs(45), || {
+        h.state_of(&id) == "running" && h.status_json(&id)["supervisor_pid"].as_i64().is_some()
+    });
+    let job_pid = h.status_json(&id)["pid"].as_i64().unwrap() as i32;
+    let supervisor = h.status_json(&id)["supervisor_pid"].as_i64().unwrap() as i32;
+    let held = holder.0.id() as i32;
+
+    // A stopped supervisor cannot collect the job, so the job ends as its zombie.
+    unsafe { libc::kill(supervisor, libc::SIGSTOP) };
+    h.until("the supervisor is stopped", Duration::from_secs(30), || {
+        Harness::state_in_proc(supervisor) == Some('T')
+    });
+    unsafe { libc::kill(job_pid, libc::SIGKILL) };
+    h.until(
+        "the job process is a zombie",
+        Duration::from_secs(30),
+        || Harness::state_in_proc(job_pid) == Some('Z'),
+    );
+    // The live coordinator collects the supervisor and reaps; the holder adopts the zombie job.
+    unsafe { libc::kill(supervisor, libc::SIGKILL) };
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&id) == "failed"
+    });
+    assert_eq!(Harness::parent_in_proc(job_pid), Some(held));
+    assert_eq!(Harness::state_in_proc(job_pid), Some('Z'));
+    let error = h.status_json(&id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.starts_with("the supervisor stopped without a result")
+            && !error.contains("qex stopped the job process"),
+        "reap must count the zombie job process as ended: {error}"
+    );
 }
 
 /// A record from an earlier start of the machine is dead, whatever its pids
