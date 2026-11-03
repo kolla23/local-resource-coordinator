@@ -1,11 +1,7 @@
 # qex — Queued EXecutor
 <!-- Modified by the local-resource-coordinator fork, 2026-10-02: the test command needs --features test-fixtures. -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
-<!-- Modified by the local-resource-coordinator fork, 2026-11-03: no upstream CI or release badges, the install section builds from the source, and the documentation link names docs/ (issue #100). -->
-
-[![Version on crates.io](https://img.shields.io/crates/v/qex)](https://crates.io/crates/qex)
-[![Earliest Rust that qex needs](https://img.shields.io/crates/msrv/qex)](https://crates.io/crates/qex)
-[![Licence: Apache 2.0](https://img.shields.io/crates/l/qex)](LICENSE)
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: no upstream CI, release or crates.io badges, the install section builds from the source, and the documentation link names docs/ (issue #100). -->
 
 qex gives independent agents and harnesses one shared resource scheduler for one
 machine.

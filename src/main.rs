@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-05: declares the os module (R1 of docs/fork/PORT_PLAN.md).
+// Modified by the local-resource-coordinator fork, 2026-11-03: the Windows build message links this repository (issue #100).
 //! qex — Queued EXecutor.
 //!
 //! qex is a job queue for long tasks on a local machine. It controls the
@@ -26,7 +27,8 @@ compile_error!(
     "qex builds for Linux and macOS only.\n\n     qex controls processes with the session and the process group of Unix, and it holds a job \
      with `waitpid` on one process id. Windows has no equivalent of those, so this is a port \
      and not an option that somebody can turn on.\n\n     ON WINDOWS, USE WSL2. qex builds and operates there with no change, and the jobs that an \
-     agent starts (make, cargo, uv) are usually in WSL2 as well.\n\n     See https://github.com/stephenc/qex for the reason in full."
+     agent starts (make, cargo, uv) are usually in WSL2 as well.\n\n     See \
+     https://github.com/kolla23/local-resource-coordinator for the reason in full."
 );
 
 #[cfg(unix)]
