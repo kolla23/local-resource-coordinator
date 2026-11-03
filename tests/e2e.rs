@@ -2034,12 +2034,15 @@ fn a_service_with_no_release_fails_quietly() {
     assert!(value["newest"].is_null(), "no release was named: {value}");
 
     // QUIET: the next commands succeed and say nothing about the check.
-    let id = h.submit(&["submit", "--", "true"]);
+    let submitted = h.qex(&["submit", "--", "true"]);
+    assert!(submitted.status.success());
+    let id = String::from_utf8_lossy(&submitted.stdout).trim().to_string();
+    assert!(id.parse::<uuid::Uuid>().is_ok(), "submit wrote: {id}");
     let out = h.qex(&["wait", &id]);
     assert_eq!(out.status.code(), Some(0));
     let info = h.qex(&["info"]);
     assert!(info.status.success());
-    for said in [&out.stderr, &info.stderr] {
+    for said in [&submitted.stderr, &out.stderr, &info.stderr] {
         let said = String::from_utf8_lossy(said);
         assert!(
             !said.contains("release") && !said.contains("404") && !said.contains("could not ask"),
