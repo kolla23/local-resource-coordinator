@@ -1950,12 +1950,8 @@ fn the_default_asks_nothing_and_writes_nothing() {
     assert!(h.qex(&["info", "--no-start"]).status.success());
 }
 
-/// A project with no release yet: the service answers 404, as GitHub does for
-/// `releases/latest` of a repository that has published none (issue #113).
-///
-/// The automatic check, once a user turns it on, must fail QUIETLY: a job still
-/// runs, no command prints a word about it, and the record keeps the fault for
-/// `qex version --check`, which says that it could not ask and gives 1.
+/// With no release yet the service answers 404, and the automatic check fails
+/// quietly; `qex version --check` says it could not ask and gives 1 (issue #113).
 #[test]
 fn a_service_with_no_release_fails_quietly() {
     use std::io::{Read, Write};
@@ -2001,9 +1997,8 @@ fn a_service_with_no_release_fails_quietly() {
          [update]\ncheck = \"300s\"\nurl = \"{url}\"\n"
     ));
 
-    // THE CHECK IS DUE AT ONCE. A fresh install asks nothing in its first
-    // interval (see `a_fresh_install_asks_nothing_and_says_nothing`), so the
-    // record says that qex last asked long ago.
+    // THE CHECK IS DUE AT ONCE: a fresh install asks nothing in its first
+    // interval, so the record says that qex last asked long ago.
     let state = h.root.join("state/qex");
     std::fs::DirBuilder::new()
         .recursive(true)

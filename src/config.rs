@@ -1007,8 +1007,7 @@ impl Default for UpdateConfig {
     fn default() -> Self {
         Self {
             // The fork asks nothing by default (docs/fork/DECISION_UPDATE_CHECK.md).
-            // The address is this project's releases; while it has none, the
-            // service answers 404 and the check fails quietly (issue #113).
+            // With no release yet, this address answers 404 (issue #113).
             check: crate::update::NEVER.into(),
             url: "https://api.github.com/repos/kolla23/local-resource-coordinator/releases/latest"
                 .into(),
