@@ -8691,8 +8691,11 @@ fn a_link_in_jobs_to_an_outside_record_is_no_job() {
         "`qex status <link id>`: {status:?}"
     );
     h.stop_coordinator();
+    // A real folder under the same id unhyphenated: a lookup by it must not reach the link.
+    let unhyphenated = link_id.replace('-', "");
+    std::fs::create_dir(h.root.join("state/qex/jobs").join(&unhyphenated)).unwrap();
     // With no coordinator, `qex logs` finds the job on the disk, by its id or a prefix of it.
-    for raw in [link_id, "00000000-0000-4000"] {
+    for raw in [link_id, "00000000-0000-4000", &unhyphenated[..16]] {
         let out = h.qex(&["logs", raw]);
         let (stdout, stderr) = (
             String::from_utf8_lossy(&out.stdout),
