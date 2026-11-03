@@ -3,6 +3,7 @@ title: qex — a local job queue for long tasks
 description: A resource-aware local job queue and CLI job scheduler for long-running builds, tests and jobs. It replaces polling shell scripts with a wait that always answers.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials link is gone (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: install by building from the source, in place of upstream's downloads, and the source link names this repository (issue #100). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -19,7 +20,7 @@ and gives you one command that waits for the result.
 - **Linux and macOS.** One binary, and no service to configure.
 
 ```sh
-cargo install qex
+cargo build --release --locked   # in a clone of the source; see Install
 ```
 
 ## Twenty seconds
@@ -202,48 +203,21 @@ a SIGTERM stops the command that waits for it.
 
 ## Install
 
-With [mise](https://mise.jdx.dev/), which needs no build:
+This project has no releases yet, so build it from the source. In a clone of
+the source, with Rust 1.85 or later:
 
 ```sh
-mise x ubi:stephenc/qex -- qex --version   # run it, and change no configuration
-mise use -g ubi:stephenc/qex               # for this account, and every project in it
+cargo build --release --locked
 ```
 
-`mise use` alone does not put qex on your path: mise must be active in the
-shell, or its shims must be on the path. `mise doctor` says whether it is.
-
-Or with cargo:
+The binary is `target/release/qex`. Run it by that path, or copy it to a
+directory on your path:
 
 ```sh
-cargo install qex
-```
-
-Or take the binary for your machine from
-[the latest release](https://github.com/stephenc/qex/releases/latest):
-
-```sh
-dir=$(mktemp -d) &&
-archive="qex-$(uname -s)-$(uname -m).tar.gz" &&
-curl -fsSL -o "$dir/$archive" \
-  "https://github.com/stephenc/qex/releases/latest/download/$archive" &&
-curl -fsSL -o "$dir/$archive.sha256" \
-  "https://github.com/stephenc/qex/releases/latest/download/$archive.sha256" &&
-if command -v sha256sum >/dev/null
-then (cd "$dir" && sha256sum -c "$archive.sha256")
-else (cd "$dir" && shasum -a 256 -c "$archive.sha256")
-fi &&
-tar -xzf "$dir/$archive" -C "$dir" qex &&
 mkdir -p ~/.local/bin &&
-install -m 755 "$dir/qex" ~/.local/bin/qex
-[ -n "$dir" ] && rm -rf "$dir"
+install -m 755 target/release/qex ~/.local/bin/qex
 command -v qex
 ```
-
-These commands write into a temporary directory, and they do not write into
-the directory that you are in. The two `curl` lines take the archive and the
-`.sha256` file that the release holds beside it. The check compares the two.
-The `&&` after each write means a line that fails stops the writes that follow.
-The `rm` line still runs, and it removes the temporary directory.
 
 `mkdir` makes `~/.local/bin` when that directory is not there. `install` puts
 `qex` in that directory, and it REPLACES a `qex` that is already there.
@@ -253,9 +227,8 @@ show a file in `~/.local/bin`. If it shows nothing, add `~/.local/bin` to the
 path of this shell. If it shows a different file, that file is the one the
 shell will run.
 
-Linux and macOS, x86-64 and arm64. The Linux binaries hold no dynamic library.
-The first command starts the coordinator for you, and there is no service to
-configure. On Windows, use WSL2.
+qex builds for Linux and macOS. The first qex command starts the coordinator
+for you, and there is no service to configure. On Windows, use WSL2.
 
 ## For coding agents
 
@@ -291,5 +264,6 @@ somebody measured their own monitor scripts and gave the numbers.
 | [Design](design.md) | The coordinator, the supervisor, the files, and the limits. |
 | [Security](security.md) | What qex writes, and who can read it. |
 
-The source is at [github.com/stephenc/qex](https://github.com/stephenc/qex),
+The source is at
+[github.com/kolla23/local-resource-coordinator](https://github.com/kolla23/local-resource-coordinator),
 under the Apache 2.0 licence.

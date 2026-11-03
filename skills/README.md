@@ -1,4 +1,5 @@
 # Skills
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: no install from upstream's repository; copy the skill from a clone (issue #100). -->
 
 A skill is a page of instructions that an agent loads when a task matches it.
 The skill in `qex/` teaches an agent to use qex instead of a background command
@@ -18,14 +19,6 @@ For one project, so that each agent in it gets the skill:
 ```sh
 mkdir -p .claude/skills
 cp -r /path/to/qex/skills/qex .claude/skills/qex
-```
-
-Or take it from the release, with no copy of the source:
-
-```sh
-mkdir -p ~/.claude/skills/qex
-curl -fsSL https://raw.githubusercontent.com/stephenc/qex/main/skills/qex/SKILL.md \
-  -o ~/.claude/skills/qex/SKILL.md
 ```
 
 This repository holds `.claude/skills/qex` as a link to `skills/qex`, so an
