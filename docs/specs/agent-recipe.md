@@ -33,7 +33,7 @@ Upstream ships the same idea: `docs/agents.md`, `skills/qex/SKILL.md` and `qex h
 ### 3. When the coordinator isn't available
 - The fallback fires in exactly two cases:
   1. `coord` isn't on PATH;
-  2. `coord run` exits with the dedicated **"coordinator unavailable"** code (ADR 2 below) **and** the result file shows no job was accepted (ADR 2 defines that proof). The code alone isn't enough: a child can exit with any value, so a build that happens to exit with the same number must not look like "unavailable".
+  2. `coord run` exits with the dedicated **"coordinator unavailable"** code (the unavailable-code ADR below) **and** the result file shows no job was accepted (that ADR defines the proof). The code alone isn't enough: a child can exit with any value, so a build that happens to exit with the same number must not look like "unavailable".
 - In those cases the agent runs the command directly and **warns the user once per session**, not once per command. Suggested wording: "The resource coordinator isn't available, so builds and tests in this session run without coordination."
 - **Never fall back on any other exit code.** A failed build or test, a timeout, a cancellation or a queue timeout is a result, not "coordinator unavailable". So a failed build is never rerun uncoordinated.
 - **The agent never starts the daemon itself.** It never runs `coord daemon start` and never edits coordinator config. The CLI's own on-demand autostart (SPEC L482, L623) is accepted (decision A): it's part of `coord run`, not an agent action.
@@ -41,11 +41,11 @@ Upstream ships the same idea: `docs/agents.md`, `skills/qex/SKILL.md` and `qex h
 ### 4. When the job has to WAIT
 - `coord run` waits in the foreground, so to the agent a queued command just looks slower.
 - **The agent sets its tool timeout explicitly** for every `coord run`, and **passes `--queue-timeout` shorter than its own tool limit minus the expected run time** (decision B). The rule has no fixed numbers because agents differ; for Claude Code (Bash tool default 2 minutes, maximum 10) the example is a 10-minute tool timeout with `--queue-timeout 8m` for a short command. A job that is still queued then leaves the queue before the agent gives up, so it never starts later with nobody watching.
-- Queue time plus run time must fit in the tool limit; otherwise the client is killed mid-run and ADR 1 cancels the job. For a command expected to run long, the agent leaves less room for queueing, and tells the user if the command can't fit in the limit at all.
+- Queue time plus run time must fit in the tool limit; otherwise the client is killed mid-run and the client-kill ADR cancels the job. For a command expected to run long, the agent leaves less room for queueing, and tells the user if the command can't fit in the limit at all.
 - **A command that can't fit, or a `coord run` killed by the tool limit, is never run directly.** The agent asks the user, or uses its own background-execution mode if it has one, still through `coord run`. It doesn't rerun after a tool-timeout kill without the user asking.
 - **If the queue timeout is reached, or the wait otherwise outlasts the tool limit**, the agent tells the user:
   - how long it waited,
-  - what it's queued behind: the wait reason code (SPEC L286) and the jobs ahead of it, from `coord inspect --json JOB` (the jobs-ahead field is ADR 4),
+  - what it's queued behind: the wait reason code (SPEC L286) and the jobs ahead of it, from `coord inspect --json JOB` (the jobs-ahead field is the jobs-ahead ADR),
   - the job ID, so the user can inspect it with `coord inspect JOB`.
 - **Never:**
   - bypass the queue by running a command directly, except in the two fallback cases of section 3,
@@ -56,26 +56,26 @@ Upstream ships the same idea: `docs/agents.md`, `skills/qex/SKILL.md` and `qex h
 
 ## Decisions (owner, 2026-10-01)
 - **A. Autostart: accepted.** `coord run` may start the daemon on demand, as the SPEC says (L482, L623). The agent never starts it explicitly.
-- **B. Queue timeout: yes.** The recipe passes `--queue-timeout` shorter than the tool limit (e.g. 8m vs 10m), with the tool timeout set explicitly. A killed client while the job is *running* is covered by ADR 1.
-- **C. Unavailable code: yes.** The recipe falls back only on a dedicated "coordinator unavailable" exit code (ADR 2), never on a command failure. Because codes can collide, the fallback also needs the result file's proof that no job was accepted.
-- **D. Per-job TEMP/TMP: fix it in the coordinator** via the pending per-job TEMP ADR (evidence: `docs/decision-gate/02-parallel-workload-windows.md`, PRs #9/#10; the SPEC doesn't cover TEMP yet). The recipe doesn't tell agents to set TEMP.
+- **B. Queue timeout: yes.** The recipe passes `--queue-timeout` shorter than the tool limit (e.g. 8m vs 10m), with the tool timeout set explicitly. A killed client while the job is *running* is covered by the client-kill ADR.
+- **C. Unavailable code: yes.** The recipe falls back only on a dedicated "coordinator unavailable" exit code (the unavailable-code ADR), never on a command failure. Because codes can collide, the fallback also needs the result file's proof that no job was accepted.
+- **D. Per-job TEMP/TMP: fix it in the coordinator** via the pending (written since: [adr/0001b-per-job-temp.md](../fork/adr/0001b-per-job-temp.md), #106) per-job TEMP ADR (evidence: `docs/decision-gate/02-parallel-workload-windows.md`, PRs #9/#10; the SPEC doesn't cover TEMP yet). The recipe doesn't tell agents to set TEMP.
 - **E. Binary name: keep `coord` as a placeholder. Rename before release.** The recipe can't ship until the name is final (SPEC L6, §25).
 
 ## ADRs this recipe depends on
-These change upstream interfaces, so each needs an ADR before the CLI implements it (AGENTS.md rule).
-1. **Cancel the job tree when the client is killed while the job runs.** If the process running `coord run` dies (for example, the agent's tool limit kills it) while the job is running, the coordinator cancels the whole job tree. This changes the SPEC default for `run` (`disconnect = "continue"`, L446/L519). The ADR must define how a killed client is told apart from a transient transport failure (SPEC L450), whether detached `submit` jobs keep today's behavior, and whether a client killed while its job is still **queued** withdraws the job (recommended, as a safety net if an agent's tool limit is shorter than its `--queue-timeout`), whether killing a `coord wait JOB` client (not `run`) also cancels the job. Proposal: no, since `wait` only attaches (SPEC L421).
-2. **A dedicated "coordinator unavailable" exit code**, distinct from 125. No exit code can be distinct from every child code (a child can exit 0-255), so the ADR must also define machine-readable proof that no job was accepted: a **positive** "not accepted" record written to the `--result-file` (SPEC L425: the submitting CLI writes it atomically). A missing or unreadable result file is **not** proof: it can also come from a CLI crash, a full disk or an unwritable path after the job was accepted. It means "no job was accepted, nothing ran". The ADR picks the value and the proof, defines exactly which failures produce it (daemon unreachable, autostart failed, state directory unusable), and keeps L705's rule: the coordinator itself never runs work unmanaged.
-3. **Per-job TEMP/TMP** (decision D). Already pending from gate 2; listed here because the recipe relies on it.
-4. **`inspect` reports what a queued job waits behind**: the jobs ahead of it (IDs, groups, claims) in `inspect --json`. The SPEC only defines wait reason codes (L286), and the owner's WAIT requirement needs more.
+These change upstream interfaces, so each needs an ADR before the CLI implements it (AGENTS.md rule). They are named, not numbered: "ADR 1" to "ADR 5" are the numbers of [PORT_PLAN.md](../fork/PORT_PLAN.md)'s "ADRs" table. That table already covers only the per-job TEMP ADR; the client-kill, unavailable-code and jobs-ahead ADRs are not in it.
+- **The client-kill ADR: cancel the job tree when the client is killed while the job runs.** If the process running `coord run` dies (for example, the agent's tool limit kills it) while the job is running, the coordinator cancels the whole job tree. This changes the SPEC default for `run` (`disconnect = "continue"`, L446/L519). The ADR must define how a killed client is told apart from a transient transport failure (SPEC L450), whether detached `submit` jobs keep today's behavior, and whether a client killed while its job is still **queued** withdraws the job (recommended, as a safety net if an agent's tool limit is shorter than its `--queue-timeout`), whether killing a `coord wait JOB` client (not `run`) also cancels the job. Proposal: no, since `wait` only attaches (SPEC L421).
+- **The unavailable-code ADR: a dedicated "coordinator unavailable" exit code**, distinct from 125. No exit code can be distinct from every child code (a child can exit 0-255), so the ADR must also define machine-readable proof that no job was accepted: a **positive** "not accepted" record written to the `--result-file` (SPEC L425: the submitting CLI writes it atomically). A missing or unreadable result file is **not** proof: it can also come from a CLI crash, a full disk or an unwritable path after the job was accepted. It means "no job was accepted, nothing ran". The ADR picks the value and the proof, defines exactly which failures produce it (daemon unreachable, autostart failed, state directory unusable), and keeps L705's rule: the coordinator itself never runs work unmanaged.
+- **The per-job TEMP ADR: per-job TEMP/TMP** (decision D), PORT_PLAN's row "1 (alongside)", [adr/0001b-per-job-temp.md](../fork/adr/0001b-per-job-temp.md). Listed here because the recipe relies on it.
+- **The jobs-ahead ADR: `inspect` reports what a queued job waits behind**: the jobs ahead of it (IDs, groups, claims) in `inspect --json`. The SPEC only defines wait reason codes (L286), and the owner's WAIT requirement needs more.
 
 ## Open questions for the ADRs
 Found in review round 3 and left open by the owner (2026-10-01). Each has a suggested answer; the ADRs decide.
 1. **Job ID after a tool-timeout kill.** The result file is written by the submitting CLI (SPEC L425; the SPEC doesn't say when, but a result implies the end of the run), so if the tool limit kills `coord run`, the agent has no machine-readable job ID to report, and parsing stderr is not allowed (L460).
    *Suggested answer:* every `coord run` also writes the machine-readable event file (SPEC L421), and the ADR requires that file to record the job ID at acceptance (the SPEC doesn't define its contents or timing yet). Alternative: write the result file at acceptance and update it at the end. Add this case to acceptance check 5.
-2. **"What it's queued behind" after the queue timeout.** By the time the agent reports, the job is terminal (`QUEUE_EXPIRED`), so a live jobs-ahead view (ADR 4) has nothing to show.
-   *Suggested answer:* ADR 4 keeps the last wait reason and jobs-ahead snapshot on the terminal `QUEUE_EXPIRED` (and withdrawn) record, and an acceptance check reads it after expiry.
-3. **A killed client can still leave a queued job.** If an agent's tool limit is shorter than its `--queue-timeout`, the client dies while the job is queued; ADR 1 currently only *recommends* withdrawing it, so it could start later with nobody watching.
-   *Suggested answer:* make withdrawal of a queued job a required part of ADR 1 (this extends decision B, which covered running jobs), and add an acceptance check under 4: kill the client while its job is queued and confirm the job never starts.
+2. **"What it's queued behind" after the queue timeout.** By the time the agent reports, the job is terminal (`QUEUE_EXPIRED`), so a live jobs-ahead view (the jobs-ahead ADR) has nothing to show.
+   *Suggested answer:* the jobs-ahead ADR keeps the last wait reason and jobs-ahead snapshot on the terminal `QUEUE_EXPIRED` (and withdrawn) record, and an acceptance check reads it after expiry.
+3. **A killed client can still leave a queued job.** If an agent's tool limit is shorter than its `--queue-timeout`, the client dies while the job is queued; the client-kill ADR currently only *recommends* withdrawing it, so it could start later with nobody watching.
+   *Suggested answer:* make withdrawal of a queued job a required part of the client-kill ADR (this extends decision B, which covered running jobs), and add an acceptance check under 4: kill the client while its job is queued and confirm the job never starts.
 
 ## Acceptance checks (once the CLI exists)
 Run through the real CLI, in the same spirit as the repo's e2e tests:
@@ -83,14 +83,14 @@ Run through the real CLI, in the same spirit as the repo's e2e tests:
 2. Every command in the recipe parses with the real CLI (`--help`, or a dry-run against a test daemon).
 3. A scripted agent session on a fake bench (3 tiny crates, as in PR #11's e2e) with a capacity of 1:
    - the second and third `coord run` wait, then run, and their exit codes pass through;
-   - with `coord` removed from PATH, or with the daemon made unavailable so `coord run` returns the ADR 2 code, commands run directly and the warning appears exactly once per session;
+   - with `coord` removed from PATH, or with the daemon made unavailable so `coord run` returns the unavailable-code ADR's code, commands run directly and the warning appears exactly once per session;
    - a build that fails through `coord run` is reported as failed and is **not** rerun directly;
-   - a child that exits with exactly the ADR 2 code is treated as a job result, not as "unavailable", and is not rerun;
+   - a child that exits with exactly the unavailable-code ADR's code is treated as a job result, not as "unavailable", and is not rerun;
    - a missing or unreadable result file never triggers the fallback;
    - result files are written outside the repo, and `git status` stays clean after a run.
 4. Lifetimes:
    - a job still queued when `--queue-timeout` is reached leaves the queue and never starts;
-   - killing the `coord run` client while its job runs cancels the whole job tree (ADR 1), with no surviving processes.
+   - killing the `coord run` client while its job runs cancels the whole job tree (the client-kill ADR), with no surviving processes.
 5. Manual agent scenarios. Load the skill in Claude Code and the snippet in Codex, and check each against these observable pass criteria. The scripted test in check 3 tests the CLI path; these test whether a real agent follows the recipe:
    - "build and test this repo": uses `coord run` with `--result-file` outside the repo, a `--queue-timeout` shorter than that agent's own tool limit minus run time, and an explicit tool timeout; `git status` runs directly. Check this in Codex too, against Codex's tool limit.
    - A command too long for the tool limit: the agent asks the user or uses background mode through `coord run`; it never runs it directly.
