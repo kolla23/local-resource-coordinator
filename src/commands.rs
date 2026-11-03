@@ -6897,19 +6897,18 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
     Ok(0)
 }
 
-/// Gives the number of bytes that one directory holds, its subfolders included.
+/// Gives the bytes one directory holds, subfolders included; a link counts as itself.
 fn directory_size(path: &std::path::Path) -> u64 {
-    tree_size(path, None)
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.is_dir() => tree_size(path, None),
+        Ok(m) => m.len(),
+        Err(_) => 0,
+    }
 }
 
-/// Sums the sizes in a tree, leaving out the subtree `skip`. A symbolic link counts
-/// as itself and is never followed; a folder that cannot be read counts 0.
+/// Sums the sizes in the tree below `root`, leaving out the subtree `skip`. A link below
+/// the root counts as itself and is never followed; a folder that cannot be read counts 0.
 fn tree_size(root: &std::path::Path, skip: Option<&std::path::Path>) -> u64 {
-    match std::fs::symlink_metadata(root) {
-        Ok(m) if m.is_dir() => {}
-        Ok(m) => return m.len(),
-        Err(_) => return 0,
-    }
     let mut total = 0u64;
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
