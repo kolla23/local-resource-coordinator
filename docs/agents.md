@@ -5,6 +5,7 @@ description: The one page that an agent needs, and the property that makes qex s
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: install by building from the source, and copy the skill from a clone, in place of upstream's downloads (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: the build gives the clone address, and says that it needs Rust 1.85 or later (issue #118). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -14,9 +15,16 @@ You cannot see the work that another agent is about to start, and it cannot see
 yours. qex holds the work of every agent on this machine in one queue. It starts
 each job when the claim of the job fits the machine, records the result on the
 disk, and gives you one command that waits for it. This project has no
-releases yet: `cargo build --release --locked` in a clone of its source builds
-the binary at `target/release/qex`. The first command starts the coordinator,
-and there is no service to configure.
+releases yet, so build it from the source, with Rust 1.85 or later:
+
+```sh
+git clone https://github.com/kolla23/local-resource-coordinator.git
+cd local-resource-coordinator
+cargo build --release --locked
+```
+
+That builds the binary at `target/release/qex`. The first command starts the
+coordinator, and there is no service to configure.
 
 This page is also in the binary: run `qex help agents` to read it with no
 network, or [install it as a skill](#install-this-page-as-a-skill).

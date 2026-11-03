@@ -5,6 +5,7 @@ description: Run a long local task (a build, a test suite, a training run, a dat
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: install by building from the source, in place of upstream's downloads (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: the build gives the clone address, and says that it needs Rust 1.85 or later (issue #118). -->
 
 # qex — run long tasks and wait for them correctly
 
@@ -12,9 +13,17 @@ You cannot see the work that another agent is about to start, and it cannot see
 yours. qex holds the work of every agent on this machine in one queue. It starts
 each job when the claim of the job fits the machine, records the result on the
 disk, and gives you one command that waits for it. `command -v qex` says whether
-it is installed. This project has no releases yet: in a clone of its source,
-`cargo build --release --locked` builds the binary at `target/release/qex`.
-The first command starts the coordinator.
+it is installed. This project has no releases yet, so build it from the
+source, with Rust 1.85 or later:
+
+```sh
+git clone https://github.com/kolla23/local-resource-coordinator.git
+cd local-resource-coordinator
+cargo build --release --locked
+```
+
+That builds the binary at `target/release/qex`. The first command starts the
+coordinator.
 
 `qex help agents` is the complete page inside the binary.
 
