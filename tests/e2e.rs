@@ -19,7 +19,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: six tests for qex du and qex gc on job subfolders and on symbolic links in a job, in jobs/ or at the state directory (issue #101).
 // Modified by the local-resource-coordinator fork, 2026-11-03: Drop waits until each process that it signalled has stopped (issue #126).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a link in jobs/ to an outside job record; du, complete, list, status and logs ignore it (issue #129).
-// Modified by the local-resource-coordinator fork, 2026-11-03: three tests check what a job's group left after the system collected its leader (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: five tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -5226,36 +5226,68 @@ impl Harness {
     fn unheld_leftover_job(&self) -> (UnheldJob, Leftover) {
         let file = self.root.join("leftover.pid");
         let file_text = file.to_str().unwrap().to_string();
-        let id = self.submit(&["submit", "--", "sh", "-c", LEFTOVER_JOB, "sh", &file_text]);
+        let job = self.submit_unheld_job(&["sh", "-c", LEFTOVER_JOB, "sh", &file_text]);
+        let guard = self.leftover_in_group(&file, job.leader);
+        (job, guard)
+    }
+
+    /// Submits a job with no holder and waits until it runs.
+    fn submit_unheld_job(&self, command: &[&str]) -> UnheldJob {
+        let mut args = vec!["submit", "--"];
+        args.extend_from_slice(command);
+        let id = self.submit(&args);
         self.until("the job operates", Duration::from_secs(45), || {
             let s = self.status_json(&id);
             s["state"].as_str() == Some("running")
                 && s["supervisor_pid"].as_i64().is_some()
                 && s["pid"].as_i64().is_some()
         });
+        let s = self.status_json(&id);
+        UnheldJob {
+            leader: s["pid"].as_i64().unwrap() as i32,
+            supervisor: s["supervisor_pid"].as_i64().unwrap() as i32,
+            id,
+        }
+    }
+
+    /// Waits until the job writes a pid to `file`, and checks that pid is in group `leader`.
+    fn leftover_in_group(&self, file: &Path, leader: i32) -> Leftover {
         let mut leftover = 0;
         self.until(
             "the job names its leftover",
             Duration::from_secs(30),
             || {
-                let text = std::fs::read_to_string(&file).unwrap_or_default();
+                let text = std::fs::read_to_string(file).unwrap_or_default();
                 leftover = text.trim().parse().unwrap_or(0);
                 leftover > 0
             },
         );
         let guard = Leftover(leftover);
-        let s = self.status_json(&id);
-        let job = UnheldJob {
-            leader: s["pid"].as_i64().unwrap() as i32,
-            supervisor: s["supervisor_pid"].as_i64().unwrap() as i32,
-            id,
-        };
         assert_eq!(
             unsafe { libc::getpgid(leftover) },
-            job.leader,
+            leader,
             "the leftover is in the group of the job"
         );
-        (job, guard)
+        guard
+    }
+
+    /// Says whether a process runs: `kill` succeeds on a zombie, and on macOS only `ps` shows one.
+    /// No `ps` line counts as not running, so a failed look turns a negative red.
+    fn runs(pid: i32) -> bool {
+        (unsafe { libc::kill(pid, 0) }) == 0
+            && !matches!(Harness::state_by_ps(pid), Some('Z') | None)
+    }
+
+    /// Polls `test` every 10 ms and gives the time it took; runs no qex command, so it can wait
+    /// while the coordinator is stopped, where `until`'s report would hang.
+    fn poll_until(what: &str, limit: Duration, mut test: impl FnMut() -> bool) -> Duration {
+        let start = Instant::now();
+        while !test() {
+            let took = start.elapsed();
+            assert!(took < limit, "not reached in {limit:?} ({took:?}): {what}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        start.elapsed()
     }
 
     /// The state letter that `ps` gives for a process, on Linux and macOS alike.
@@ -5269,7 +5301,7 @@ impl Harness {
 
     /// Waits until the system collected `leader`, while `leftover` still holds its group.
     fn leader_collected(&self, leader: i32, leftover: i32) {
-        self.until(
+        Harness::poll_until(
             "the system collected the leader",
             Duration::from_secs(30),
             || unsafe { libc::kill(leader, 0) } != 0,
@@ -5281,6 +5313,81 @@ impl Harness {
         );
         assert!(!Harness::stopped(leftover), "the leftover runs");
     }
+
+    /// Submits `TERM_STOP_JOB` and waits until it runs and its leftover exists.
+    fn term_stop_job(&self) -> (UnheldJob, Leftover) {
+        let path = |name: &str| self.root.join(name).to_str().unwrap().to_string();
+        let file = path("leftover.pid");
+        let (got_term, go, pid_file) = (path("got-term"), path("go"), path("state/qex/run/pid"));
+        let job = self.submit_unheld_job(&[
+            "sh",
+            "-c",
+            TERM_STOP_JOB,
+            "sh",
+            &file,
+            &got_term,
+            &go,
+            &pid_file,
+        ]);
+        let guard = self.leftover_in_group(Path::new(&file), job.leader);
+        (job, guard)
+    }
+
+    /// Steps 2-6 of the TERM handshake, after `killed`, the coordinator, and the supervisor of a
+    /// `TERM_STOP_JOB` were killed: recovery TERMs the leader, which stops the new coordinator.
+    fn term_stops_the_coordinator(
+        &self,
+        job: &UnheldJob,
+        leftover: i32,
+        killed: i32,
+    ) -> StoppedCoordinator {
+        let t0 = Instant::now();
+        let child = self.spawn(&["list"]);
+        let got_term = self.root.join("got-term");
+        Harness::poll_until("the leader got qex's TERM", Duration::from_secs(30), || {
+            got_term.exists()
+        });
+        let ts = Instant::now();
+        eprintln!("spawn-to-got-term: {} ms", (ts - t0).as_millis());
+
+        let read_pid =
+            |p: &Path| -> i32 { std::fs::read_to_string(p).unwrap().trim().parse().unwrap() };
+        let pid = read_pid(&got_term);
+        assert_eq!(
+            pid,
+            read_pid(&self.root.join("state/qex/run/pid")),
+            "the leader stopped the coordinator that recovers"
+        );
+        assert_ne!(pid, killed, "a new coordinator recovers");
+        Harness::poll_until(
+            "the coordinator is stopped",
+            Duration::from_secs(30),
+            || Harness::state_by_ps(pid) == Some('T'),
+        );
+        assert!(
+            Harness::runs(job.leader),
+            "no grace KILL came before the stop"
+        );
+        assert!(Harness::runs(leftover), "the leftover runs");
+
+        std::fs::write(self.root.join("go"), "").unwrap();
+        self.leader_collected(job.leader, leftover);
+        // SIGCONT then comes more than the 2 s grace after the TERM, which came before got-term.
+        std::thread::sleep(Duration::from_millis(2500).saturating_sub(ts.elapsed()));
+        StoppedCoordinator { pid, child }
+    }
+}
+
+/// The job of the TERM handshake: as `LEFTOVER_JOB`, but its TERM trap stops the coordinator
+/// that the pid file `$4` names, writes its pid to `$2`, and ends once `$3` exists.
+#[cfg(unix)]
+const TERM_STOP_JOB: &str = r#"trap '' TERM; sleep 600 & echo $! > "$1"; trap 'p=$(cat "$4"); kill -STOP "$p"; echo "$p" > "$2.new"; mv "$2.new" "$2"; until [ -e "$3" ]; do sleep 0.1; done; exit 0' TERM; wait"#;
+
+/// A coordinator that the leader's TERM trap stopped, and the `qex list` child that started it.
+#[cfg(unix)]
+struct StoppedCoordinator {
+    pid: i32,
+    child: std::process::Child,
 }
 
 /// Recovery kills what a job leader left in its group after the system collected the leader
@@ -5310,13 +5417,13 @@ fn recovery_stops_the_leftovers_of_a_collected_job_process() {
     });
 }
 
-/// Recovery TERMs a live leader, the system collects it, and what it left that ignores TERM is
-/// still killed (#115).
+/// Recovery TERMs a live leader, the system collects it while the coordinator is stopped, and
+/// what it left that ignores TERM is killed after the rest of the grace (#115).
 #[test]
 #[cfg(unix)]
 fn recovery_stops_leftovers_that_ignore_term_once_the_leader_is_collected() {
     let h = Harness::with_default_config("leftgoneterm");
-    let (job, leftover) = h.unheld_leftover_job();
+    let (job, leftover) = h.term_stop_job();
     let coordinator = h.coordinator_pid();
     unsafe { libc::kill(coordinator, libc::SIGKILL) };
     h.until("the coordinator is gone", Duration::from_secs(30), || {
@@ -5328,7 +5435,19 @@ fn recovery_stops_leftovers_that_ignore_term_once_the_leader_is_collected() {
     });
     assert!(!Harness::stopped(job.leader), "the leader runs");
     assert!(!Harness::stopped(leftover.0), "the leftover runs");
+    let mut stopped = h.term_stops_the_coordinator(&job, leftover.0, coordinator);
 
+    let t1 = Instant::now();
+    unsafe { libc::kill(stopped.pid, libc::SIGCONT) };
+    Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
+        Harness::stopped(leftover.0)
+    });
+    let waited = t1.elapsed();
+    eprintln!("SIGCONT-to-killed: {} ms", waited.as_millis());
+    assert!(
+        waited >= Duration::from_millis(1000),
+        "the KILL must wait out the rest of the grace: {waited:?}"
+    );
     h.until("the job is failed", Duration::from_secs(20), || {
         h.state_of(&job.id) == "failed"
     });
@@ -5340,14 +5459,7 @@ fn recovery_stops_leftovers_that_ignore_term_once_the_leader_is_collected() {
         error.contains("; qex stopped the job process"),
         "recovery must stop the live job process: {error}"
     );
-    h.until(
-        "the system collected the leader",
-        Duration::from_secs(30),
-        || (unsafe { libc::kill(job.leader, 0) }) != 0,
-    );
-    h.until("the leftover is killed", Duration::from_secs(20), || {
-        Harness::stopped(leftover.0)
-    });
+    let _ = stopped.child.wait();
 }
 
 /// `reap` kills what a job leader left in its group after the system collected the leader
@@ -5361,12 +5473,12 @@ fn reap_stops_the_leftovers_of_a_collected_job_process() {
     // A stopped coordinator collects no supervisor, so `reap` looks only after the leader is gone.
     unsafe { libc::kill(coordinator, libc::SIGSTOP) };
     unsafe { libc::kill(job.supervisor, libc::SIGSTOP) };
-    h.until("both are stopped", Duration::from_secs(30), || {
+    Harness::poll_until("both are stopped", Duration::from_secs(30), || {
         Harness::state_by_ps(coordinator) == Some('T')
             && Harness::state_by_ps(job.supervisor) == Some('T')
     });
     unsafe { libc::kill(job.leader, libc::SIGKILL) };
-    h.until("the leader is a zombie", Duration::from_secs(30), || {
+    Harness::poll_until("the leader is a zombie", Duration::from_secs(30), || {
         Harness::state_by_ps(job.leader) == Some('Z')
     });
     unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
@@ -5387,6 +5499,93 @@ fn reap_stops_the_leftovers_of_a_collected_job_process() {
     h.until("the leftover is killed", Duration::from_secs(20), || {
         Harness::stopped(leftover.0)
     });
+}
+
+/// A leader that qex's TERM makes a zombie: its group gets the rest of the grace before the KILL
+/// (#115).
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_gives_the_group_of_a_zombie_leader_the_rest_of_the_grace() {
+    let h = Harness::with_default_config("leftzombiegrace");
+    let (_holder, job, leftover) = h.held_leftover_job();
+    h.orphan_the_job(&job);
+    assert!(
+        !Harness::term_bit(job.leader, "SigIgn:") && !Harness::term_bit(job.leader, "SigCgt:"),
+        "TERM must end the leader"
+    );
+    assert!(!Harness::stopped(leftover.0), "the leftover runs");
+    let mut child = h.spawn(&["list"]);
+
+    Harness::poll_until("the leader is a zombie", Duration::from_secs(20), || {
+        Harness::state_in_proc(job.leader) == Some('Z')
+    });
+    let tz = Instant::now();
+    Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
+        Harness::stopped(leftover.0)
+    });
+    let waited = tz.elapsed();
+    eprintln!("zombie-to-killed: {} ms", waited.as_millis());
+    assert!(
+        waited >= Duration::from_millis(1000),
+        "the KILL must wait out the rest of the grace: {waited:?}"
+    );
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.status_json(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("; qex stopped the job process"),
+        "recovery must stop the live job process: {error}"
+    );
+    let _ = child.wait();
+}
+
+/// A job whose leader and leftover ignore TERM: the leader stays the job through the grace.
+#[cfg(unix)]
+const TERM_IGNORING_JOB: &str = r#"trap '' TERM; sleep 600 & echo $! > "$1"; wait"#;
+
+/// A leader that outlives qex's TERM gets the KILL at the end of the grace, its group with it
+/// (#115).
+#[test]
+#[cfg(unix)]
+fn recovery_kills_a_leader_that_ignores_term_at_the_end_of_the_grace() {
+    let h = Harness::with_default_config("leftgrace");
+    let file = h.root.join("leftover.pid");
+    let file_text = file.to_str().unwrap().to_string();
+    let job = h.submit_unheld_job(&["sh", "-c", TERM_IGNORING_JOB, "sh", &file_text]);
+    let leftover = h.leftover_in_group(&file, job.leader);
+    let coordinator = h.coordinator_pid();
+    unsafe { libc::kill(coordinator, libc::SIGKILL) };
+    h.until("the coordinator is gone", Duration::from_secs(30), || {
+        Harness::stopped(coordinator)
+    });
+    unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+    h.until("the supervisor is gone", Duration::from_secs(30), || {
+        Harness::stopped(job.supervisor)
+    });
+    assert!(!Harness::stopped(job.leader), "the leader runs");
+    assert!(!Harness::stopped(leftover.0), "the leftover runs");
+
+    h.qex(&["list"]);
+    h.until(
+        "the leader and the leftover are stopped",
+        Duration::from_secs(20),
+        || Harness::stopped(job.leader) && Harness::stopped(leftover.0),
+    );
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.status_json(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("; qex stopped the job process"),
+        "recovery must stop the live job process: {error}"
+    );
 }
 
 /// A record from an earlier start of the machine is dead, whatever its pids
