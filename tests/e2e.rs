@@ -16,6 +16,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: eight tests plant a symbolic link at a state or coordinator file and expect its target untouched (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: seven tests plant a symbolic link at a job file and expect its target untouched (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie job process; recovery and reap must not stop it; five tests check what its group left (issue #97).
+// Modified by the local-resource-coordinator fork, 2026-11-03: six tests for qex du and qex gc on job subfolders and on symbolic links in a job, in jobs/ or at the state directory (issue #101).
 // Modified by the local-resource-coordinator fork, 2026-11-03: Drop waits until each process that it signalled has stopped (issue #126).
 //! End-to-end tests for qex.
 //!
@@ -8382,6 +8383,248 @@ fn du_reports_the_space_that_qex_holds() {
     assert!(v["total_bytes"].as_u64().unwrap() > 0);
     assert!(v["jobs_bytes"].as_u64().unwrap() > 0);
     assert_eq!(v["largest"][0]["id"].as_str(), Some(id.as_str()));
+}
+
+/// Runs one job to its end and gives its id; `qex du` then reads a disk no coordinator writes.
+fn du_job_with_no_coordinator(h: &Harness) -> String {
+    let id = h.submit(&["submit", "--", "sh", "-c", "echo du-subfolder"]);
+    h.ok(&["wait", &id, "--timeout", "45s"]);
+    h.stop_coordinator();
+    id
+}
+
+fn du_json(h: &Harness) -> serde_json::Value {
+    let text = h.ok(&["du", "--json"]);
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("`qex du --json`: {e}: {text}"))
+}
+
+fn du_bytes(v: &serde_json::Value, key: &str) -> u64 {
+    v[key]
+        .as_u64()
+        .unwrap_or_else(|| panic!("`qex du --json` has no {key}: {v}"))
+}
+
+/// `qex du` counts the files in the subfolders of a job directory (issue #101).
+#[test]
+fn du_counts_the_bytes_in_a_job_subfolder() {
+    // du compares whole seconds, so `keep = "0.5s"` makes the job old at once; "0s" means none.
+    let h = Harness::new(
+        "du-subfolder",
+        "[peers]\nenabled = false\n\
+         [budget]\ncpu = \"3\"\n\
+         [defaults]\nmem = \"256MB\"\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [gc]\nkeep = \"0.5s\"\n",
+    );
+    let id = du_job_with_no_coordinator(&h);
+    let before = du_json(&h);
+
+    let attempt = h.job_dir(&id).join("tmp/1");
+    std::fs::create_dir_all(attempt.join("deeper")).unwrap();
+    std::fs::write(attempt.join("blob"), vec![b'x'; 300_000]).unwrap();
+    std::fs::write(attempt.join("deeper/small"), vec![b'y'; 1_000]).unwrap();
+    let after = du_json(&h);
+
+    assert_eq!(after["largest"][0]["id"].as_str(), Some(id.as_str()));
+    let job = |v: &serde_json::Value| du_bytes(&v["largest"][0], "bytes");
+    assert_eq!(
+        job(&after) - job(&before),
+        301_000,
+        "the job's size must grow by the bytes in tmp/1: before {before}, after {after}"
+    );
+    for key in ["jobs_bytes", "total_bytes", "reclaimable_bytes"] {
+        assert_eq!(
+            du_bytes(&after, key) - du_bytes(&before, key),
+            301_000,
+            "{key}: before {before}, after {after}"
+        );
+    }
+}
+
+/// A symbolic link in a job subfolder counts as the link, never as its target (issue #101).
+#[test]
+fn du_counts_a_link_in_a_job_subfolder_as_itself() {
+    let h = Harness::with_default_config("du-subfolder-link");
+    let id = du_job_with_no_coordinator(&h);
+    let outside = h.root.join("outside-the-state-directory");
+    std::fs::create_dir_all(outside.join("folder")).unwrap();
+    std::fs::write(outside.join("file"), vec![b'x'; 1_000_000]).unwrap();
+    std::fs::write(outside.join("folder/inner"), vec![b'x'; 1_000_000]).unwrap();
+    let before = du_json(&h);
+
+    let attempt = h.job_dir(&id).join("tmp/1");
+    std::fs::create_dir_all(&attempt).unwrap();
+    std::os::unix::fs::symlink(outside.join("file"), attempt.join("to-file")).unwrap();
+    std::os::unix::fs::symlink(outside.join("folder"), attempt.join("to-folder")).unwrap();
+    let links: u64 = ["to-file", "to-folder"]
+        .iter()
+        .map(|n| std::fs::symlink_metadata(attempt.join(n)).unwrap().len())
+        .sum();
+    assert!(links > 0 && links < 1_000, "a link holds its target's path");
+    let after = du_json(&h);
+
+    let job = |v: &serde_json::Value| du_bytes(&v["largest"][0], "bytes");
+    assert_eq!(
+        job(&after) - job(&before),
+        links,
+        "links count as themselves, not their 2 MB of targets: before {before}, after {after}"
+    );
+}
+
+/// Each byte counts once: `other_bytes` takes subfolders outside `jobs/`, never `jobs/` (#101).
+#[test]
+fn du_counts_each_byte_once_across_jobs_and_other() {
+    let h = Harness::with_default_config("du-once");
+    let id = du_job_with_no_coordinator(&h);
+    let before = du_json(&h);
+
+    let run_sub = h.root.join("state/qex/run/a-subfolder");
+    std::fs::create_dir_all(&run_sub).unwrap();
+    std::fs::write(run_sub.join("blob"), vec![b'x'; 50_000]).unwrap();
+    let attempt = h.job_dir(&id).join("tmp/1");
+    std::fs::create_dir_all(&attempt).unwrap();
+    std::fs::write(attempt.join("x"), vec![b'x'; 70_000]).unwrap();
+    let after = du_json(&h);
+
+    let grew = |key: &str| du_bytes(&after, key) - du_bytes(&before, key);
+    assert_eq!(
+        grew("other_bytes"),
+        50_000,
+        "before {before}, after {after}"
+    );
+    assert_eq!(grew("jobs_bytes"), 70_000, "before {before}, after {after}");
+    for v in [&before, &after] {
+        assert_eq!(
+            du_bytes(v, "total_bytes"),
+            du_bytes(v, "jobs_bytes") + du_bytes(v, "other_bytes"),
+            "the total is the jobs plus the other files, with no byte twice: {v}"
+        );
+    }
+}
+
+/// `qex gc --dry-run` counts the bytes in a job's subfolders among those it frees (#101).
+#[test]
+fn gc_dry_run_counts_the_bytes_in_a_job_subfolder() {
+    let h = Harness::with_default_config("gc-subfolder");
+    let id = h.submit(&["submit", "--", "sh", "-c", "echo gc-subfolder"]);
+    h.ok(&["wait", &id, "--timeout", "45s"]);
+    let gc = |h: &Harness| -> serde_json::Value {
+        let out = h.ok(&["gc", "--dry-run", "--older-than", "0s", "--json"]);
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("`qex gc --json`: {e}: {out}"))
+    };
+    let before = gc(&h);
+    assert_eq!(before["jobs"][0]["id"].as_str(), Some(id.as_str()));
+
+    let attempt = h.job_dir(&id).join("tmp/1");
+    std::fs::create_dir_all(&attempt).unwrap();
+    std::fs::write(attempt.join("blob"), vec![b'x'; 300_000]).unwrap();
+    let after = gc(&h);
+
+    assert_eq!(
+        du_bytes(&after, "bytes") - du_bytes(&before, "bytes"),
+        300_000,
+        "before {before}, after {after}"
+    );
+}
+
+/// A symbolic link in `jobs/` to an outside folder is not walked by `qex du` or `qex gc`, and
+/// `qex gc` deletes nothing through it; the link itself may go (issue #101).
+#[test]
+fn du_and_gc_do_not_walk_or_delete_through_a_link_in_jobs() {
+    let h = Harness::with_default_config("du-gc-jobs-link");
+    let id = h.submit(&["submit", "--", "sh", "-c", "echo jobs-link"]);
+    h.ok(&["wait", &id, "--timeout", "45s"]);
+
+    let outside = h.root.join("outside-the-state-directory");
+    std::fs::create_dir_all(outside.join("inner")).unwrap();
+    std::fs::write(outside.join("blob"), vec![b'x'; 400_000]).unwrap();
+    std::fs::write(outside.join("inner/small"), vec![b'y'; 4_000]).unwrap();
+    let listing = |dir: &Path| -> Vec<(PathBuf, u64)> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                let m = std::fs::symlink_metadata(e.path()).unwrap();
+                if m.is_dir() {
+                    stack.push(e.path());
+                }
+                out.push((e.path(), m.len()));
+            }
+        }
+        out.sort();
+        out
+    };
+    let outside_before = listing(&outside);
+
+    let du_before = du_json(&h);
+    let gc = |h: &Harness| -> serde_json::Value {
+        let out = h.ok(&["gc", "--dry-run", "--older-than", "0s", "--json"]);
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("`qex gc --json`: {e}: {out}"))
+    };
+    let gc_before = gc(&h);
+
+    // A name shaped like a job id, so nothing skips it by its name.
+    let link = h
+        .root
+        .join("state/qex/jobs/00000000-0000-4000-8000-000000000101");
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+    let du_after = du_json(&h);
+    for key in ["jobs_bytes", "directories_with_no_record"] {
+        assert_eq!(
+            du_bytes(&du_after, key),
+            du_bytes(&du_before, key),
+            "`qex du` walked the link in jobs/: {key}: before {du_before}, after {du_after}"
+        );
+    }
+    let gc_after = gc(&h);
+    for key in ["bytes", "directories_with_no_record"] {
+        assert_eq!(
+            du_bytes(&gc_after, key),
+            du_bytes(&gc_before, key),
+            "`qex gc --dry-run` walked the link in jobs/: {key}: {gc_before} then {gc_after}"
+        );
+    }
+
+    h.ok(&["gc", "--older-than", "0s"]);
+    assert!(
+        !h.job_dir(&id).exists(),
+        "gc must still delete the old record"
+    );
+    assert_eq!(
+        listing(&outside),
+        outside_before,
+        "`qex gc` changed the folder behind the link in jobs/"
+    );
+    assert_eq!(
+        std::fs::read(outside.join("blob")).unwrap(),
+        vec![b'x'; 400_000]
+    );
+    assert_eq!(
+        std::fs::read(outside.join("inner/small")).unwrap(),
+        vec![b'y'; 4_000]
+    );
+}
+
+/// `other_bytes` still counts the files of a state directory behind the user's own link (#101).
+#[test]
+fn du_counts_the_other_files_of_a_state_directory_behind_a_link() {
+    let h = Harness::with_default_config("du-state-link");
+    let elsewhere = h.root.join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, h.root.join("state/qex")).unwrap();
+    du_job_with_no_coordinator(&h);
+    let before = du_json(&h);
+
+    std::fs::create_dir_all(elsewhere.join("run")).unwrap();
+    std::fs::write(elsewhere.join("run/blob"), vec![b'x'; 50_000]).unwrap();
+    let after = du_json(&h);
+
+    assert_eq!(
+        du_bytes(&after, "other_bytes") - du_bytes(&before, "other_bytes"),
+        50_000,
+        "before {before}, after {after}"
+    );
 }
 
 /// A deep directory must not stop qex. The socket path must fit in `sun_path`,
