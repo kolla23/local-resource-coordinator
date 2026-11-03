@@ -17,6 +17,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: seven tests plant a symbolic link at a job file and expect its target untouched (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: two tests hold a zombie job process; recovery and reap must not stop it; five tests check what its group left (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: six tests for qex du and qex gc on job subfolders and on symbolic links in a job, in jobs/ or at the state directory (issue #101).
+// Modified by the local-resource-coordinator fork, 2026-11-03: Drop waits until each process that it signalled has stopped (issue #126).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -968,7 +969,16 @@ impl Drop for Harness {
         //
         // Do not ask the socket for the pid. A test can hide that socket or
         // replace it, and the coordinator then stays after cargo test returns.
-        let stayed = self.stop_holders(self.stop_signal, self.stop_limit);
+        let mut sent_to = Vec::new();
+        let stayed = self.stop_holders_noting(self.stop_signal, self.stop_limit, &mut sent_to);
+        // SIGKILL closes a process's files before the process ends (issue #126):
+        // a look that finds no holder can still see the coordinator running.
+        if stayed.pids.is_empty() {
+            let deadline = Instant::now() + self.stop_limit;
+            while sent_to.iter().any(|&p| !Self::stopped(p)) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
         // A LOOK THAT FAILED IS NOT A CLEAN STATE. The second evidence is the
         // socket: the directory goes only when no coordinator of this test
         // accepts a connection. The line on stderr says that the harness did
