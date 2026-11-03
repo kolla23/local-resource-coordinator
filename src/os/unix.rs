@@ -414,15 +414,26 @@ pub fn pid_namespace_identity() -> Option<(String, u64)> {
     #[cfg(target_os = "linux")]
     {
         let status = std::fs::read_to_string("/proc/self/status").ok()?;
-        if !nspid_is_own(&status) {
-            return None;
-        }
-        Some((pid_namespace()?, process_start_token(1)?))
+        identity_from(&status, || {
+            Some((pid_namespace()?, process_start_token(1)?))
+        })
     }
     #[cfg(not(target_os = "linux"))]
     {
         None
     }
+}
+
+/// `read`'s identity, given only when `status` comes from this namespace's own /proc.
+#[cfg(any(target_os = "linux", test))]
+fn identity_from(
+    status: &str,
+    read: impl FnOnce() -> Option<(String, u64)>,
+) -> Option<(String, u64)> {
+    if !nspid_is_own(status) {
+        return None;
+    }
+    read()
 }
 
 /// Says whether a `/proc/self/status` text comes from this namespace's own /proc: its `NSpid:`
@@ -959,6 +970,16 @@ mod tests {
             !nspid_is_own("Name:\tqex\nPid:\t42\n"),
             "no NSpid line (an old kernel)"
         );
+
+        // `pid_namespace_identity` gives what `identity_from` gives for its /proc text.
+        let read = || Some(("pid:[4026532263]".to_string(), 161));
+        assert_eq!(identity_from(&status("\t42"), read), read());
+        assert_eq!(
+            identity_from(&status("\t4242\t42"), read),
+            None,
+            "the parent's /proc"
+        );
+        assert_eq!(identity_from("Name:\tqex\n", read), None, "no NSpid line");
     }
 
     const NO_NS: Namespace = Namespace { overflow: None };
