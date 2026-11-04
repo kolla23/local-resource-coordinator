@@ -5,6 +5,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: process_is_zombie forwards to src/os/; a zombie is not an own live process (issue #85).
 // Modified by the local-resource-coordinator fork, 2026-11-02: a zombie group leader is no live job; zombie_group_leader forwards to src/os/ (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: group_members and process_uids forward to src/os/ (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: the two forwarders lose their lint expectation, since the fix calls them; pid_namespace_identity forwards to src/os/ (issue #115).
 //! This module reads the machine capacity and the current machine load.
 //! It also holds the process functions that qex needs.
 //!
@@ -75,24 +76,20 @@ pub fn process_start_token(pid: i32) -> Option<u64> {
     crate::os::process_start_token(pid)
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the fix of issue #115 calls it")
-)]
 pub fn process_uids(pid: i32) -> Option<(u32, u32)> {
     crate::os::process_uids(pid)
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the fix of issue #115 calls it")
-)]
 pub fn group_members(pgid: i32) -> Option<Vec<i32>> {
     crate::os::group_members(pgid)
 }
 
 pub fn pid_namespace() -> Option<String> {
     crate::os::pid_namespace()
+}
+
+pub fn pid_namespace_identity() -> Option<(String, u64)> {
+    crate::os::pid_namespace_identity()
 }
 
 /// What qex reads about one process for the chain of a submission.

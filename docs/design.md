@@ -2,6 +2,7 @@
 title: How qex operates
 description: The coordinator, the supervisor, the files on the disk, and the limits.
 ---
+<!-- Modified by the local-resource-coordinator fork, 2026-11-03: the limits name the group that qex can stop after a pid is reused (issue #115). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -153,6 +154,16 @@ claim after the job starts.
 **A claim is a promise, and not a measurement.** A job that claims 2GB and uses
 20GB can still fill the machine. qex tests the free memory of the machine before
 each start, which limits the damage, but an accurate claim is better.
+
+**After a supervisor dies, qex can stop a group that is not the job's.** qex
+stops what the job left in its process group, also after the system collected
+the job process. It first checks that the job ran in the pid namespace of the
+coordinator that looks, and that every process in the group belongs to this
+user and started no earlier than the job. One rare chain passes those
+checks: the whole group ended, a new process of this user got the same number,
+made its own group with it, and left processes in that group, all before qex
+looked. qex then stops that group. For a coordinator that runs as root, this
+user is root, whose processes include the services of the system.
 
 ## The property that an agent needs most
 

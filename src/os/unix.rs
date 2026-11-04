@@ -408,6 +408,58 @@ pub fn pid_namespace() -> Option<String> {
     }
 }
 
+/// The pid namespace's name and its pid 1's start, which a later namespace reusing the name
+/// lacks; `None` on macOS, when /proc or the boot clock is not this namespace's, or a read fails.
+pub fn pid_namespace_identity() -> Option<(String, u64)> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let time_ns =
+            std::fs::read_link("/proc/self/ns/time").map(|p| p.to_string_lossy().into_owned());
+        identity_from(&status, &time_ns, || {
+            Some((pid_namespace()?, process_start_token(1)?))
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// `read`'s identity, given only when `status` comes from this namespace's own /proc and the
+/// time namespace `time_ns` adds no offset to the start tokens that /proc gives.
+#[cfg(any(target_os = "linux", test))]
+fn identity_from(
+    status: &str,
+    time_ns: &std::io::Result<String>,
+    read: impl FnOnce() -> Option<(String, u64)>,
+) -> Option<(String, u64)> {
+    if !nspid_is_own(status) || !boot_clock_unshifted(time_ns) {
+        return None;
+    }
+    read()
+}
+
+/// The initial time namespace (the kernel's fixed PROC_TIME_INIT_INO) has no boot clock offset,
+/// and nor does a kernel without time namespaces, where the link is missing (ENOENT only).
+#[cfg(any(target_os = "linux", test))]
+fn boot_clock_unshifted(time_ns: &std::io::Result<String>) -> bool {
+    match time_ns {
+        Ok(name) => name == "time:[4026531834]",
+        Err(e) => e.raw_os_error() == Some(libc::ENOENT),
+    }
+}
+
+/// Says whether a `/proc/self/status` text comes from this namespace's own /proc: its `NSpid:`
+/// line has one entry more for each namespace between that /proc's and this one.
+#[cfg(any(target_os = "linux", test))]
+fn nspid_is_own(status: &str) -> bool {
+    status
+        .lines()
+        .find_map(|l| l.strip_prefix("NSpid:"))
+        .is_some_and(|pids| pids.split_whitespace().count() == 1)
+}
+
 /// Gives the chain of processes above this process, from its parent up to
 /// the first process of the machine.
 ///
@@ -916,6 +968,69 @@ pub fn terminal_size() -> Option<(usize, usize)> {
 mod tests {
     use super::*;
     use std::os::unix::fs::{symlink, PermissionsExt};
+
+    // A unit test: making a pid namespace that sees its parent's /proc needs a user namespace,
+    // which a test machine may refuse, and no qex command shows the recorded value's source.
+    #[test]
+    fn only_a_single_nspid_entry_is_this_namespaces_own_proc() {
+        let status = |nspid: &str| format!("Name:\tqex\nPid:\t42\nNSpid:{nspid}\nPPid:\t1\n");
+        assert!(nspid_is_own(&status("\t42")));
+        assert!(
+            !nspid_is_own(&status("\t4242\t42")),
+            "two entries: the parent's /proc"
+        );
+        assert!(!nspid_is_own(&status("")), "no entry");
+        assert!(
+            !nspid_is_own("Name:\tqex\nPid:\t42\n"),
+            "no NSpid line (an old kernel)"
+        );
+
+        // `pid_namespace_identity` gives what `identity_from` gives for its /proc text.
+        let read = || Some(("pid:[4026532263]".to_string(), 161));
+        let initial = Ok("time:[4026531834]".to_string());
+        assert_eq!(identity_from(&status("\t42"), &initial, read), read());
+        assert_eq!(
+            identity_from(&status("\t4242\t42"), &initial, read),
+            None,
+            "the parent's /proc"
+        );
+        assert_eq!(
+            identity_from("Name:\tqex\n", &initial, read),
+            None,
+            "no NSpid line"
+        );
+    }
+
+    // A unit test: a time namespace with an offset needs a user namespace, which a test machine
+    // may refuse, and no qex command shows the recorded value's source.
+    #[test]
+    fn only_a_boot_clock_with_no_offset_gives_a_namespace_identity() {
+        let own = "Name:\tqex\nNSpid:\t42\n";
+        let read = || Some(("pid:[4026532263]".to_string(), 161));
+        let err = |code| Err(std::io::Error::from_raw_os_error(code));
+        let initial = Ok("time:[4026531834]".to_string());
+        assert_eq!(
+            identity_from(own, &initial, read),
+            read(),
+            "the initial time namespace"
+        );
+        let other = Ok("time:[4026532270]".to_string());
+        assert_eq!(
+            identity_from(own, &other, read),
+            None,
+            "a time namespace with an offset"
+        );
+        assert_eq!(
+            identity_from(own, &err(libc::ENOENT), read),
+            read(),
+            "no time namespaces"
+        );
+        assert_eq!(
+            identity_from(own, &err(libc::EACCES), read),
+            None,
+            "an unreadable link"
+        );
+    }
 
     const NO_NS: Namespace = Namespace { overflow: None };
 

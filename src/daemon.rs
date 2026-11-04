@@ -6,6 +6,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: recovery skips a symbolic link in jobs/ (issue #129).
 // Modified by the local-resource-coordinator fork, 2026-11-03: recovery skips a record whose ids differ from its folder's name, and its second read keeps the checked record when the disk one names another job (issue #135).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the start makes the socket directory again when a sweep deleted it after its mkdir or before the pid lock, and a debug-only pause tests it (issue #132).
+// Modified by the local-resource-coordinator fork, 2026-11-03: recovery passes the job id and the record's pid namespace to stop_process_group and kill_what_the_job_left, which also handle a collected leader, and clears it with the pid (issue #115).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1665,7 +1666,12 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                          continues; qex stops the job now",
                         status.id
                     ));
-                    crate::supervisor::stop_process_group(pid, status.pid_start_token);
+                    crate::supervisor::stop_process_group(
+                        status.id,
+                        pid,
+                        status.pid_start_token,
+                        status.pid_ns.as_deref().zip(status.pid_ns_init_start),
+                    );
                     note.push_str("; qex stopped the job process");
                 }
                 status.state = JobState::Failed;
@@ -1703,9 +1709,14 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                      continued"
                         .to_string()
                 });
-                // A zombie job process of this start can still hold its group: kill what it left.
+                // A job process of this start, zombie or collected, can leave a group: kill it.
                 if let Some(pid) = status.pid.filter(|_| same_boot) {
-                    crate::supervisor::kill_what_a_zombie_job_left(pid, status.pid_start_token);
+                    crate::supervisor::kill_what_the_job_left(
+                        status.id,
+                        pid,
+                        status.pid_start_token,
+                        status.pid_ns.as_deref().zip(status.pid_ns_init_start),
+                    );
                 }
                 retire_the_pids(&mut status);
                 job::write_status(&path, &status).ok();
@@ -1843,6 +1854,8 @@ fn retire_the_pids(status: &mut crate::job::JobStatus) {
         status.last_pid = Some(pid);
     }
     status.pid_start_token = None;
+    status.pid_ns = None;
+    status.pid_ns_init_start = None;
     status.supervisor_pid = None;
 }
 
