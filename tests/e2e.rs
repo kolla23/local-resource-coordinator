@@ -21,7 +21,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a link in jobs/ to an outside job record; du, complete, list, status and logs ignore it (issue #129).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a record whose id names a link in jobs/; list, logs, status, rerun and gc ignore the link (issue #135).
 // Modified by the local-resource-coordinator fork, 2026-11-03: two tests that a coordinator starts when a sweep deletes its new socket directory (issue #132).
-// Modified by the local-resource-coordinator fork, 2026-11-03: sixteen tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-03: eighteen tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -5956,32 +5956,58 @@ fn recovery_leaves_a_collected_leaders_group_alone_after_term_without_a_recorded
     let _ = stopped.child.wait();
 }
 
-/// The job of the another-user test: its one member runs as `$2` in the job's group and session.
+/// The job of the another-user tests: its one member runs under `setpriv $2` in the job's group
+/// and session (`$2` unquoted, so that it gives setpriv several options).
 #[cfg(target_os = "linux")]
-const ANOTHER_USERS_MEMBER_JOB: &str =
-    r#"setpriv --reuid="$2" --regid="$2" --clear-groups sleep 600 & echo $! > "$1"; wait"#;
+const ANOTHER_USERS_MEMBER_JOB: &str = r#"setpriv $2 sleep 600 & echo $! > "$1"; wait"#;
 
 /// A collected leader's group with a member of another user gets no KILL from a root
 /// coordinator, which `kill` alone would allow (#115).
 #[test]
 #[cfg(target_os = "linux")]
 fn recovery_leaves_a_collected_leaders_group_alone_when_a_member_belongs_to_another_user() {
+    let opts = format!("--reuid={ANOTHER_UID} --regid={ANOTHER_UID} --clear-groups");
+    a_member_of_another_user_leaves_the_group_alone("leftother", &opts, [ANOTHER_UID, ANOTHER_UID]);
+}
+
+/// A member whose real uid is another user's refuses the group, though its effective uid is
+/// the coordinator's (#115).
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_leaves_a_collected_leaders_group_alone_when_a_members_real_uid_is_another_users() {
+    let opts = format!("--ruid={ANOTHER_UID}");
+    a_member_of_another_user_leaves_the_group_alone("leftotherreal", &opts, [ANOTHER_UID, 0]);
+}
+
+/// A member whose effective uid is another user's refuses the group, though its real uid is
+/// the coordinator's (#115).
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_leaves_a_collected_leaders_group_alone_when_a_members_effective_uid_is_another_users() {
+    let opts = format!("--euid={ANOTHER_UID}");
+    a_member_of_another_user_leaves_the_group_alone("leftothereff", &opts, [0, ANOTHER_UID]);
+}
+
+/// Recovers a collected leader's job whose member runs under `setpriv <opts>` with the real
+/// and effective uids `uids`: the group is left alone, with one refusal line. Root only.
+#[cfg(target_os = "linux")]
+fn a_member_of_another_user_leaves_the_group_alone(name: &str, opts: &str, uids: [u32; 2]) {
     // Only root can start a process of another user in the job's group; CI runs as a normal user.
     if !running_as_root() {
         return;
     }
-    let h = Harness::with_default_config("leftother");
+    let h = Harness::with_default_config(name);
     let file = h.root.join("member.pid");
-    let uid = ANOTHER_UID.to_string();
     let job = h.submit_unheld_job(&[
         "sh",
         "-c",
         ANOTHER_USERS_MEMBER_JOB,
         "sh",
         file.to_str().unwrap(),
-        &uid,
+        opts,
     ]);
     let member = h.leftover_in_group(&file, job.leader);
+    let expected = uids;
     let uids = |pid: i32| -> Option<Vec<u32>> {
         let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
         let line = status.lines().find(|l| l.starts_with("Uid:"))?;
@@ -5992,9 +6018,9 @@ fn recovery_leaves_a_collected_leaders_group_alone_when_a_member_belongs_to_anot
             .collect()
     };
     h.until(
-        "the member runs as another user",
+        "the member runs with the planned uids",
         Duration::from_secs(30),
-        || uids(member.0) == Some(vec![ANOTHER_UID, ANOTHER_UID]),
+        || uids(member.0) == Some(expected.to_vec()),
     );
     h.kill_all_but(&job, &[member.0]);
 
