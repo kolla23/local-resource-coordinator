@@ -22,6 +22,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a record whose id names a link in jobs/; list, logs, status, rerun and gc ignore the link (issue #135).
 // Modified by the local-resource-coordinator fork, 2026-11-03: two tests that a coordinator starts when a sweep deletes its new socket directory (issue #132).
 // Modified by the local-resource-coordinator fork, 2026-11-03: eighteen tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-04: a test of the socket-directory sweep race through a linked TMPDIR (issue #145).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -23145,6 +23146,7 @@ fn a_coordinator_starts_when_a_sweep_deletes_its_new_socket_directory() {
             )
         },
         "before the pid lock",
+        false,
     );
 }
 
@@ -23161,15 +23163,35 @@ fn a_coordinator_starts_when_a_sweep_deletes_its_socket_directory_after_the_mkdi
             )
         },
         "ms after it made",
+        false,
+    );
+}
+
+/// The same race when TMPDIR names a link, as on macOS, where /var links to
+/// /private/var (issue #145).
+#[test]
+fn a_coordinator_starts_when_a_sweep_deletes_its_socket_directory_through_a_linked_tmpdir() {
+    a_coordinator_starts_after_a_sweep_in_its_pause(
+        "lnswept",
+        |tmp, pause| {
+            (
+                "QEX_TEST_PAUSE_AFTER_MKDIR_IN",
+                format!("{} {}", pause.as_millis(), tmp.display()),
+            )
+        },
+        "ms after it made",
+        true,
     );
 }
 
 /// Pauses coordinator A (long state path, private TMPDIR) by `pause`, while the
 /// sweep of coordinator B deletes A's new directory there; A must then start.
+/// With `linked`, TMPDIR names a link to that private TMPDIR.
 fn a_coordinator_starts_after_a_sweep_in_its_pause(
     name: &str,
     pause: impl Fn(&Path, Duration) -> (&'static str, String),
     marker: &str,
+    linked: bool,
 ) {
     // The switch that pauses the coordinator exists in a debug build only.
     if !cfg!(debug_assertions) {
@@ -23180,15 +23202,22 @@ fn a_coordinator_starts_after_a_sweep_in_its_pause(
     let mut a = Harness::with_default_config(name);
     let tmp = a.root.join("t");
     std::fs::create_dir_all(&tmp).unwrap();
+    let tmp_env = if linked {
+        let link = a.root.join("l");
+        std::os::unix::fs::symlink(&tmp, &link).unwrap();
+        link
+    } else {
+        tmp.clone()
+    };
     let deep = a
         .root
         .join("a-directory-with-a-very-long-name-to-pass-the-limit")
         .join("another-directory-with-a-long-name-to-pass-the-limit");
     std::fs::create_dir_all(&deep).unwrap();
-    let (switch, value) = pause(&tmp, PAUSE);
+    let (switch, value) = pause(&tmp_env, PAUSE);
     for (key, value) in [
         ("XDG_STATE_HOME", deep.display().to_string()),
-        ("TMPDIR", tmp.display().to_string()),
+        ("TMPDIR", tmp_env.display().to_string()),
         (switch, value),
     ] {
         a.extra_env.push((key.into(), value));
@@ -23228,7 +23257,7 @@ fn a_coordinator_starts_after_a_sweep_in_its_pause(
     // B sweeps the same TMPDIR when it starts.
     let mut b = Harness::with_default_config("sweeper");
     b.extra_env
-        .push(("TMPDIR".into(), tmp.display().to_string()));
+        .push(("TMPDIR".into(), tmp_env.display().to_string()));
     b.coordinator_pid();
 
     // The race, or the test proves nothing: the directory must go while A
