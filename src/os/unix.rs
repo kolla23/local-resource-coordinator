@@ -893,7 +893,10 @@ fn pause_after_mkdir(made: &Path) {
     let Ok(ms) = ms.parse::<u64>() else {
         return;
     };
-    if made.parent() != Some(Path::new(parent))
+    // The walk resolved every link in `made`, so the parent must match resolved:
+    // on macOS, TMPDIR lies under /var, a link to /private/var (issue #145).
+    let parent = std::fs::canonicalize(parent).unwrap_or_else(|_| PathBuf::from(parent));
+    if made.parent() != Some(parent.as_path())
         || PAUSED.swap(true, std::sync::atomic::Ordering::SeqCst)
     {
         return;
