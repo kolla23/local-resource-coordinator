@@ -9,6 +9,8 @@
 # revision's checker on refactor/ pull requests.
 # Modified by the local-resource-coordinator fork, 2026-10-31: the Style job
 # runs the Stop hook's test and shellcheck.
+# Modified by the local-resource-coordinator fork, 2026-11-10: the macOS
+# comment names macos-15 (GitHub retired the macos-14 runner).
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -127,7 +129,7 @@ jobs:
         # Two versions of Ubuntu, because a fault that appears on one of them
         # and not on the other says immediately where to look.
         #
-        # Fork: macos-14 runs in macos.yml, weekly and on demand.
+        # Fork: macos-15 runs in macos.yml, weekly and on demand.
         os: [ubuntu-22.04, ubuntu-24.04]
     steps:
       - uses: actions/checkout@v5

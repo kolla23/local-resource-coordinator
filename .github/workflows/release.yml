@@ -2,6 +2,8 @@
 # tests run with --features test-fixtures.
 # Modified by the local-resource-coordinator fork, 2026-11-03: the crates.io
 # job comment no longer names the removed Pages deployment (issue #122).
+# Modified by the local-resource-coordinator fork, 2026-11-10: the macOS test
+# and build jobs run on macos-15 (GitHub retired the macos-14 runner).
 name: Release
 
 # ONE workflow makes the release, from the tag.
@@ -240,7 +242,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-24.04, macos-15]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -270,10 +272,10 @@ jobs:
             os: ubuntu-24.04
           - name: Darwin-x86_64
             target: x86_64-apple-darwin
-            os: macos-14
+            os: macos-15
           - name: Darwin-arm64
             target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
     steps:
       - uses: actions/checkout@v5
         with:
