@@ -5460,12 +5460,23 @@ impl Harness {
     ) -> StoppedCoordinator {
         let t0 = Instant::now();
         let child = self.spawn(&["list"]);
+        let (pid, ts) = self.term_handshake(job, leftover);
+        eprintln!("spawn-to-got-term: {} ms", (ts - t0).as_millis());
+        assert_ne!(pid, killed, "a new coordinator recovers");
+        // SIGCONT then comes more than the 2 s grace after the TERM, which came before got-term.
+        std::thread::sleep(Duration::from_millis(2500).saturating_sub(ts.elapsed()));
+        eprintln!("got-term-to-return: {} ms", ts.elapsed().as_millis());
+        StoppedCoordinator { pid, child }
+    }
+
+    /// Steps 2-5 of the TERM handshake once qex sent its TERM to a `TERM_STOP_JOB`: gives the
+    /// coordinator that the leader stopped and when `got-term` appeared; the leader then ends.
+    fn term_handshake(&self, job: &UnheldJob, leftover: i32) -> (i32, Instant) {
         let got_term = self.root.join("got-term");
         Harness::poll_until("the leader got qex's TERM", Duration::from_secs(30), || {
             got_term.exists()
         });
         let ts = Instant::now();
-        eprintln!("spawn-to-got-term: {} ms", (ts - t0).as_millis());
 
         let read_pid =
             |p: &Path| -> i32 { std::fs::read_to_string(p).unwrap().trim().parse().unwrap() };
@@ -5473,9 +5484,8 @@ impl Harness {
         assert_eq!(
             pid,
             read_pid(&self.root.join("state/qex/run/pid")),
-            "the leader stopped the coordinator that recovers"
+            "the leader stopped the coordinator that the pid file names"
         );
-        assert_ne!(pid, killed, "a new coordinator recovers");
         Harness::poll_until(
             "the coordinator is stopped",
             Duration::from_secs(30),
@@ -5489,9 +5499,7 @@ impl Harness {
 
         std::fs::write(self.root.join("go"), "").unwrap();
         self.leader_collected(job.leader, leftover);
-        // SIGCONT then comes more than the 2 s grace after the TERM, which came before got-term.
-        std::thread::sleep(Duration::from_millis(2500).saturating_sub(ts.elapsed()));
-        StoppedCoordinator { pid, child }
+        (pid, ts)
     }
 
     /// Kills coordinator `pid`, which the TERM handshake stopped after it logged `path_line`, and
@@ -5674,6 +5682,29 @@ fn a_coordinator_killed_in_recoverys_term_wait_leaves_the_job_to_the_next_recove
         job.leader
     );
     h.killed_in_term_wait_then_recovered(&job, leftover.0, stopped.pid, &line);
+}
+
+/// A coordinator killed in reap's TERM wait leaves the job to the next recovery, which fails it
+/// and kills what the collected leader left (#143).
+#[test]
+#[cfg(unix)]
+fn a_coordinator_killed_in_reaps_term_wait_leaves_the_job_to_the_next_recovery() {
+    let h = Harness::with_default_config("twreap");
+    let (job, leftover) = h.term_stop_job();
+    let coordinator = h.coordinator_pid();
+    // No qex command until the kill: reap holds the state lock, then the coordinator is stopped.
+    unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+    let (pid, _) = h.term_handshake(&job, leftover.0);
+    assert_eq!(
+        pid, coordinator,
+        "the live coordinator's reap sent the TERM"
+    );
+    let id: uuid::Uuid = job.id.parse().unwrap();
+    let line = format!(
+        "the supervisor of the job {id} stopped, and the job {} continues; qex stops the job now",
+        job.leader
+    );
+    h.killed_in_term_wait_then_recovered(&job, leftover.0, pid, &line);
 }
 
 /// `reap` kills what a job leader left in its group after the system collected the leader
