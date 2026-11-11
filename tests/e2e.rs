@@ -24,6 +24,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: eighteen tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-04: a test of the socket-directory sweep race through a linked TMPDIR (issue #145).
 // Modified by the local-resource-coordinator fork, 2026-11-10: each harness root takes a process-wide counter and is made with create_dir, with a test (issue #150).
+// Modified by the local-resource-coordinator fork, 2026-11-11: tests kill the coordinator in the TERM wait of a job whose supervisor died, then check the next recovery (issue #143).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -5459,12 +5460,23 @@ impl Harness {
     ) -> StoppedCoordinator {
         let t0 = Instant::now();
         let child = self.spawn(&["list"]);
+        let (pid, ts) = self.term_handshake(job, leftover);
+        eprintln!("spawn-to-got-term: {} ms", (ts - t0).as_millis());
+        assert_ne!(pid, killed, "a new coordinator recovers");
+        // SIGCONT then comes more than the 2 s grace after the TERM, which came before got-term.
+        std::thread::sleep(Duration::from_millis(2500).saturating_sub(ts.elapsed()));
+        eprintln!("got-term-to-return: {} ms", ts.elapsed().as_millis());
+        StoppedCoordinator { pid, child }
+    }
+
+    /// Steps 2-5 of the TERM handshake once qex sent its TERM to a `TERM_STOP_JOB`: gives the
+    /// coordinator that the leader stopped and when `got-term` appeared; the leader then ends.
+    fn term_handshake(&self, job: &UnheldJob, leftover: i32) -> (i32, Instant) {
         let got_term = self.root.join("got-term");
         Harness::poll_until("the leader got qex's TERM", Duration::from_secs(30), || {
             got_term.exists()
         });
         let ts = Instant::now();
-        eprintln!("spawn-to-got-term: {} ms", (ts - t0).as_millis());
 
         let read_pid =
             |p: &Path| -> i32 { std::fs::read_to_string(p).unwrap().trim().parse().unwrap() };
@@ -5472,9 +5484,8 @@ impl Harness {
         assert_eq!(
             pid,
             read_pid(&self.root.join("state/qex/run/pid")),
-            "the leader stopped the coordinator that recovers"
+            "the leader stopped the coordinator that the pid file names"
         );
-        assert_ne!(pid, killed, "a new coordinator recovers");
         Harness::poll_until(
             "the coordinator is stopped",
             Duration::from_secs(30),
@@ -5488,9 +5499,70 @@ impl Harness {
 
         std::fs::write(self.root.join("go"), "").unwrap();
         self.leader_collected(job.leader, leftover);
-        // SIGCONT then comes more than the 2 s grace after the TERM, which came before got-term.
-        std::thread::sleep(Duration::from_millis(2500).saturating_sub(ts.elapsed()));
-        StoppedCoordinator { pid, child }
+        (pid, ts)
+    }
+
+    /// Kills coordinator `pid`, which the TERM handshake stopped after it logged `path_line`, and
+    /// checks that the next recovery fails the job and kills the leftover at once (#143).
+    fn killed_in_term_wait_then_recovered(
+        &self,
+        job: &UnheldJob,
+        leftover: i32,
+        pid: i32,
+        path_line: &str,
+    ) {
+        let log = std::fs::read_to_string(self.root.join("state/qex/run/daemon.log")).unwrap();
+        assert!(
+            log.contains(path_line),
+            "the stopped coordinator logged: {path_line}"
+        );
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        Harness::poll_until(
+            "the stopped coordinator is gone",
+            Duration::from_secs(30),
+            || Harness::stopped(pid),
+        );
+        assert_eq!(
+            self.record(&job.id)["state"].as_str(),
+            Some("running"),
+            "the coordinator died before it wrote the record"
+        );
+        assert!(
+            Harness::runs(leftover),
+            "the leftover outlives the coordinator"
+        );
+
+        let start = Instant::now();
+        self.until("the job is failed", Duration::from_secs(20), || {
+            self.state_of(&job.id) == "failed"
+        });
+        let record = self.record(&job.id);
+        assert_eq!(
+            record["state"].as_str(),
+            Some("failed"),
+            "the next recovery writes the record"
+        );
+        assert_eq!(
+            record["error"].as_str(),
+            Some(FINAL_BRANCH),
+            "the next recovery's final branch"
+        );
+        assert_eq!(
+            self.refusals_of(&job.id, job.leader),
+            0,
+            "the group passed its checks"
+        );
+        Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
+            Harness::stopped(leftover)
+        });
+        let took = start.elapsed();
+        eprintln!("recovery-to-killed: {} ms", took.as_millis());
+        // The final branch KILLs at once and the rest of a 2 s grace takes 2000 ms or more:
+        // 1000 ms only tells the two apart, so a slow start under load is no failure.
+        assert!(
+            took < Duration::from_millis(1000),
+            "the KILL must not wait a grace: {took:?}"
+        );
     }
 }
 
@@ -5582,6 +5654,57 @@ fn recovery_stops_leftovers_that_ignore_term_once_the_leader_is_collected() {
         "recovery must stop the live job process: {error}"
     );
     let _ = stopped.child.wait();
+}
+
+/// A coordinator killed in recovery's TERM wait leaves the job to the next recovery, which fails
+/// it and kills what the collected leader left (#143).
+#[test]
+#[cfg(unix)]
+fn a_coordinator_killed_in_recoverys_term_wait_leaves_the_job_to_the_next_recovery() {
+    let h = Harness::with_default_config("twrecover");
+    let (job, leftover) = h.term_stop_job();
+    let coordinator = h.coordinator_pid();
+    unsafe { libc::kill(coordinator, libc::SIGKILL) };
+    h.until("the coordinator is gone", Duration::from_secs(30), || {
+        Harness::stopped(coordinator)
+    });
+    unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+    h.until("the supervisor is gone", Duration::from_secs(30), || {
+        Harness::stopped(job.supervisor)
+    });
+    let mut stopped = h.term_stops_the_coordinator(&job, leftover.0, coordinator);
+    // The client is the stopped coordinator's parent; a client that retried would start the next.
+    let _ = stopped.child.kill();
+    let _ = stopped.child.wait();
+    let id: uuid::Uuid = job.id.parse().unwrap();
+    let line = format!(
+        "job {id} lost its supervisor, and the job process {} continues; qex stops the job now",
+        job.leader
+    );
+    h.killed_in_term_wait_then_recovered(&job, leftover.0, stopped.pid, &line);
+}
+
+/// A coordinator killed in reap's TERM wait leaves the job to the next recovery, which fails it
+/// and kills what the collected leader left (#143).
+#[test]
+#[cfg(unix)]
+fn a_coordinator_killed_in_reaps_term_wait_leaves_the_job_to_the_next_recovery() {
+    let h = Harness::with_default_config("twreap");
+    let (job, leftover) = h.term_stop_job();
+    let coordinator = h.coordinator_pid();
+    // No qex command until the kill: reap holds the state lock, then the coordinator is stopped.
+    unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+    let (pid, _) = h.term_handshake(&job, leftover.0);
+    assert_eq!(
+        pid, coordinator,
+        "the live coordinator's reap sent the TERM"
+    );
+    let id: uuid::Uuid = job.id.parse().unwrap();
+    let line = format!(
+        "the supervisor of the job {id} stopped, and the job {} continues; qex stops the job now",
+        job.leader
+    );
+    h.killed_in_term_wait_then_recovered(&job, leftover.0, pid, &line);
 }
 
 /// `reap` kills what a job leader left in its group after the system collected the leader
