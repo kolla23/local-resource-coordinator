@@ -22,6 +22,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test plants a record whose id names a link in jobs/; list, logs, status, rerun and gc ignore the link (issue #135).
 // Modified by the local-resource-coordinator fork, 2026-11-03: two tests that a coordinator starts when a sweep deletes its new socket directory (issue #132).
 // Modified by the local-resource-coordinator fork, 2026-11-03: eighteen tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-10: each harness root takes a process-wide counter and is made with create_dir, with a test (issue #150).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -53,7 +54,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -182,12 +183,22 @@ impl Harness {
         // Keep the path short. The socket path must fit in `sun_path`, and qex
         // uses a directory in /tmp when it does not fit. Both paths are tested,
         // but a short path here tests the usual one.
-        let root = std::env::temp_dir().join(format!(
-            "qx{}-{}-{}",
-            std::process::id(),
-            name,
-            Instant::now().elapsed().subsec_nanos()
-        ));
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        // `create_dir`, not `create_dir_all`: a root that exists (a crashed run
+        // with this pid) takes the next number instead of being shared (issue #150).
+        let root = loop {
+            let root = std::env::temp_dir().join(format!(
+                "qx{}-{}-{}",
+                std::process::id(),
+                name,
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match std::fs::create_dir(&root) {
+                Ok(()) => break root,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => panic!("making {}: {e}", root.display()),
+            }
+        };
         std::fs::create_dir_all(root.join("cfg")).unwrap();
         std::fs::create_dir_all(root.join("state")).unwrap();
         std::fs::create_dir_all(root.join("run")).unwrap();
@@ -21065,7 +21076,7 @@ fn the_harness_stops_a_coordinator_whose_pid_file_is_gone() {
 fn the_harness_stops_a_coordinator_on_a_long_socket_path() {
     // `/tmp/qx1-<name>-0/state/qex/run/s` is 27 bytes plus the name. The name
     // must pass 73 bytes so the path is longer than 100 when TMPDIR is `/tmp`
-    // and the pid and the nanos are one digit.
+    // and the pid and the counter are one digit.
     let h = Harness::with_default_config(
         "dropcoord-long-name-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     );
