@@ -20651,6 +20651,42 @@ fn an_answer_that_never_finishes_does_not_stop_a_command() {
     );
 }
 
+/// Two tests that share a harness name and run at once must not share a state
+/// directory and socket (issue #150).
+#[test]
+fn harnesses_made_at_once_with_one_name_get_their_own_roots() {
+    const THREADS: usize = 4;
+    const EACH: usize = 15;
+    let start = Arc::new(std::sync::Barrier::new(THREADS));
+    let threads: Vec<_> = (0..THREADS)
+        .map(|_| {
+            let start = Arc::clone(&start);
+            std::thread::spawn(move || {
+                start.wait();
+                (0..EACH)
+                    .map(|_| Harness::with_default_config("oneroot"))
+                    .collect::<Vec<_>>()
+            })
+        })
+        .collect();
+    let harnesses: Vec<Harness> = threads
+        .into_iter()
+        .flat_map(|t| t.join().unwrap())
+        .collect();
+    let mut roots: Vec<&Path> = harnesses.iter().map(|h| h.root.as_path()).collect();
+    roots.sort();
+    let shared: Vec<&&Path> = roots
+        .windows(2)
+        .filter(|w| w[0] == w[1])
+        .map(|w| &w[0])
+        .collect();
+    assert!(
+        shared.is_empty(),
+        "{} harnesses share a root with another: {shared:?}",
+        shared.len()
+    );
+}
+
 /// A test that hides the socket must still stop its coordinator.
 ///
 /// The tests that put a proxy in front of a real coordinator used to leave
