@@ -23,6 +23,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: two tests that a coordinator starts when a sweep deletes its new socket directory (issue #132).
 // Modified by the local-resource-coordinator fork, 2026-11-03: eighteen tests check what a job's group left after the system collected its leader or qex's TERM (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-04: a test of the socket-directory sweep race through a linked TMPDIR (issue #145).
+// Modified by the local-resource-coordinator fork, 2026-11-10: each harness root takes a process-wide counter and is made with create_dir, with a test (issue #150).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -54,7 +55,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -183,12 +184,22 @@ impl Harness {
         // Keep the path short. The socket path must fit in `sun_path`, and qex
         // uses a directory in /tmp when it does not fit. Both paths are tested,
         // but a short path here tests the usual one.
-        let root = std::env::temp_dir().join(format!(
-            "qx{}-{}-{}",
-            std::process::id(),
-            name,
-            Instant::now().elapsed().subsec_nanos()
-        ));
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        // `create_dir`, not `create_dir_all`: a root that exists (a crashed run
+        // with this pid) takes the next number instead of being shared (issue #150).
+        let root = loop {
+            let root = std::env::temp_dir().join(format!(
+                "qx{}-{}-{}",
+                std::process::id(),
+                name,
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match std::fs::create_dir(&root) {
+                Ok(()) => break root,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => panic!("making {}: {e}", root.display()),
+            }
+        };
         std::fs::create_dir_all(root.join("cfg")).unwrap();
         std::fs::create_dir_all(root.join("state")).unwrap();
         std::fs::create_dir_all(root.join("run")).unwrap();
@@ -20652,6 +20663,42 @@ fn an_answer_that_never_finishes_does_not_stop_a_command() {
     );
 }
 
+/// Two tests that share a harness name and run at once must not share a state
+/// directory and socket (issue #150).
+#[test]
+fn harnesses_made_at_once_with_one_name_get_their_own_roots() {
+    const THREADS: usize = 4;
+    const EACH: usize = 15;
+    let start = Arc::new(std::sync::Barrier::new(THREADS));
+    let threads: Vec<_> = (0..THREADS)
+        .map(|_| {
+            let start = Arc::clone(&start);
+            std::thread::spawn(move || {
+                start.wait();
+                (0..EACH)
+                    .map(|_| Harness::with_default_config("oneroot"))
+                    .collect::<Vec<_>>()
+            })
+        })
+        .collect();
+    let harnesses: Vec<Harness> = threads
+        .into_iter()
+        .flat_map(|t| t.join().unwrap())
+        .collect();
+    let mut roots: Vec<&Path> = harnesses.iter().map(|h| h.root.as_path()).collect();
+    roots.sort();
+    let shared: Vec<&&Path> = roots
+        .windows(2)
+        .filter(|w| w[0] == w[1])
+        .map(|w| &w[0])
+        .collect();
+    assert!(
+        shared.is_empty(),
+        "{} harnesses share a root with another: {shared:?}",
+        shared.len()
+    );
+}
+
 /// A test that hides the socket must still stop its coordinator.
 ///
 /// The tests that put a proxy in front of a real coordinator used to leave
@@ -21030,7 +21077,7 @@ fn the_harness_stops_a_coordinator_whose_pid_file_is_gone() {
 fn the_harness_stops_a_coordinator_on_a_long_socket_path() {
     // `/tmp/qx1-<name>-0/state/qex/run/s` is 27 bytes plus the name. The name
     // must pass 73 bytes so the path is longer than 100 when TMPDIR is `/tmp`
-    // and the pid and the nanos are one digit.
+    // and the pid and the counter are one digit.
     let h = Harness::with_default_config(
         "dropcoord-long-name-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     );
