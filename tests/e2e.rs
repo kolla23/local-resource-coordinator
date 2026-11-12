@@ -28,6 +28,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-11: eight tests for processes whose command name is not UTF-8: submitter chain, top, recovery, reap, watchers, the pid namespace record and the harness's own /proc reads; state_in_proc and term_bit read /proc as bytes (issue #131).
 // Modified by the local-resource-coordinator fork, 2026-11-12: tests for a qex and a testjob command line that is not UTF-8; the pid namespace test starts its copy under the copy's own name (issue #156).
 // Modified by the local-resource-coordinator fork, 2026-11-12: the /proc helpers read bytes, and the two watcher tests stop their shell's process group on a failure too (issue #157).
+// Modified by the local-resource-coordinator fork, 2026-11-12: recovery and reap of a leader alone in its group, which TERM ends, finish without the rest of the grace (issue #139).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -6044,6 +6045,70 @@ fn recovery_kills_a_leader_that_ignores_term_at_the_end_of_the_grace() {
     assert!(
         error.contains("; qex stopped the job process"),
         "recovery must stop the live job process: {error}"
+    );
+}
+
+/// Recovery TERMs a leader alone in its group, which TERM ends: with the group empty, the
+/// coordinator serves without the rest of the grace (#139).
+#[test]
+#[cfg(unix)]
+fn recovery_ends_the_term_wait_once_the_group_is_empty() {
+    let h = Harness::with_default_config("emptygrouprecovery");
+    let job = h.submit_unheld_job(&["sleep", "600"]);
+    h.kill_coordinator_and_supervisor(&job);
+    assert!(!Harness::stopped(job.leader), "the leader runs");
+
+    // Recovery runs before the coordinator serves, so this command waits for it.
+    let start = Instant::now();
+    h.qex(&["list"]);
+    let took = start.elapsed();
+    eprintln!("recovery-to-served: {} ms", took.as_millis());
+    Harness::poll_until("the leader is stopped", Duration::from_secs(20), || {
+        Harness::stopped(job.leader)
+    });
+    let record = h.record(&job.id);
+    assert_eq!(record["state"].as_str(), Some("failed"));
+    let error = record["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("; qex stopped the job process"),
+        "recovery must TERM the live job process: {error}"
+    );
+    // The rest of a 2 s grace takes 1900 ms or more after the first 100 ms check.
+    assert!(
+        took < Duration::from_millis(1000),
+        "an empty group must not wait out the grace: {took:?}"
+    );
+}
+
+/// Reap TERMs a leader alone in its group, which TERM ends: with the group empty, the record is
+/// written without the rest of the grace (#139).
+#[test]
+#[cfg(unix)]
+fn reap_ends_the_term_wait_once_the_group_is_empty() {
+    let h = Harness::with_default_config("emptygroupreap");
+    let job = h.submit_unheld_job(&["sleep", "600"]);
+
+    let start = Instant::now();
+    unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+    Harness::poll_until("the job is failed", Duration::from_secs(20), || {
+        h.record(&job.id)["state"].as_str() == Some("failed")
+    });
+    let took = start.elapsed();
+    eprintln!("supervisor-kill-to-failed: {} ms", took.as_millis());
+    Harness::poll_until("the leader is stopped", Duration::from_secs(20), || {
+        Harness::stopped(job.leader)
+    });
+    let error = h.record(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("; qex stopped the job process"),
+        "reap must TERM the live job process: {error}"
+    );
+    assert!(
+        took < Duration::from_millis(1000),
+        "an empty group must not wait out the grace: {took:?}"
     );
 }
 
