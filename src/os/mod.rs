@@ -15,7 +15,9 @@ pub use unix::{
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::{available_memory, group_usage, memory_pressure, process_info, total_memory};
+pub use linux::{
+    available_memory, group_usage, memory_pressure, process_info, stat_after_name, total_memory,
+};
 
 #[cfg(target_os = "macos")]
 mod macos;

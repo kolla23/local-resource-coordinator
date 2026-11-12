@@ -217,8 +217,8 @@ pub fn process_is_zombie(pid: i32) -> bool {
         return false;
     }
     #[cfg(target_os = "linux")]
-    if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        if let Some((_, rest)) = stat.rsplit_once(')') {
+    if let Ok(stat) = std::fs::read(format!("/proc/{pid}/stat")) {
+        if let Some(rest) = super::stat_after_name(&stat) {
             return matches!(rest.split_whitespace().next(), Some("Z") | Some("X"));
         }
     }
@@ -273,10 +273,9 @@ pub fn process_start_token(pid: i32) -> Option<u64> {
         return None;
     }
     #[cfg(target_os = "linux")]
-    if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        // The command name can hold spaces and `)`. The stable fields start
-        // after the LAST `)`, and `starttime` is the 20th of them.
-        if let Some((_, rest)) = stat.rsplit_once(')') {
+    if let Ok(stat) = std::fs::read(format!("/proc/{pid}/stat")) {
+        // `starttime` is the 20th field after the command name.
+        if let Some(rest) = super::stat_after_name(&stat) {
             return rest.split_whitespace().nth(19).and_then(|f| f.parse().ok());
         }
     }
@@ -310,8 +309,9 @@ pub fn process_uids(pid: i32) -> Option<(u32, u32)> {
         return None;
     }
     #[cfg(target_os = "linux")]
-    if let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) {
+    if let Ok(status) = std::fs::read(format!("/proc/{pid}/status")) {
         // The line holds the real, effective, saved and file system uids.
+        let status = status_after_name(&status)?;
         let line = status.lines().find_map(|l| l.strip_prefix("Uid:"))?;
         let mut uids = line.split_whitespace().map(|f| f.parse::<u32>().ok());
         return Some((uids.next()??, uids.next()??));
@@ -458,6 +458,16 @@ fn nspid_is_own(status: &str) -> bool {
         .lines()
         .find_map(|l| l.strip_prefix("NSpid:"))
         .is_some_and(|pids| pids.split_whitespace().count() == 1)
+}
+
+/// A `/proc/<pid>/status` text after its first line, the `Name:` line, whose value can hold any
+/// bytes; `None` when the rest is not UTF-8, as for the whole text before (#131).
+#[cfg(any(target_os = "linux", test))]
+fn status_after_name(status: &[u8]) -> Option<&str> {
+    let rest = status.strip_prefix(b"Name:").map_or(status, |name| {
+        name.splitn(2, |&b| b == b'\n').nth(1).unwrap_or_default()
+    });
+    std::str::from_utf8(rest).ok()
 }
 
 /// Gives the chain of processes above this process, from its parent up to
