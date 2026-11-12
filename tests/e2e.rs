@@ -25,6 +25,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-04: a test of the socket-directory sweep race through a linked TMPDIR (issue #145).
 // Modified by the local-resource-coordinator fork, 2026-11-10: each harness root takes a process-wide counter and is made with create_dir, with a test (issue #150).
 // Modified by the local-resource-coordinator fork, 2026-11-11: tests kill the coordinator in the TERM wait of a job whose supervisor died, then check the next recovery (issue #143).
+// Modified by the local-resource-coordinator fork, 2026-11-11: eight tests for processes whose command name is not UTF-8: submitter chain, top, recovery, reap, watchers, the pid namespace record and the harness's own /proc reads; state_in_proc and term_bit read /proc as bytes (issue #131).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -855,12 +856,12 @@ impl Harness {
     /// `Z` and `X` are a process that ended. `None` says that the entry is
     /// gone, which is the same fact.
     ///
-    /// The name of the program is the second field, and it can contain spaces
-    /// and brackets. The state is the first field after the LAST `)`.
+    /// The name of the program is the second field, and it can contain spaces,
+    /// brackets and bytes that are not UTF-8. The state is the first field after the LAST `)`.
     fn state_in_proc(pid: i32) -> Option<char> {
-        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        let (_, after) = stat.rsplit_once(')')?;
-        after.trim_start().chars().next()
+        let stat = std::fs::read(format!("/proc/{pid}/stat")).ok()?;
+        let after = &stat[stat.iter().rposition(|&b| b == b')')? + 1..];
+        std::str::from_utf8(after).ok()?.trim_start().chars().next()
     }
 
     /// Says whether a process has stopped running (issue #30).
@@ -5027,7 +5028,12 @@ impl Harness {
 
     /// Says whether the SIGTERM bit is set in one signal mask line of `/proc/<pid>/status`.
     fn term_bit(pid: i32, field: &str) -> bool {
-        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+        let status = std::fs::read(format!("/proc/{pid}/status")).unwrap();
+        // status_after_name's rule (src/os/unix.rs): only the `Name:` first line holds any bytes.
+        let rest = status.strip_prefix(b"Name:").map_or(&status[..], |name| {
+            name.splitn(2, |&b| b == b'\n').nth(1).unwrap_or_default()
+        });
+        let status = std::str::from_utf8(rest).unwrap();
         let line = status.lines().find(|l| l.starts_with(field)).unwrap();
         let mask = u64::from_str_radix(line[field.len()..].trim(), 16).unwrap();
         mask & (1 << (libc::SIGTERM - 1)) != 0
@@ -5152,6 +5158,66 @@ fn reap_stops_the_leftovers_of_a_zombie_job_process() {
     );
     h.until("the leftover is killed", Duration::from_secs(20), || {
         Harness::stopped(leftover.0)
+    });
+}
+
+/// Reap reads a zombie job process whose command name is not UTF-8 as ended, and stops what
+/// its group left (#131).
+#[test]
+#[cfg(target_os = "linux")]
+fn reap_stops_the_leftovers_of_a_zombie_job_process_whose_name_is_not_utf8() {
+    let h = Harness::with_default_config("zombieff");
+    non_utf8_link(&h.root, b"s\xffh", "sh");
+    let file = h.root.join("leftover.pid");
+    let file_text = file.to_str().unwrap().to_string();
+    let dir = h.root.to_str().unwrap().to_string();
+    let (_holder, id) = h.held_submit(&[
+        "sh",
+        "-c",
+        r#"exec "$2/$(printf 's\377h')" -c "$3" sh "$1""#,
+        "sh",
+        &file_text,
+        &dir,
+        LEFTOVER_JOB,
+    ]);
+    h.until("the job operates", Duration::from_secs(45), || {
+        let s = h.status_json(&id);
+        s["state"].as_str() == Some("running")
+            && s["supervisor_pid"].as_i64().is_some()
+            && s["pid"].as_i64().is_some()
+    });
+    let s = h.status_json(&id);
+    let job_pid = s["pid"].as_i64().unwrap() as i32;
+    let supervisor = s["supervisor_pid"].as_i64().unwrap() as i32;
+    let leftover = h.leftover_in_group(&file, job_pid);
+    assert!(
+        name_has_ff(job_pid),
+        "the job process carries the 0xff name"
+    );
+    unsafe { libc::kill(supervisor, libc::SIGSTOP) };
+    h.until("the supervisor is stopped", Duration::from_secs(30), || {
+        Harness::state_in_proc(supervisor) == Some('T')
+    });
+    unsafe { libc::kill(job_pid, libc::SIGKILL) };
+    Harness::poll_until("the leader is a zombie", Duration::from_secs(30), || {
+        Harness::state_by_ps(job_pid) == Some('Z')
+    });
+    assert!(Harness::runs(leftover.0), "the leftover runs");
+    unsafe { libc::kill(supervisor, libc::SIGKILL) };
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&id) == "failed"
+    });
+    let error = h.status_json(&id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.starts_with("the supervisor stopped without a result")
+            && !error.contains("qex stopped the job process"),
+        "reap must count the zombie job process as ended: {error}"
+    );
+    Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
+        !Harness::runs(leftover.0)
     });
 }
 
@@ -5609,6 +5675,87 @@ fn recovery_stops_the_leftovers_of_a_collected_job_process() {
         h.refusal_lines().is_empty(),
         "a group that passed its checks gets no refusal line"
     );
+}
+
+/// Recovery proves and stops a leftover whose command name is not UTF-8: its uids and start
+/// are read (#131).
+#[test]
+#[cfg(target_os = "linux")]
+fn recovery_stops_a_leftover_whose_name_is_not_utf8() {
+    let h = Harness::with_default_config("leftff");
+    non_utf8_link(&h.root, b"sl\xffep", "sleep");
+    let file = h.root.join("leftover.pid");
+    let file_text = file.to_str().unwrap().to_string();
+    let dir = h.root.to_str().unwrap().to_string();
+    let job = h.submit_unheld_job(&[
+        "sh",
+        "-c",
+        r#"trap '' TERM; "$2/$(printf 'sl\377ep')" 600 & echo $! > "$1"; trap - TERM; wait"#,
+        "sh",
+        &file_text,
+        &dir,
+    ]);
+    let leftover = h.leftover_in_group(&file, job.leader);
+    Harness::poll_until(
+        "the leftover carries the 0xff name",
+        Duration::from_secs(10),
+        || name_has_ff(leftover.0),
+    );
+    h.kill_all_but(&job, &[leftover.0]);
+    h.recovered_as_failed(&job.id);
+    assert_eq!(
+        h.refusals_of(&job.id, job.leader),
+        0,
+        "the group passed its checks"
+    );
+    Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
+        !Harness::runs(leftover.0)
+    });
+}
+
+/// A coordinator and supervisor run from a program file whose name is not UTF-8 record and
+/// compare the pid namespace, so recovery still stops a collected leader's leftover (#131).
+#[test]
+#[cfg(target_os = "linux")]
+fn a_program_file_whose_name_is_not_utf8_keeps_the_pid_namespace_check() {
+    use std::os::unix::ffi::OsStrExt;
+    let h = Harness::with_default_config("nsff");
+    let copy = h.root.join(std::ffi::OsStr::from_bytes(b"q\xffx"));
+    copy_program(&copy);
+    let run = |args: &[&str]| -> Output {
+        use std::os::unix::process::CommandExt;
+        // A UTF-8 argv[0]: qex panics at exit on one that is not (src/main.rs subcommand_word).
+        let mut cmd = Command::new(&copy);
+        cmd.arg0("qex").args(args);
+        isolate(&mut cmd, &h.root, &h.peers_dir);
+        cmd.envs(h.extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        cmd.output().unwrap()
+    };
+    let started = run(&["info", "--json"]);
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let (job, leftover) = h.unheld_leftover_job();
+    assert!(name_has_ff(job.supervisor), "the supervisor runs the copy");
+    assert_the_record_names_this_namespace(&h.record(&job.id));
+    h.kill_all_but(&job, &[leftover.0]);
+    let listed = run(&["list"]);
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    h.recovered_as_failed(&job.id);
+    assert_eq!(
+        h.refusals_of(&job.id, job.leader),
+        0,
+        "the group passed its checks"
+    );
+    Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
+        !Harness::runs(leftover.0)
+    });
 }
 
 /// Recovery TERMs a live leader, the system collects it while the coordinator is stopped, and
@@ -8473,6 +8620,27 @@ fn a_replacement_of_the_program_does_not_stop_the_jobs() {
 /// Puts a copy of the qex program at a path, for a test that starts that copy.
 fn copy_program(to: &Path) {
     copy_for_a_start(Path::new(env!("CARGO_BIN_EXE_qex")), to);
+}
+
+/// Makes `dir/<name>` a link to `program` from /bin or /usr/bin; a process started through it
+/// carries `name` as its command name (#131).
+#[cfg(target_os = "linux")]
+fn non_utf8_link(dir: &Path, name: &[u8], program: &str) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    let target = ["/bin", "/usr/bin"]
+        .iter()
+        .map(|d| Path::new(d).join(program))
+        .find(|p| p.exists())
+        .unwrap_or_else(|| panic!("no {program} program"));
+    let link = dir.join(std::ffi::OsStr::from_bytes(name));
+    std::os::unix::fs::symlink(target, &link).unwrap();
+    link
+}
+
+/// Says whether a process's command name holds the byte 0xff.
+#[cfg(target_os = "linux")]
+fn name_has_ff(pid: i32) -> bool {
+    std::fs::read(format!("/proc/{pid}/comm")).is_ok_and(|c| c.contains(&0xff))
 }
 
 /// Copies a program file that the test starts directly after the copy.
@@ -20282,6 +20450,137 @@ fn a_page_with_no_coordinator_gives_zero_for_a_query() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("budget"));
 }
 
+/// `qex top` measures a job process whose command name is not UTF-8 (#131).
+#[test]
+#[cfg(target_os = "linux")]
+fn top_measures_a_job_process_whose_name_is_not_utf8() {
+    let h = Harness::with_default_config("topff");
+    non_utf8_link(&h.root, b"sl\xffep", "sleep");
+    let dir = h.root.to_str().unwrap().to_string();
+    let id = h.submit(&[
+        "submit",
+        "--",
+        "sh",
+        "-c",
+        r#"exec "$0/$(printf 'sl\377ep')" 300"#,
+        &dir,
+    ]);
+    let mut pid = 0;
+    h.until(
+        "the job process carries the 0xff name",
+        Duration::from_secs(45),
+        || {
+            pid = h.status_json(&id)["pid"].as_i64().unwrap_or(0) as i32;
+            pid > 0 && name_has_ff(pid)
+        },
+    );
+    let page = h.ok(&["top", "--once", "--no-color"]);
+    let line = page
+        .lines()
+        .find(|l| l.contains(&id[..8]))
+        .unwrap_or_else(|| panic!("no line for the job: {page}"))
+        .to_string();
+    h.ok(&["kill", &id]);
+    assert!(line.contains("running"), "{line}");
+    assert!(
+        !line.contains("/ 0B"),
+        "top must measure the job process: {line}"
+    );
+}
+
+/// `qex watchers` gives the age of a monitor whose command name is not UTF-8 (#131).
+#[test]
+#[cfg(target_os = "linux")]
+fn watchers_gives_the_age_of_a_monitor_whose_name_is_not_utf8() {
+    use std::os::unix::process::CommandExt;
+    let h = Harness::with_default_config("watchff");
+    let sh = non_utf8_link(&h.root, b"s\xffh", "sh");
+    let mut monitor = Command::new(&sh)
+        .args(["-c", "while true; do sleep 1; done"])
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let pid = monitor.id() as i32;
+    Harness::poll_until(
+        "the monitor carries the 0xff name",
+        Duration::from_secs(10),
+        || name_has_ff(pid),
+    );
+    std::thread::sleep(Duration::from_millis(2500));
+    let out = h.qex(&["watchers", "--json"]);
+    unsafe { libc::killpg(pid, libc::SIGKILL) };
+    monitor.wait().ok();
+    let found: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| panic!("no JSON: {e}: {}", String::from_utf8_lossy(&out.stdout)));
+    let ours = found
+        .iter()
+        .find(|w| w["pid"].as_i64() == Some(pid as i64))
+        .unwrap_or_else(|| panic!("the monitor is reported: {found:?}"));
+    assert!(
+        ours["age_secs"].as_u64().unwrap_or(0) >= 2,
+        "the age of the monitor: {ours}"
+    );
+}
+
+/// `qex watchers` never reports a process that started it, above a parent whose command name
+/// is not UTF-8 (#131).
+#[test]
+#[cfg(target_os = "linux")]
+fn watchers_never_reports_a_process_above_a_parent_whose_name_is_not_utf8() {
+    use std::os::unix::process::CommandExt;
+    let h = Harness::with_default_config("watchanc");
+    let sh = non_utf8_link(&h.root, b"s\xffh", "sh");
+    let (out_file, comm_file) = (h.root.join("watchers.json"), h.root.join("comm"));
+    // The outer loop looks like a monitor; the shell named with 0xff runs `qex watchers` and,
+    // with the `true` after it, stays its parent.
+    let inner = r#"cat /proc/$$/comm > "$2"; "$0" watchers --json > "$1"; true"#;
+    let outer_script = r#"for i in 1; do "$0" -c "$4" "$1" "$2" "$3"; sleep 30; done"#;
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", outer_script])
+        .arg(&sh)
+        .arg(env!("CARGO_BIN_EXE_qex"))
+        .arg(&out_file)
+        .arg(&comm_file)
+        .arg(inner)
+        .process_group(0);
+    isolate(&mut cmd, &h.root, &h.peers_dir);
+    let mut outer = cmd.spawn().unwrap();
+    let outer_pid = outer.id() as i32;
+    let mut inside: Vec<serde_json::Value> = Vec::new();
+    Harness::poll_until(
+        "qex watchers ran below the shell",
+        Duration::from_secs(30),
+        || match serde_json::from_slice(&std::fs::read(&out_file).unwrap_or_default()) {
+            Ok(v) => {
+                inside = v;
+                true
+            }
+            Err(_) => false,
+        },
+    );
+    let control = h.qex(&["watchers", "--json"]);
+    unsafe { libc::killpg(outer_pid, libc::SIGKILL) };
+    outer.wait().ok();
+    let comm = std::fs::read(&comm_file).unwrap();
+    assert!(
+        comm.contains(&0xff),
+        "the parent of qex carries the 0xff name: {comm:?}"
+    );
+    let control: Vec<serde_json::Value> = serde_json::from_slice(&control.stdout).unwrap();
+    let reports = |v: &[serde_json::Value]| {
+        v.iter()
+            .any(|w| w["pid"].as_i64() == Some(outer_pid as i64))
+    };
+    assert!(
+        reports(&control),
+        "the outer loop is a monitor to a search it did not start: {control:?}"
+    );
+    assert!(
+        !reports(&inside),
+        "qex watchers reported a process that started it: {inside:?}"
+    );
+}
+
 /// Answers the connect and NEVER answers a request.
 ///
 /// The helper that fills a backlog exercises the CONNECT. This one exercises
@@ -21174,6 +21473,49 @@ fn a_zombie_counts_as_stopped_and_a_running_process_does_not() {
     ended.wait().unwrap();
 }
 
+/// The harness reads `/proc` of a process whose command name is not UTF-8: `term_bit` sees
+/// its signal mask, and `state_in_proc` and `stopped` see it as a zombie (#131).
+#[test]
+#[cfg(target_os = "linux")]
+fn the_harness_reads_a_process_whose_name_is_not_utf8() {
+    use std::os::unix::process::CommandExt;
+    let h = Harness::with_default_config("helpff");
+    let sh = non_utf8_link(&h.root, b"s\xffh", "sh");
+    let mut child = Command::new(&sh)
+        .args(["-c", "trap '' TERM; while true; do sleep 1; done"])
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let pid = child.id() as i32;
+    let guard = Leftover(pid);
+    Harness::poll_until(
+        "the shell carries the 0xff name",
+        Duration::from_secs(10),
+        || name_has_ff(pid),
+    );
+    Harness::poll_until("the shell ignores TERM", Duration::from_secs(10), || {
+        Harness::term_bit(pid, "SigIgn:")
+    });
+    assert!(!Harness::stopped(pid), "a running process has not stopped");
+    unsafe { libc::killpg(pid, libc::SIGKILL) };
+    Harness::poll_until(
+        "ps shows the shell as a zombie",
+        Duration::from_secs(10),
+        || Harness::state_by_ps(pid) == Some('Z'),
+    );
+    assert_eq!(
+        Harness::state_in_proc(pid),
+        Some('Z'),
+        "the state of the zombie"
+    );
+    assert!(
+        Harness::stopped(pid),
+        "a zombie whose name is not UTF-8 has stopped running"
+    );
+    drop(guard);
+    child.wait().unwrap();
+}
+
 /// A test that deletes the pid file must still stop its coordinator.
 ///
 /// `a_socket_that_answers_stops_a_new_coordinator` unlinks that file. A later
@@ -21887,6 +22229,41 @@ fn a_record_shows_the_chain_of_its_submitter() {
     assert!(
         text.contains(&format!(" {me} ")),
         "the text must name this test process: {text}"
+    );
+    h.ok(&["wait", &id]);
+}
+
+/// The chain of a submission holds a submitter whose command name is not UTF-8 (#131).
+#[test]
+#[cfg(target_os = "linux")]
+fn a_submitter_whose_name_is_not_utf8_is_in_the_chain() {
+    let h = Harness::with_default_config("chainff");
+    let sh = non_utf8_link(&h.root, b"s\xffh", "sh");
+    let mut cmd = Command::new(&sh);
+    cmd.args(["-c", r#""$0" submit -- true; true"#])
+        .arg(env!("CARGO_BIN_EXE_qex"));
+    isolate(&mut cmd, &h.root, &h.peers_dir);
+    cmd.envs(h.extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    let out = cmd.output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let chain = h.status_json(&id)["submitter"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let me = std::process::id() as i64;
+    let seen: Vec<_> = chain
+        .iter()
+        .map(|a| (a["pid"].as_i64(), a["name"].clone()))
+        .collect();
+    assert!(
+        chain.first().and_then(|a| a["name"].as_str()) == Some("s_h")
+            && chain.iter().any(|a| a["pid"].as_i64() == Some(me)),
+        "the chain starts at the shell named with 0xff and reaches this test: {seen:?}"
     );
     h.ok(&["wait", &id]);
 }
