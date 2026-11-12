@@ -56,13 +56,12 @@ pub fn process_info(pid: i32) -> Option<ProcessInfo> {
     if pid <= 0 {
         return None;
     }
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // The command name is in parentheses and can hold spaces and `)`. The
-    // stable fields start after the LAST `)`.
-    let open = stat.find('(')?;
-    let close = stat.rfind(')')?;
-    let name = stat.get(open + 1..close)?.to_string();
-    let fields: Vec<&str> = stat[close + 1..].split_whitespace().collect();
+    let stat = std::fs::read(format!("/proc/{pid}/stat")).ok()?;
+    // The command name is in parentheses and can hold any bytes, spaces and `)`.
+    let open = stat.iter().position(|&b| b == b'(')?;
+    let close = stat.iter().rposition(|&b| b == b')')?;
+    let name = String::from_utf8_lossy(stat.get(open + 1..close)?).into_owned();
+    let fields: Vec<&str> = stat_after_name(&stat)?.split_whitespace().collect();
     // After the name: state, ppid, pgrp, session, tty_nr, ... and the start
     // time is the 20th of them.
     let ppid = fields.get(1)?.parse().ok()?;
@@ -104,15 +103,13 @@ pub fn group_usage(pgid: i32) -> GroupUsage {
             continue;
         }
 
-        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+        let Ok(stat) = std::fs::read(entry.path().join("stat")) else {
             continue;
         };
-        // The command of a process can hold a space or a bracket, and it is
-        // inside brackets. Read the fields after the last bracket.
-        let Some(rest) = stat.rsplit_once(") ") else {
+        let Some(rest) = stat_after_name(&stat) else {
             continue;
         };
-        let fields: Vec<&str> = rest.1.split_whitespace().collect();
+        let fields: Vec<&str> = rest.split_whitespace().collect();
         // After the command, field 1 is the state and field 3 is the group.
         if fields.len() < 22 {
             continue;
@@ -133,4 +130,12 @@ pub fn group_usage(pgid: i32) -> GroupUsage {
         out.processes += 1;
     }
     out
+}
+
+/// The fields of a `/proc/<pid>/stat` text after the command name, which is in parentheses and
+/// can hold any bytes and `)`: they start after the LAST `)` (#131).
+#[cfg(target_os = "linux")]
+pub fn stat_after_name(stat: &[u8]) -> Option<&str> {
+    let close = stat.iter().rposition(|&b| b == b')')?;
+    std::str::from_utf8(&stat[close + 1..]).ok()
 }

@@ -217,8 +217,8 @@ pub fn process_is_zombie(pid: i32) -> bool {
         return false;
     }
     #[cfg(target_os = "linux")]
-    if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        if let Some((_, rest)) = stat.rsplit_once(')') {
+    if let Ok(stat) = std::fs::read(format!("/proc/{pid}/stat")) {
+        if let Some(rest) = super::stat_after_name(&stat) {
             return matches!(rest.split_whitespace().next(), Some("Z") | Some("X"));
         }
     }
@@ -273,10 +273,9 @@ pub fn process_start_token(pid: i32) -> Option<u64> {
         return None;
     }
     #[cfg(target_os = "linux")]
-    if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        // The command name can hold spaces and `)`. The stable fields start
-        // after the LAST `)`, and `starttime` is the 20th of them.
-        if let Some((_, rest)) = stat.rsplit_once(')') {
+    if let Ok(stat) = std::fs::read(format!("/proc/{pid}/stat")) {
+        // `starttime` is the 20th field after the command name.
+        if let Some(rest) = super::stat_after_name(&stat) {
             return rest.split_whitespace().nth(19).and_then(|f| f.parse().ok());
         }
     }
@@ -310,8 +309,9 @@ pub fn process_uids(pid: i32) -> Option<(u32, u32)> {
         return None;
     }
     #[cfg(target_os = "linux")]
-    if let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/status")) {
+    if let Ok(status) = std::fs::read(format!("/proc/{pid}/status")) {
         // The line holds the real, effective, saved and file system uids.
+        let status = status_after_name(&status)?;
         let line = status.lines().find_map(|l| l.strip_prefix("Uid:"))?;
         let mut uids = line.split_whitespace().map(|f| f.parse::<u32>().ok());
         return Some((uids.next()??, uids.next()??));
@@ -413,7 +413,7 @@ pub fn pid_namespace() -> Option<String> {
 pub fn pid_namespace_identity() -> Option<(String, u64)> {
     #[cfg(target_os = "linux")]
     {
-        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let status = std::fs::read("/proc/self/status").ok()?;
         let time_ns =
             std::fs::read_link("/proc/self/ns/time").map(|p| p.to_string_lossy().into_owned());
         identity_from(&status, &time_ns, || {
@@ -430,11 +430,11 @@ pub fn pid_namespace_identity() -> Option<(String, u64)> {
 /// time namespace `time_ns` adds no offset to the start tokens that /proc gives.
 #[cfg(any(target_os = "linux", test))]
 fn identity_from(
-    status: &str,
+    status: &[u8],
     time_ns: &std::io::Result<String>,
     read: impl FnOnce() -> Option<(String, u64)>,
 ) -> Option<(String, u64)> {
-    if !nspid_is_own(status) || !boot_clock_unshifted(time_ns) {
+    if !status_after_name(status).is_some_and(nspid_is_own) || !boot_clock_unshifted(time_ns) {
         return None;
     }
     read()
@@ -458,6 +458,16 @@ fn nspid_is_own(status: &str) -> bool {
         .lines()
         .find_map(|l| l.strip_prefix("NSpid:"))
         .is_some_and(|pids| pids.split_whitespace().count() == 1)
+}
+
+/// A `/proc/<pid>/status` text after its first line, the `Name:` line, whose value can hold any
+/// bytes; `None` when the rest is not UTF-8, as for the whole text before (#131).
+#[cfg(any(target_os = "linux", test))]
+fn status_after_name(status: &[u8]) -> Option<&str> {
+    let rest = status.strip_prefix(b"Name:").map_or(status, |name| {
+        name.splitn(2, |&b| b == b'\n').nth(1).unwrap_or_default()
+    });
+    std::str::from_utf8(rest).ok()
 }
 
 /// Gives the chain of processes above this process, from its parent up to
@@ -991,16 +1001,33 @@ mod tests {
         // `pid_namespace_identity` gives what `identity_from` gives for its /proc text.
         let read = || Some(("pid:[4026532263]".to_string(), 161));
         let initial = Ok("time:[4026531834]".to_string());
-        assert_eq!(identity_from(&status("\t42"), &initial, read), read());
         assert_eq!(
-            identity_from(&status("\t4242\t42"), &initial, read),
+            identity_from(status("\t42").as_bytes(), &initial, read),
+            read()
+        );
+        assert_eq!(
+            identity_from(status("\t4242\t42").as_bytes(), &initial, read),
             None,
             "the parent's /proc"
         );
         assert_eq!(
-            identity_from("Name:\tqex\n", &initial, read),
+            identity_from(b"Name:\tqex\n", &initial, read),
             None,
             "no NSpid line"
+        );
+        assert_eq!(
+            identity_from(b"Name:\tq\xffx\nNSpid:\t42\xff\n", &initial, read),
+            None,
+            "an NSpid line that is not UTF-8"
+        );
+        assert_eq!(
+            identity_from(
+                b"Name:\tq\xffx\nUid:\t1000\xff\nNSpid:\t42\n",
+                &initial,
+                read
+            ),
+            None,
+            "a Uid line that is not UTF-8"
         );
     }
 
@@ -1008,7 +1035,7 @@ mod tests {
     // may refuse, and no qex command shows the recorded value's source.
     #[test]
     fn only_a_boot_clock_with_no_offset_gives_a_namespace_identity() {
-        let own = "Name:\tqex\nNSpid:\t42\n";
+        let own: &[u8] = b"Name:\tqex\nNSpid:\t42\n";
         let read = || Some(("pid:[4026532263]".to_string(), 161));
         let err = |code| Err(std::io::Error::from_raw_os_error(code));
         let initial = Ok("time:[4026531834]".to_string());

@@ -1,5 +1,5 @@
-//! The platform code behind `sys` and the mode helpers of `paths`, which keep the signatures
-//! and forward here: one file per platform, and `unix` for shared Unix code.
+//! Platform code for `sys` and `paths` (which forward here) and the /proc stat reads of
+//! `watchers`: one file per platform, and `unix` for shared Unix code.
 
 mod unix;
 #[cfg(not(target_os = "linux"))]
@@ -15,7 +15,9 @@ pub use unix::{
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::{available_memory, group_usage, memory_pressure, process_info, total_memory};
+pub use linux::{
+    available_memory, group_usage, memory_pressure, process_info, stat_after_name, total_memory,
+};
 
 #[cfg(target_os = "macos")]
 mod macos;
