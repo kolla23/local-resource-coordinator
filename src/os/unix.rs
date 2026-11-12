@@ -413,7 +413,7 @@ pub fn pid_namespace() -> Option<String> {
 pub fn pid_namespace_identity() -> Option<(String, u64)> {
     #[cfg(target_os = "linux")]
     {
-        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let status = std::fs::read("/proc/self/status").ok()?;
         let time_ns =
             std::fs::read_link("/proc/self/ns/time").map(|p| p.to_string_lossy().into_owned());
         identity_from(&status, &time_ns, || {
@@ -430,11 +430,11 @@ pub fn pid_namespace_identity() -> Option<(String, u64)> {
 /// time namespace `time_ns` adds no offset to the start tokens that /proc gives.
 #[cfg(any(target_os = "linux", test))]
 fn identity_from(
-    status: &str,
+    status: &[u8],
     time_ns: &std::io::Result<String>,
     read: impl FnOnce() -> Option<(String, u64)>,
 ) -> Option<(String, u64)> {
-    if !nspid_is_own(status) || !boot_clock_unshifted(time_ns) {
+    if !status_after_name(status).is_some_and(nspid_is_own) || !boot_clock_unshifted(time_ns) {
         return None;
     }
     read()
@@ -1001,16 +1001,33 @@ mod tests {
         // `pid_namespace_identity` gives what `identity_from` gives for its /proc text.
         let read = || Some(("pid:[4026532263]".to_string(), 161));
         let initial = Ok("time:[4026531834]".to_string());
-        assert_eq!(identity_from(&status("\t42"), &initial, read), read());
         assert_eq!(
-            identity_from(&status("\t4242\t42"), &initial, read),
+            identity_from(status("\t42").as_bytes(), &initial, read),
+            read()
+        );
+        assert_eq!(
+            identity_from(status("\t4242\t42").as_bytes(), &initial, read),
             None,
             "the parent's /proc"
         );
         assert_eq!(
-            identity_from("Name:\tqex\n", &initial, read),
+            identity_from(b"Name:\tqex\n", &initial, read),
             None,
             "no NSpid line"
+        );
+        assert_eq!(
+            identity_from(b"Name:\tq\xffx\nNSpid:\t42\xff\n", &initial, read),
+            None,
+            "an NSpid line that is not UTF-8"
+        );
+        assert_eq!(
+            identity_from(
+                b"Name:\tq\xffx\nUid:\t1000\xff\nNSpid:\t42\n",
+                &initial,
+                read
+            ),
+            None,
+            "a Uid line that is not UTF-8"
         );
     }
 
@@ -1018,7 +1035,7 @@ mod tests {
     // may refuse, and no qex command shows the recorded value's source.
     #[test]
     fn only_a_boot_clock_with_no_offset_gives_a_namespace_identity() {
-        let own = "Name:\tqex\nNSpid:\t42\n";
+        let own: &[u8] = b"Name:\tqex\nNSpid:\t42\n";
         let read = || Some(("pid:[4026532263]".to_string(), 161));
         let err = |code| Err(std::io::Error::from_raw_os_error(code));
         let initial = Ok("time:[4026531834]".to_string());
