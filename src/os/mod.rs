@@ -1,5 +1,5 @@
-//! The platform code behind `sys` and the mode helpers of `paths`, which keep the signatures
-//! and forward here: one file per platform, and `unix` for shared Unix code.
+//! Platform code for `sys` and `paths` (which forward here) and the /proc stat reads of
+//! `watchers`: one file per platform, and `unix` for shared Unix code.
 
 mod unix;
 #[cfg(not(target_os = "linux"))]

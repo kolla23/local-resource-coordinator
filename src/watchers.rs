@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-11: ancestors_of and process_age read /proc stat as bytes, so a command name that is not UTF-8 is read (issue #131).
 //! This module finds the monitor scripts that wait for a proxy.
 //!
 //! A monitor waits for evidence of the work: a pattern in the process list, a
@@ -257,13 +258,13 @@ fn ancestors_of(mut pid: i32) -> Vec<i32> {
     let mut out = Vec::new();
     // A limit, so a strange process table cannot make an endless loop.
     for _ in 0..64 {
-        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        let Ok(stat) = std::fs::read(format!("/proc/{pid}/stat")) else {
             break;
         };
-        let Some(rest) = stat.rsplit_once(") ") else {
+        let Some(rest) = crate::os::stat_after_name(&stat) else {
             break;
         };
-        let fields: Vec<&str> = rest.1.split_whitespace().collect();
+        let fields: Vec<&str> = rest.split_whitespace().collect();
         if fields.len() < 2 {
             break;
         }
@@ -290,13 +291,13 @@ fn read_uptime() -> f64 {
 
 #[cfg(target_os = "linux")]
 fn process_age(dir: &std::path::Path, uptime: f64, ticks: f64) -> u64 {
-    let Ok(stat) = std::fs::read_to_string(dir.join("stat")) else {
+    let Ok(stat) = std::fs::read(dir.join("stat")) else {
         return 0;
     };
-    let Some(rest) = stat.rsplit_once(") ") else {
+    let Some(rest) = crate::os::stat_after_name(&stat) else {
         return 0;
     };
-    let fields: Vec<&str> = rest.1.split_whitespace().collect();
+    let fields: Vec<&str> = rest.split_whitespace().collect();
     // After the command, field 20 is the time when the process started.
     if fields.len() < 20 {
         return 0;
