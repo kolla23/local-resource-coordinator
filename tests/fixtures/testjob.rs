@@ -30,7 +30,11 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    // `args()` panics on an argument that is not UTF-8, argv[0] included (#156).
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     match run(&args) {
         Ok(code) => ExitCode::from(code),
         Err(message) => {
