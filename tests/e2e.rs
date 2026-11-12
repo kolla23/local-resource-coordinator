@@ -26,6 +26,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-10: each harness root takes a process-wide counter and is made with create_dir, with a test (issue #150).
 // Modified by the local-resource-coordinator fork, 2026-11-11: tests kill the coordinator in the TERM wait of a job whose supervisor died, then check the next recovery (issue #143).
 // Modified by the local-resource-coordinator fork, 2026-11-11: eight tests for processes whose command name is not UTF-8: submitter chain, top, recovery, reap, watchers, the pid namespace record and the harness's own /proc reads; state_in_proc and term_bit read /proc as bytes (issue #131).
+// Modified by the local-resource-coordinator fork, 2026-11-12: tests for a qex and a testjob command line that is not UTF-8; the pid namespace test starts its copy under the copy's own name (issue #156).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -1334,6 +1335,68 @@ fn a_usage_error_of_a_command_that_speaks_for_a_job_uses_the_band() {
     // conventional code 2.
     let out = h.qex(&["list", "--no-such-option"]);
     assert_eq!(out.status.code(), Some(2));
+}
+
+/// A program name or a word before the subcommand that is not UTF-8 still gives the code of
+/// the command, not a panic at exit (#156).
+#[test]
+#[cfg(unix)]
+fn a_command_line_that_is_not_utf8_gives_the_code_of_the_command() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::process::CommandExt;
+    let h = Harness::with_default_config("argvff");
+    let missing = h.root.join("no-such-pipeline.toml");
+    let missing = missing.to_str().unwrap();
+    type Row<'a> = (&'a [u8], &'a [&'a [u8]], i32);
+    let rows: [Row; 6] = [
+        (b"q\xffx", &[b"version"], 0),
+        (b"q\xffx", &[b"status"], 121),
+        (b"q\xffx", &[b"pipeline", missing.as_bytes()], 121),
+        (b"q\xffx", &[b"list", b"--no-such-option"], 2),
+        (b"qex", &[b"st\xfftus"], 121),
+        (b"qex", &[b"--b\xffd", b"list"], 2),
+    ];
+    for (arg0, args, code) in rows {
+        let args: Vec<&OsStr> = args.iter().map(|a| OsStr::from_bytes(a)).collect();
+        let mut cmd = h.command(&[]);
+        cmd.arg0(OsStr::from_bytes(arg0)).args(&args);
+        let out = cmd.output().unwrap();
+        let shown = format!("argv[0] {:?}, arguments {args:?}", OsStr::from_bytes(arg0));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!stderr.contains("panicked"), "{shown} panicked: {stderr}");
+        assert_eq!(out.status.code(), Some(code), "{shown}: {stderr}");
+    }
+}
+
+/// The test job runs its steps when its program name or an argument is not UTF-8; such an
+/// argument is read with U+FFFD in place of each bad byte (#156).
+#[test]
+#[cfg(unix)]
+fn testjob_runs_a_command_line_that_is_not_utf8() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::process::CommandExt;
+    let out = Command::new(TESTJOB)
+        .arg0(OsStr::from_bytes(b"t\xffj"))
+        .args(["print", "first", "exit", "3"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(3), "argv[0] \"t\\xffj\": {stderr}");
+    assert_eq!(out.stdout, b"first\n", "argv[0] \"t\\xffj\": {stderr}");
+    let out = Command::new(TESTJOB)
+        .arg("print")
+        .arg(OsStr::from_bytes(b"q\xffx"))
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "print \"q\\xffx\": {stderr}");
+    assert_eq!(
+        out.stdout,
+        "q\u{FFFD}x\n".as_bytes(),
+        "print \"q\\xffx\": {stderr}"
+    );
 }
 
 /// `qex pipeline` and `qex rerun` start a job, so they speak in the same voice
@@ -5723,10 +5786,8 @@ fn a_program_file_whose_name_is_not_utf8_keeps_the_pid_namespace_check() {
     let copy = h.root.join(std::ffi::OsStr::from_bytes(b"q\xffx"));
     copy_program(&copy);
     let run = |args: &[&str]| -> Output {
-        use std::os::unix::process::CommandExt;
-        // A UTF-8 argv[0]: qex panics at exit on one that is not (src/main.rs subcommand_word).
         let mut cmd = Command::new(&copy);
-        cmd.arg0("qex").args(args);
+        cmd.args(args);
         isolate(&mut cmd, &h.root, &h.peers_dir);
         cmd.envs(h.extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         cmd.output().unwrap()
