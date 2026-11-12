@@ -4,6 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: supervisor.log and the job's output files are opened with O_NOFOLLOW (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: once the system collected a job's leader, recovery and reap check every member of its group before the SIGKILL; after qex's TERM the group gets the rest of the grace; a refused group gets one log line; the record's pid_ns and pid_ns_init_start, written with the pid, must name this pid namespace (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-12: the rest of the grace after qex's TERM ends once the job's process group is empty (issue #139).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -335,7 +336,11 @@ pub(crate) fn stop_process_group(
         std::thread::sleep(Duration::from_millis(100));
         if !is_the_job(pid) {
             // The rest of the group got the TERM too: it gets the rest of the grace to clean up.
+            // ESRCH: no process is left in the group, so nothing is left to wait for.
             for _ in check + 1..20 {
+                if unsafe { libc::killpg(pid, 0) } != 0 && last_error_is(libc::ESRCH) {
+                    break;
+                }
                 std::thread::sleep(Duration::from_millis(100));
             }
             kill_what_the_job_left(id, pid, recorded_start, recorded_ns);
