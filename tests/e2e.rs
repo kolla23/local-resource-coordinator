@@ -27,6 +27,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-11: tests kill the coordinator in the TERM wait of a job whose supervisor died, then check the next recovery (issue #143).
 // Modified by the local-resource-coordinator fork, 2026-11-11: eight tests for processes whose command name is not UTF-8: submitter chain, top, recovery, reap, watchers, the pid namespace record and the harness's own /proc reads; state_in_proc and term_bit read /proc as bytes (issue #131).
 // Modified by the local-resource-coordinator fork, 2026-11-12: tests for a qex and a testjob command line that is not UTF-8; the pid namespace test starts its copy under the copy's own name (issue #156).
+// Modified by the local-resource-coordinator fork, 2026-11-12: the /proc helpers read bytes, and the two watcher tests stop their shell's process group on a failure too (issue #157).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -708,10 +709,17 @@ impl Harness {
         (unsafe { libc::kill(pid, 0) }) != 0
     }
 
+    /// The fields of `/proc/<pid>/stat` after the name, which can hold spaces, brackets and
+    /// bytes that are not UTF-8: the text after the LAST `)`.
+    fn stat_after_name(pid: i32) -> Option<String> {
+        let stat = std::fs::read(format!("/proc/{pid}/stat")).ok()?;
+        let after = &stat[stat.iter().rposition(|&b| b == b')')? + 1..];
+        String::from_utf8(after.to_vec()).ok()
+    }
+
     /// Gives the parent of a process from `/proc/<pid>/stat`, the field after the state.
     fn parent_in_proc(pid: i32) -> Option<i32> {
-        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        let (_, after) = stat.rsplit_once(')')?;
+        let after = Self::stat_after_name(pid)?;
         after.split_whitespace().nth(1)?.parse().ok()
     }
 
@@ -856,13 +864,8 @@ impl Harness {
     ///
     /// `Z` and `X` are a process that ended. `None` says that the entry is
     /// gone, which is the same fact.
-    ///
-    /// The name of the program is the second field, and it can contain spaces,
-    /// brackets and bytes that are not UTF-8. The state is the first field after the LAST `)`.
     fn state_in_proc(pid: i32) -> Option<char> {
-        let stat = std::fs::read(format!("/proc/{pid}/stat")).ok()?;
-        let after = &stat[stat.iter().rposition(|&b| b == b')')? + 1..];
-        std::str::from_utf8(after).ok()?.trim_start().chars().next()
+        Self::stat_after_name(pid)?.trim_start().chars().next()
     }
 
     /// Says whether a process has stopped running (issue #30).
@@ -4777,8 +4780,7 @@ impl Harness {
             std::thread::sleep(Duration::from_millis(20));
         };
         let deadline = Instant::now() + Duration::from_secs(10);
-        while std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default() != "sleep\n"
-        {
+        while std::fs::read(format!("/proc/{pid}/comm")).unwrap_or_default() != b"sleep\n" {
             if let Some(status) = holder.0.try_wait().unwrap() {
                 panic!("the holder stopped with {status} before it became sleep");
             }
@@ -5089,14 +5091,19 @@ impl Harness {
         (holder, job, guard)
     }
 
-    /// Says whether the SIGTERM bit is set in one signal mask line of `/proc/<pid>/status`.
-    fn term_bit(pid: i32, field: &str) -> bool {
-        let status = std::fs::read(format!("/proc/{pid}/status")).unwrap();
-        // status_after_name's rule (src/os/unix.rs): only the `Name:` first line holds any bytes.
+    /// `/proc/<pid>/status` without its `Name:` first line, the only line that holds any bytes
+    /// (status_after_name in src/os/unix.rs).
+    fn status_after_name(pid: i32) -> Option<String> {
+        let status = std::fs::read(format!("/proc/{pid}/status")).ok()?;
         let rest = status.strip_prefix(b"Name:").map_or(&status[..], |name| {
             name.splitn(2, |&b| b == b'\n').nth(1).unwrap_or_default()
         });
-        let status = std::str::from_utf8(rest).unwrap();
+        String::from_utf8(rest.to_vec()).ok()
+    }
+
+    /// Says whether the SIGTERM bit is set in one signal mask line of `/proc/<pid>/status`.
+    fn term_bit(pid: i32, field: &str) -> bool {
+        let status = Self::status_after_name(pid).unwrap();
         let line = status.lines().find(|l| l.starts_with(field)).unwrap();
         let mask = u64::from_str_radix(line[field.len()..].trim(), 16).unwrap();
         mask & (1 << (libc::SIGTERM - 1)) != 0
@@ -5391,8 +5398,7 @@ impl Harness {
     fn start_token(pid: i32) -> Option<u64> {
         #[cfg(target_os = "linux")]
         {
-            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-            let (_, rest) = stat.rsplit_once(')')?;
+            let rest = Self::stat_after_name(pid)?;
             rest.split_whitespace().nth(19)?.parse().ok()
         }
         #[cfg(target_os = "macos")]
@@ -6352,7 +6358,7 @@ fn a_member_of_another_user_leaves_the_group_alone(name: &str, opts: &str, uids:
     let member = h.leftover_in_group(&file, job.leader);
     let expected = uids;
     let uids = |pid: i32| -> Option<Vec<u32>> {
-        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+        let status = Harness::status_after_name(pid)?;
         let line = status.lines().find(|l| l.starts_with("Uid:"))?;
         line[4..]
             .split_whitespace()
@@ -20549,6 +20555,19 @@ fn top_measures_a_job_process_whose_name_is_not_utf8() {
     );
 }
 
+/// A child that leads its own process group; `Drop` kills the group and collects the child,
+/// also when a test panics (#157).
+#[cfg(target_os = "linux")]
+struct ProcessGroup(std::process::Child);
+
+#[cfg(target_os = "linux")]
+impl Drop for ProcessGroup {
+    fn drop(&mut self) {
+        unsafe { libc::killpg(self.0.id() as i32, libc::SIGKILL) };
+        self.0.wait().ok();
+    }
+}
+
 /// `qex watchers` gives the age of a monitor whose command name is not UTF-8 (#131).
 #[test]
 #[cfg(target_os = "linux")]
@@ -20556,12 +20575,14 @@ fn watchers_gives_the_age_of_a_monitor_whose_name_is_not_utf8() {
     use std::os::unix::process::CommandExt;
     let h = Harness::with_default_config("watchff");
     let sh = non_utf8_link(&h.root, b"s\xffh", "sh");
-    let mut monitor = Command::new(&sh)
-        .args(["-c", "while true; do sleep 1; done"])
-        .process_group(0)
-        .spawn()
-        .unwrap();
-    let pid = monitor.id() as i32;
+    let monitor = ProcessGroup(
+        Command::new(&sh)
+            .args(["-c", "while true; do sleep 1; done"])
+            .process_group(0)
+            .spawn()
+            .unwrap(),
+    );
+    let pid = monitor.0.id() as i32;
     Harness::poll_until(
         "the monitor carries the 0xff name",
         Duration::from_secs(10),
@@ -20569,8 +20590,7 @@ fn watchers_gives_the_age_of_a_monitor_whose_name_is_not_utf8() {
     );
     std::thread::sleep(Duration::from_millis(2500));
     let out = h.qex(&["watchers", "--json"]);
-    unsafe { libc::killpg(pid, libc::SIGKILL) };
-    monitor.wait().ok();
+    drop(monitor);
     let found: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)
         .unwrap_or_else(|e| panic!("no JSON: {e}: {}", String::from_utf8_lossy(&out.stdout)));
     let ours = found
@@ -20605,8 +20625,8 @@ fn watchers_never_reports_a_process_above_a_parent_whose_name_is_not_utf8() {
         .arg(inner)
         .process_group(0);
     isolate(&mut cmd, &h.root, &h.peers_dir);
-    let mut outer = cmd.spawn().unwrap();
-    let outer_pid = outer.id() as i32;
+    let outer = ProcessGroup(cmd.spawn().unwrap());
+    let outer_pid = outer.0.id() as i32;
     let mut inside: Vec<serde_json::Value> = Vec::new();
     Harness::poll_until(
         "qex watchers ran below the shell",
@@ -20620,8 +20640,7 @@ fn watchers_never_reports_a_process_above_a_parent_whose_name_is_not_utf8() {
         },
     );
     let control = h.qex(&["watchers", "--json"]);
-    unsafe { libc::killpg(outer_pid, libc::SIGKILL) };
-    outer.wait().ok();
+    drop(outer);
     let comm = std::fs::read(&comm_file).unwrap();
     assert!(
         comm.contains(&0xff),
@@ -21534,8 +21553,8 @@ fn a_zombie_counts_as_stopped_and_a_running_process_does_not() {
     ended.wait().unwrap();
 }
 
-/// The harness reads `/proc` of a process whose command name is not UTF-8: `term_bit` sees
-/// its signal mask, and `state_in_proc` and `stopped` see it as a zombie (#131).
+/// The harness reads `/proc` of a process whose command name is not UTF-8: its signal mask,
+/// parent, start token and uids, and `state_in_proc` and `stopped` see a zombie (#131, #157).
 #[test]
 #[cfg(target_os = "linux")]
 fn the_harness_reads_a_process_whose_name_is_not_utf8() {
@@ -21558,6 +21577,20 @@ fn the_harness_reads_a_process_whose_name_is_not_utf8() {
         Harness::term_bit(pid, "SigIgn:")
     });
     assert!(!Harness::stopped(pid), "a running process has not stopped");
+    assert_eq!(
+        Harness::parent_in_proc(pid),
+        Some(std::process::id() as i32),
+        "the parent of the shell"
+    );
+    assert!(
+        Harness::start_token(pid).is_some(),
+        "the start token of the shell"
+    );
+    let status = Harness::status_after_name(pid).unwrap_or_default();
+    assert!(
+        status.lines().any(|l| l.starts_with("Uid:")),
+        "the status of the shell: {status:?}"
+    );
     unsafe { libc::killpg(pid, libc::SIGKILL) };
     Harness::poll_until(
         "ps shows the shell as a zombie",
