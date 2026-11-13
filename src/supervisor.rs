@@ -5,6 +5,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: once the system collected a job's leader, recovery and reap check every member of its group before the SIGKILL; after qex's TERM the group gets the rest of the grace; a refused group gets one log line; the record's pid_ns and pid_ns_init_start, written with the pid, must name this pid namespace (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-12: the rest of the grace after qex's TERM ends once the job's process group is empty (issue #139).
+// Modified by the local-resource-coordinator fork, 2026-11-12: reap releases the state lock while it signals the job's group and takes it again to write the record; a fault there ends the coordinator with the code 101, and a debug-only switch makes one for the tests (issue #140).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -139,6 +140,8 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
     };
 
     let mut state = coord.state.lock().unwrap();
+    let mut pending = None;
+    let mut stopped = false;
     if let Some(job) = state.jobs.get_mut(&id) {
         job.supervisor_pid = None;
 
@@ -201,37 +204,72 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
                         job.status.pid_ns.clone().zip(job.status.pid_ns_init_start),
                     ),
                 };
-                let job_ns = job_ns.as_ref().map(|(ns, init)| (ns.as_str(), *init));
-                let mut note = "the supervisor stopped without a result".to_string();
+                pending = Some((job_pid, job_start, job_ns));
+            }
+        }
+        state.publish_changes();
+    } else if state.stopped.contains_key(&id) {
+        stopped = true;
+    }
+    drop(state);
 
-                // Give the words of the supervisor itself.
-                //
-                // The supervisor writes each fault to its own log, and NO
-                // COMMAND READ THAT FILE. A user thus met "the supervisor
-                // stopped without a result", which names no cause and gives no
-                // remedy, while the cause was on the disk beside the record.
-                if let Some(text) = supervisor_log_tail(&dir) {
-                    note.push_str(&format!(". The supervisor said: {text}"));
-                }
+    if let Some((job_pid, job_start, job_ns)) = pending {
+        // The signal step can take the whole grace, so the lock stays free for commands and the
+        // scheduler (#140).
+        let outcome = std::panic::catch_unwind(|| {
+            let job_ns = job_ns.as_ref().map(|(ns, init)| (ns.as_str(), *init));
+            let mut note = "the supervisor stopped without a result".to_string();
 
-                if let Some(pid) = job_pid {
-                    // `job_pid_alive` with the start time, and not `pid_alive`:
-                    // the machine can give this number to a new process, and
-                    // the group signal below must not reach a stranger. The
-                    // job process leads its own group and has the recorded
-                    // start time; a stranger fails one of the two.
-                    if sys::job_pid_alive(pid) && sys::same_process_start(pid, job_start) {
-                        log(&format!(
-                            "the supervisor of the job {id} stopped, and the job {pid} \
-                             continues; qex stops the job now"
-                        ));
-                        stop_process_group(id, pid, job_start, job_ns);
-                        note.push_str("; qex stopped the job process");
-                    } else {
-                        kill_what_the_job_left(id, pid, job_start, job_ns);
+            // Give the words of the supervisor itself.
+            //
+            // The supervisor writes each fault to its own log, and NO
+            // COMMAND READ THAT FILE. A user thus met "the supervisor
+            // stopped without a result", which names no cause and gives no
+            // remedy, while the cause was on the disk beside the record.
+            if let Some(text) = supervisor_log_tail(&dir) {
+                note.push_str(&format!(". The supervisor said: {text}"));
+            }
+
+            if let Some(pid) = job_pid {
+                // `job_pid_alive` with the start time, and not `pid_alive`:
+                // the machine can give this number to a new process, and
+                // the group signal below must not reach a stranger. The
+                // job process leads its own group and has the recorded
+                // start time; a stranger fails one of the two.
+                if sys::job_pid_alive(pid) && sys::same_process_start(pid, job_start) {
+                    log(&format!(
+                        "the supervisor of the job {id} stopped, and the job {pid} \
+                         continues; qex stops the job now"
+                    ));
+                    // A test of qex makes the signal step fail here; a release build has no switch.
+                    #[cfg(debug_assertions)]
+                    if std::env::var_os(PANIC_IN_SIGNAL_STEP).is_some() {
+                        panic!("{PANIC_IN_SIGNAL_STEP} is set: reap's signal step fails here");
                     }
+                    stop_process_group(id, pid, job_start, job_ns);
+                    note.push_str("; qex stopped the job process");
+                } else {
+                    kill_what_the_job_left(id, pid, job_start, job_ns);
                 }
+            }
+            note
+        });
+        let note = match outcome {
+            Ok(note) => note,
+            // A fault here must not leave the job active with its claim: end the coordinator, so
+            // the next recovery fails the job and stops what it left.
+            Err(_) => {
+                log_without_panic(&format!(
+                    "job {id}: a fault in qex ended reap's signal step; the coordinator stops \
+                     now, and the next coordinator's recovery fails the job and stops what it left"
+                ));
+                unsafe { libc::_exit(101) }
+            }
+        };
 
+        let mut state = coord.state.lock().unwrap();
+        match state.jobs.get_mut(&id) {
+            Some(job) if job.status.state.is_active() => {
                 job.status.state = JobState::Failed;
                 job.status.finished_at = Some(sys::now_secs());
                 // A pid in a terminal record invites a signal to whoever holds
@@ -250,32 +288,34 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
                 job.status.blocked_reason = None;
                 let status = job.status.clone();
                 job::write_status(&dir, &status).ok();
-                log(&format!("the supervisor of the job {id} left no result"));
+                log_without_panic(&format!("the supervisor of the job {id} left no result"));
 
                 // The supervisor of this job stopped before it could run the
                 // hook, so the coordinator runs it. The claim file stops a
                 // second run if the supervisor already started one.
                 crate::hook::fire_detached(&dir, &status);
+                state.publish_changes();
             }
+            Some(job) => log_without_panic(&format!(
+                "job {id} is {} once reap's signal step ended, so reap leaves its record alone",
+                job.status.state.as_str()
+            )),
+            None => {}
         }
-        state.publish_changes();
-    } else if state.stopped.contains_key(&id) {
+        drop(state);
+    } else if stopped {
         // The record on the disk said that the job stopped, and the job left
         // the map above, BEFORE this supervisor stopped: a supervisor writes
         // the final record and then runs the hook, and a hook can run for a
         // long time. The guard of the first branch must hold here also, or a
         // supervisor that a signal stopped between its two steps leaves a job
         // with a result and no notification.
-        drop(state);
         if let Ok(status) = job::read_status(&dir) {
             if status.state.is_terminal() {
                 crate::hook::fire_detached(&dir, &status);
             }
         }
-        coord.notify();
-        return;
     }
-    drop(state);
 
     coord.notify();
 }
@@ -285,6 +325,20 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
 fn persist_legacy_requeue(dir: &std::path::Path, status: &mut JobStatus) {
     status.supervisor_pid = None;
     job::write_status(dir, status).ok();
+}
+
+/// Names the variable that makes reap's signal step fail. **This variable exists for the tests
+/// of qex**, and a release build does not read it.
+#[cfg(debug_assertions)]
+const PANIC_IN_SIGNAL_STEP: &str = "QEX_TEST_PANIC_IN_REAP_SIGNAL_STEP";
+
+/// Writes a line as `daemon::log` does, but ignores a failed write: println! panics then, and
+/// these lines run where a panic would skip the exit or poison the state lock.
+fn log_without_panic(message: &str) {
+    use std::io::Write as _;
+    let mut out = std::io::stdout();
+    let _ = writeln!(out, "[{}] {message}", sys::now_secs());
+    let _ = out.flush();
 }
 
 /// Waits until a process stops, for a process that is not a child.

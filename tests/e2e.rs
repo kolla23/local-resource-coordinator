@@ -29,6 +29,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-12: tests for a qex and a testjob command line that is not UTF-8; the pid namespace test starts its copy under the copy's own name (issue #156).
 // Modified by the local-resource-coordinator fork, 2026-11-12: the /proc helpers read bytes, and the two watcher tests stop their shell's process group on a failure too (issue #157).
 // Modified by the local-resource-coordinator fork, 2026-11-12: recovery and reap of a leader alone in its group, which TERM ends, finish without the rest of the grace (issue #139).
+// Modified by the local-resource-coordinator fork, 2026-11-12: tests that reap serves a command and takes a qex kill during its TERM wait, and that a fault there ends the coordinator with the code 101 and recovery finishes the job (issue #140).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -5907,7 +5908,8 @@ fn a_coordinator_killed_in_reaps_term_wait_leaves_the_job_to_the_next_recovery()
     let h = Harness::with_default_config("twreap");
     let (job, leftover) = h.term_stop_job();
     let coordinator = h.coordinator_pid();
-    // No qex command until the kill: reap holds the state lock, then the coordinator is stopped.
+    // No qex command until the kill: the leader's TERM trap stops the coordinator, which then
+    // answers nothing.
     unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
     let (pid, _) = h.term_handshake(&job, leftover.0);
     assert_eq!(
@@ -6110,6 +6112,199 @@ fn reap_ends_the_term_wait_once_the_group_is_empty() {
         took < Duration::from_millis(1000),
         "an empty group must not wait out the grace: {took:?}"
     );
+}
+
+/// Reap TERMs a leader that TERM ends while a leftover that ignores TERM holds the group: the
+/// coordinator serves other commands during the rest of the grace (#140).
+#[test]
+#[cfg(unix)]
+fn reap_serves_commands_during_the_term_wait() {
+    let h = Harness::with_default_config("reapserves");
+    let (job, leftover) = h.unheld_leftover_job();
+
+    unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+    Harness::poll_until("the leader is stopped", Duration::from_secs(20), || {
+        Harness::stopped(job.leader)
+    });
+    let start = Instant::now();
+    let out = h.qex(&["list"]);
+    let took = start.elapsed();
+    eprintln!("list-during-term-wait: {} ms", took.as_millis());
+    assert!(
+        Harness::runs(leftover.0),
+        "the command must return inside the rest of the grace"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "list must answer: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let row = stdout.lines().find(|l| l.starts_with(&job.id[..8]));
+    assert!(
+        row.is_some_and(|r| r.contains("running")),
+        "list shows the job running: {stdout}"
+    );
+    assert!(
+        took < Duration::from_millis(1000),
+        "the TERM wait must not hold the coordinator: {took:?}"
+    );
+
+    Harness::poll_until("the job is failed", Duration::from_secs(20), || {
+        h.record(&job.id)["state"].as_str() == Some("failed")
+    });
+    Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
+        Harness::stopped(leftover.0)
+    });
+    let error = h.record(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("; qex stopped the job process"),
+        "reap must TERM the live job process: {error}"
+    );
+}
+
+/// Reap TERMs a leader that TERM ends while a leftover that ignores TERM holds the group: a
+/// `qex kill` during the rest of the grace signals the group at once (#140).
+#[test]
+#[cfg(unix)]
+fn reap_takes_a_kill_during_the_term_wait() {
+    let h = Harness::with_default_config("reapkill");
+    let (job, leftover) = h.unheld_leftover_job();
+
+    unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+    Harness::poll_until("the leader is stopped", Duration::from_secs(20), || {
+        Harness::stopped(job.leader)
+    });
+    let start = Instant::now();
+    let out = h.qex(&["kill", &job.id]);
+    let took = start.elapsed();
+    eprintln!("kill-during-term-wait: {} ms", took.as_millis());
+    assert!(
+        Harness::runs(leftover.0),
+        "the kill must return inside the rest of the grace"
+    );
+    assert!(
+        took < Duration::from_millis(1000),
+        "the TERM wait must not hold the kill: {took:?}"
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "kill must succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log")).unwrap();
+    let id: uuid::Uuid = job.id.parse().unwrap();
+    assert!(
+        log.contains(&format!("job {id} received the signal 15")),
+        "the kill must signal the group: {log}"
+    );
+
+    Harness::poll_until("the job is failed", Duration::from_secs(20), || {
+        h.record(&job.id)["state"].as_str() == Some("failed")
+    });
+    let error = h.record(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.starts_with("the supervisor stopped without a result")
+            && error.contains("; qex stopped the job process"),
+        "reap's record must not change with the kill: {error}"
+    );
+    Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
+        Harness::stopped(leftover.0)
+    });
+}
+
+/// A fault in reap's signal step ends the coordinator with the code 101 and leaves the record
+/// `running`; the next coordinator's recovery fails the job and stops its group (#140).
+#[test]
+#[cfg(unix)]
+fn a_fault_in_reaps_signal_step_ends_the_coordinator_and_recovery_finishes_the_job() {
+    // The switch that makes the signal step fail exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to fail reap's signal step");
+        return;
+    }
+    let mut h = Harness::with_default_config("reapfault");
+    h.extra_env
+        .push(("QEX_TEST_PANIC_IN_REAP_SIGNAL_STEP".into(), "1".into()));
+    let log_path = h.root.join("coordinator.log");
+    let log = std::fs::File::create(&log_path).unwrap();
+    let mut daemon = h
+        .command(&["daemon"])
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .spawn()
+        .expect("qex daemon did not start");
+    let read_log = || std::fs::read_to_string(&log_path).unwrap_or_default();
+    Harness::poll_until("the coordinator starts", Duration::from_secs(30), || {
+        read_log().contains("the coordinator started") || !matches!(daemon.try_wait(), Ok(None))
+    });
+    assert_eq!(
+        h.coordinator_pid(),
+        daemon.id() as i32,
+        "the coordinator that answers must be the test's own: {}",
+        read_log()
+    );
+
+    let (job, leftover) = h.unheld_leftover_job();
+    unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
+    let mut status = None;
+    Harness::poll_until("the coordinator ends", Duration::from_secs(30), || {
+        status = daemon.try_wait().ok().flatten();
+        status.is_some()
+    });
+    let text = read_log();
+    assert_eq!(
+        status.and_then(|s| s.code()),
+        Some(101),
+        "the fault must end the coordinator with 101: {status:?}: {text}"
+    );
+    let id: uuid::Uuid = job.id.parse().unwrap();
+    let term_line = format!(
+        "the supervisor of the job {id} stopped, and the job {} continues; qex stops the job now",
+        job.leader
+    );
+    let term_at = text.find(&term_line);
+    let panic_at = text.find("QEX_TEST_PANIC_IN_REAP_SIGNAL_STEP is set");
+    let fault_at = text.find(&format!(
+        "job {id}: a fault in qex ended reap's signal step"
+    ));
+    assert!(
+        term_at.is_some() && term_at < panic_at && panic_at < fault_at,
+        "the log must hold the TERM line, the panic and the fault line, in order: {text}"
+    );
+    assert_eq!(h.record(&job.id)["state"].as_str(), Some("running"));
+    assert!(
+        Harness::runs(job.leader) && Harness::runs(leftover.0),
+        "the fault came before the TERM, and the exit sent no signal"
+    );
+
+    // The next coordinator, without the variable.
+    h.extra_env.clear();
+    h.until("the job is failed", Duration::from_secs(30), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.record(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.starts_with(
+            "the coordinator stopped, and the supervisor of this job did not continue"
+        ) && error.contains("; qex stopped the job process"),
+        "recovery must stop the live job process: {error}"
+    );
+    assert_eq!(h.refusals_of(&job.id, job.leader), 0);
+    Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
+        Harness::stopped(leftover.0)
+    });
 }
 
 /// The error of recovery's final branch, the one that calls `kill_what_the_job_left`.
