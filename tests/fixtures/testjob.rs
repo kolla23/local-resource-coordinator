@@ -2,8 +2,8 @@
 //!
 //! The tests used to run Unix programs as their jobs (`true`, `false`,
 //! `sleep`, `echo`, `sh -c "..."`). None of them exists on Windows. This
-//! program does the same work with the standard library only, so a test that
-//! uses it runs on every platform the coordinator supports.
+//! program does the same work with the standard library only (`leave-group`, the one Unix-only
+//! step, uses `libc`), so a test that uses it runs on every platform the coordinator supports.
 //!
 //! The arguments are a list of steps, run in order:
 //!
@@ -17,13 +17,13 @@
 //!     if-count-below N    run the steps up to the next `end` only when the
 //!                         last `count` gave less than N; skip them otherwise
 //!     end                 the end of an `if-count-below`
+//!     leave-group         move into the process group of the parent (Unix only)
 //!
 //! After the last step the program exits 0. `sh -c "echo bad >&2; exit 9"` is
 //! `testjob print bad --stderr exit 9`. A job that fails on its first attempt
 //! only is `testjob count FILE if-count-below 2 exit 3 end`.
 //!
-//! It is built only with the `test-fixtures` feature, so `cargo install` never
-//! installs it.
+//! It is built only with the `test-fixtures` feature, so `cargo install` never installs it.
 
 use std::io::Write;
 use std::process::ExitCode;
@@ -42,7 +42,7 @@ fn main() -> ExitCode {
             eprintln!(
                 "usage: testjob [exit N | sleep SECS | print TEXT [--stderr] \
                  | hold-mem MIB SECS | spin SECS | count FILE \
-                 | if-count-below N ... end]..."
+                 | if-count-below N ... end | leave-group]..."
             );
             ExitCode::from(2)
         }
@@ -131,10 +131,29 @@ fn run(args: &[String]) -> Result<u8, String> {
                 }
             }
             "end" => {}
+            "leave-group" => leave_group()?,
             other => return Err(format!("unknown step {other:?}")),
         }
     }
     Ok(0)
+}
+
+/// Moves this process into the process group of its parent.
+#[cfg(unix)]
+fn leave_group() -> Result<(), String> {
+    let group = unsafe { libc::getpgid(libc::getppid()) };
+    if group < 0 || unsafe { libc::setpgid(0, group) } != 0 {
+        let e = std::io::Error::last_os_error();
+        return Err(format!(
+            "leave-group could not move to the parent's group: {e}"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn leave_group() -> Result<(), String> {
+    Err("leave-group needs Unix".to_string())
 }
 
 /// Takes the value of a step.

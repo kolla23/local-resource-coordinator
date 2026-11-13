@@ -31,6 +31,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-12: recovery and reap of a leader alone in its group, which TERM ends, finish without the rest of the grace (issue #139).
 // Modified by the local-resource-coordinator fork, 2026-11-12: tests that reap serves a command and takes a qex kill during its TERM wait, and that a fault there ends the coordinator with the code 101 and recovery finishes the job (issue #140).
 // Modified by the local-resource-coordinator fork, 2026-11-13: tests that recovery's TERM wait holds back no command (the first answer, an answer after the TERM, a kill, a dedupe re-run), that its stop hook runs after the failed record, and that a fault in its signal step ends the coordinator with the code 101 (issue #162).
+// Modified by the local-resource-coordinator fork, 2026-11-13: six tests for the identity check before qex kill's first signal: a decoy, a zombie leader of another or the recorded start, a collected leader's group that passes or fails reap's check, and a leader that left its group (issue #163).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -3192,6 +3193,385 @@ fn a_kill_stops_every_process_of_a_job() {
         "the record shows the job stopped",
         Duration::from_secs(20),
         || h.state_of(&id) == "killed",
+    );
+}
+
+/// `qex kill` checks the record's pid before its first signal, as its grace KILL does: a group
+/// whose leader is another process than the job gets no signal (#163).
+#[test]
+#[cfg(unix)]
+fn a_kill_leaves_alone_a_group_whose_leader_is_not_the_job() {
+    use std::os::unix::process::CommandExt;
+
+    let h = Harness::with_default_config("killdecoy");
+    let id = h.submit(&["submit", "--", "sleep", "300"]);
+    h.until("the job starts", Duration::from_secs(45), || {
+        h.state_of(&id) == "running" && h.status_json(&id)["pid"].as_i64().is_some()
+    });
+    let _job = Leftover(h.status_json(&id)["pid"].as_i64().unwrap() as i32);
+    let recorded = h.recorded_start(&id).expect("the record has a start time");
+    // An equal token would make the decoy the job; a later spawn can share the leader's tick.
+    let mut tries = 0;
+    let decoy = loop {
+        #[allow(clippy::zombie_processes)]
+        let mut child = Command::new("sleep")
+            .arg("600")
+            .process_group(0)
+            .spawn()
+            .expect("starting the decoy");
+        let pid = child.id() as i32;
+        if Harness::start_token(pid).is_some_and(|t| t != recorded) {
+            break Leftover(pid);
+        }
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        let _ = child.wait();
+        tries += 1;
+        assert!(tries < 50, "no decoy with another start token");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(
+        unsafe { libc::getpgid(decoy.0) },
+        decoy.0,
+        "the decoy leads a group"
+    );
+    h.plant_in_status(&id, |v| v["pid"] = serde_json::Value::from(decoy.0));
+
+    let out = h.qex(&["kill", &id, "--grace", "1s"]);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        Harness::runs(decoy.0),
+        "the decoy's group must get no signal; kill exited {:?} and said: {}",
+        out.status.code(),
+        kill_said(&out)
+    );
+    assert_no_process_reply(&out);
+}
+
+/// What a `qex kill` printed, stdout and stderr.
+#[cfg(unix)]
+fn kill_said(out: &Output) -> String {
+    format!(
+        "{} {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+}
+
+/// Checks that a `qex kill` refused with the "has no process" reply.
+#[cfg(unix)]
+fn assert_no_process_reply(out: &Output) {
+    assert!(
+        out.status.code() != Some(0)
+            && String::from_utf8_lossy(&out.stderr).contains("has no process"),
+        "kill must refuse with the \"has no process\" reply; it exited {:?} and said: {}",
+        out.status.code(),
+        kill_said(out)
+    );
+}
+
+/// Checks that a `qex kill` refused with the reply for group members qex could not verify.
+#[cfg(unix)]
+fn assert_unconfirmed_reply(out: &Output, id: &str) {
+    let id: uuid::Uuid = id.parse().unwrap();
+    let sentence = format!(
+        "qex could not confirm that the processes left in the group of the job {id} are its own, \
+         so it sent no signal. The log of the coordinator says why."
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.code() == Some(1)
+            && stderr.contains(&sentence)
+            && !stderr.contains("has no process"),
+        "kill must refuse with: {sentence}; it exited {:?} and said: {}",
+        out.status.code(),
+        kill_said(out)
+    );
+}
+
+/// Checks that a `qex kill` signalled the job's group.
+#[cfg(unix)]
+fn assert_signalled_reply(out: &Output) {
+    assert!(
+        out.status.code() == Some(0)
+            && String::from_utf8_lossy(&out.stdout).contains("received the signal"),
+        "kill must signal the group; it exited {:?} and said: {}",
+        out.status.code(),
+        kill_said(out)
+    );
+}
+
+#[cfg(unix)]
+impl Harness {
+    /// A running `LEFTOVER_JOB` whose supervisor is stopped and whose leader stays its zombie, so
+    /// the record stays `running`; gives guards for the supervisor and the leftover.
+    fn zombie_leader_of_a_running_job(&self) -> (UnheldJob, Leftover, Leftover) {
+        let (job, leftover) = self.unheld_leftover_job();
+        let supervisor = Leftover(job.supervisor);
+        unsafe { libc::kill(job.supervisor, libc::SIGSTOP) };
+        Harness::poll_until("the supervisor is stopped", Duration::from_secs(30), || {
+            Harness::state_by_ps(job.supervisor) == Some('T')
+        });
+        unsafe { libc::kill(job.leader, libc::SIGKILL) };
+        Harness::poll_until("the leader is a zombie", Duration::from_secs(30), || {
+            Harness::state_by_ps(job.leader) == Some('Z')
+        });
+        assert_eq!(
+            unsafe { libc::getpgid(leftover.0) },
+            job.leader,
+            "the leftover is in the leader's group"
+        );
+        assert!(Harness::runs(leftover.0), "the leftover runs");
+        assert!(
+            self.recorded_start(&job.id).is_some(),
+            "the record has a start time"
+        );
+        (job, supervisor, leftover)
+    }
+
+    /// Submits `sleep 300`, waits until it runs, and gives its id and a guard for its leader.
+    fn running_sleep_job(&self) -> (String, Leftover) {
+        let id = self.submit(&["submit", "--", "sleep", "300"]);
+        self.until("the job starts", Duration::from_secs(45), || {
+            self.state_of(&id) == "running" && self.status_json(&id)["pid"].as_i64().is_some()
+        });
+        let leader = Leftover(self.status_json(&id)["pid"].as_i64().unwrap() as i32);
+        (id, leader)
+    }
+
+    /// Checks that the system collected `leader` while its group exists and holds the running
+    /// `sleep`.
+    fn assert_a_collected_leaders_group(leader: i32, sleep: i32) {
+        let gone = unsafe { libc::kill(leader, 0) } != 0
+            && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+        assert!(gone, "the system collected the group's leader {leader}");
+        assert_eq!(
+            unsafe { libc::killpg(leader, 0) },
+            0,
+            "the group {leader} exists"
+        );
+        assert_eq!(
+            unsafe { libc::getpgid(sleep) },
+            leader,
+            "the sleep holds the group"
+        );
+        assert!(Harness::runs(sleep), "the sleep runs");
+    }
+}
+
+/// Starts a shell that leads a new group and starts a `sleep` in it, then collects the shell:
+/// gives the shell's number L, its start token and a guard for the `sleep`, which holds group L.
+#[cfg(unix)]
+fn a_collected_leaders_group() -> (i32, u64, Leftover) {
+    use std::io::BufRead;
+    use std::os::unix::process::CommandExt;
+
+    let mut shell = Command::new("sh")
+        .args([
+            "-c",
+            "sleep 600 </dev/null >/dev/null 2>&1 & echo $!; read -r line",
+        ])
+        .process_group(0)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("starting the shell");
+    let leader = shell.id() as i32;
+    let mut line = String::new();
+    std::io::BufReader::new(shell.stdout.take().unwrap())
+        .read_line(&mut line)
+        .expect("reading the sleep's pid");
+    let sleep = Leftover(line.trim().parse().expect("the shell names its sleep"));
+    let token = Harness::start_token(leader).expect("the shell's start token");
+    drop(shell.stdin.take());
+    shell.wait().expect("collecting the shell");
+    (leader, token, sleep)
+}
+
+/// `qex kill` leaves alone what an ended leader left when the leader, a zombie, has another
+/// start than the record names (#163).
+#[test]
+#[cfg(unix)]
+fn a_kill_leaves_alone_what_an_ended_leader_left_when_the_start_time_differs() {
+    let h = Harness::with_default_config("killzstart");
+    let (job, _supervisor, leftover) = h.zombie_leader_of_a_running_job();
+    h.plant_in_status(&job.id, |v| {
+        let token = v["pid_start_token"].as_u64().unwrap();
+        v["pid_start_token"] = serde_json::Value::from(token + 1);
+    });
+
+    // KILL: the leftover ignores TERM, so a TERM would leave it running on the base too.
+    let out = h.qex(&["kill", &job.id, "--signal", "KILL"]);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        Harness::runs(leftover.0),
+        "what the leader left must get no signal; kill exited {:?} and said: {}",
+        out.status.code(),
+        kill_said(&out)
+    );
+    assert_no_process_reply(&out);
+}
+
+/// `qex kill` still signals what an ended leader left while the leader is a zombie with the
+/// recorded start (#163).
+#[test]
+#[cfg(target_os = "linux")]
+fn a_kill_reaches_what_an_ended_leader_left_when_the_start_time_matches() {
+    let h = Harness::with_default_config("killzmatch");
+    let (job, _supervisor, leftover) = h.zombie_leader_of_a_running_job();
+    assert_eq!(
+        h.recorded_start(&job.id),
+        Harness::start_token(job.leader),
+        "the record names the zombie leader's start"
+    );
+
+    let out = h.qex(&["kill", &job.id, "--signal", "KILL"]);
+    Harness::poll_until("the leftover is killed", Duration::from_secs(10), || {
+        Harness::stopped(leftover.0)
+    });
+    assert_signalled_reply(&out);
+}
+
+/// `qex kill` still signals what a collected leader left when its group passes reap's check
+/// (#163).
+#[test]
+#[cfg(unix)]
+fn a_kill_reaches_what_a_collected_leader_left() {
+    let h = Harness::with_default_config("killgone");
+    let (id, _job) = h.running_sleep_job();
+    let (leader, token, sleep) = a_collected_leaders_group();
+    h.plant_in_status(&id, |v| {
+        v["pid"] = serde_json::Value::from(leader);
+        v["pid_start_token"] = serde_json::Value::from(token);
+    });
+    Harness::assert_a_collected_leaders_group(leader, sleep.0);
+    assert_eq!(
+        h.recorded_start(&id),
+        Some(token),
+        "the record names L's start"
+    );
+    assert!(
+        Harness::start_token(sleep.0).is_some_and(|t| t >= token),
+        "the sleep started no earlier than L"
+    );
+    #[cfg(target_os = "linux")]
+    assert_the_record_names_this_namespace(&h.record(&id));
+
+    let out = h.qex(&["kill", &id, "--signal", "KILL"]);
+    Harness::poll_until("the sleep is killed", Duration::from_secs(10), || {
+        !Harness::runs(sleep.0)
+    });
+    assert_signalled_reply(&out);
+}
+
+/// `qex kill` leaves alone a collected leader's group whose members the check could not verify,
+/// says so, and the coordinator log names the reason (#163).
+#[test]
+#[cfg(unix)]
+fn a_kill_leaves_alone_a_collected_leaders_group_it_cannot_verify() {
+    let h = Harness::with_default_config("killgonelater");
+    let (id, _job) = h.running_sleep_job();
+    let (leader, _, sleep) = a_collected_leaders_group();
+    let sleep_token = Harness::start_token(sleep.0).expect("the sleep's start token");
+    h.plant_in_status(&id, |v| {
+        v["pid"] = serde_json::Value::from(leader);
+        v["pid_start_token"] = serde_json::Value::from(sleep_token + 1);
+    });
+    Harness::assert_a_collected_leaders_group(leader, sleep.0);
+    assert!(
+        h.recorded_start(&id) > Some(sleep_token),
+        "the record names a start after the sleep's"
+    );
+    #[cfg(target_os = "linux")]
+    assert_the_record_names_this_namespace(&h.record(&id));
+
+    let out = h.qex(&["kill", &id, "--signal", "KILL"]);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        Harness::runs(sleep.0),
+        "the group must get no signal; kill exited {:?} and said: {}",
+        out.status.code(),
+        kill_said(&out)
+    );
+    assert_unconfirmed_reply(&out, &id);
+    let uuid: uuid::Uuid = id.parse().unwrap();
+    let line = format!(
+        "job {uuid}: qex leaves the process group {leader} alone: its member {} may have started \
+         before the job",
+        sleep.0
+    );
+    let lines = h.refusal_lines();
+    assert_eq!(
+        lines.iter().filter(|l| l.contains(&line)).count(),
+        1,
+        "one refusal line: {line}"
+    );
+}
+
+/// `qex kill` leaves alone group N when the job's leader runs with the recorded start but has
+/// moved to another group, says so, and the coordinator log says why (#163).
+#[test]
+#[cfg(unix)]
+fn a_kill_leaves_alone_a_group_whose_leader_left_it() {
+    let h = Harness::with_default_config("killleftgrp");
+    let file = h.root.join("sleep.pid");
+    let file_text = file.to_str().unwrap().to_string();
+    let job = h.submit_unheld_job(&[
+        "sh",
+        "-c",
+        r#"sleep 300 & echo $! > "$1"; exec "$2" leave-group sleep 300"#,
+        "sh",
+        &file_text,
+        TESTJOB,
+    ]);
+    let leader = Leftover(job.leader);
+    let sleep = h.leftover_in_group(&file, job.leader);
+    // The step runs after the `exec`, so the move comes a moment after the job starts.
+    Harness::poll_until(
+        "the leader leaves its group",
+        Duration::from_secs(30),
+        || (unsafe { libc::getpgid(leader.0) }) != leader.0,
+    );
+    let record = h.record(&job.id);
+    assert_eq!(
+        record["pid"].as_i64(),
+        Some(leader.0 as i64),
+        "the record names N"
+    );
+    assert!(
+        record["pid_start_token"].as_u64().is_some()
+            && record["pid_start_token"].as_u64() == Harness::start_token(leader.0),
+        "the record names the leader's start: {record}"
+    );
+    assert!(Harness::runs(leader.0), "the leader runs");
+    assert_eq!(
+        unsafe { libc::getpgid(sleep.0) },
+        leader.0,
+        "the sleep holds group N"
+    );
+    assert_eq!(unsafe { libc::killpg(leader.0, 0) }, 0, "group N exists");
+    assert!(Harness::runs(sleep.0), "the sleep runs");
+
+    let out = h.qex(&["kill", &job.id, "--signal", "KILL"]);
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(
+        Harness::runs(sleep.0),
+        "group N must get no signal; kill exited {:?} and said: {}",
+        out.status.code(),
+        kill_said(&out)
+    );
+    assert!(Harness::runs(leader.0), "the leader must get no signal");
+    assert_unconfirmed_reply(&out, &job.id);
+    let uuid: uuid::Uuid = job.id.parse().unwrap();
+    let n = leader.0;
+    let line = format!(
+        "job {uuid}: qex leaves the process group {n} alone: the job's leader {n} runs with the \
+         recorded start but leads another group"
+    );
+    let lines = h.refusal_lines();
+    assert_eq!(
+        lines.iter().filter(|l| l.contains(&line)).count(),
+        1,
+        "one line of kill's own: {line}"
     );
 }
 

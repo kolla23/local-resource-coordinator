@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests pass the clocks Coordinator::new now takes (issue #17); tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-11-13: qex kill checks the job's identity before its first signal, with reap's check for a leader that ended, and a second refusal for group members qex could not verify (issue #163).
 //! This module stops jobs and deletes job records.
 //!
 //! qex signals the process group of a job, and not the first process only. A
@@ -9,6 +10,7 @@ use crate::daemon::{log, Coordinator, State};
 use crate::job::{self, JobState, JobStatus};
 use crate::paths;
 use crate::proto::{AbortedJob, ErrorKind, Response};
+use crate::supervisor::LeftGroup;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -44,7 +46,7 @@ pub fn parse_signal(s: &str) -> Result<i32, String> {
 /// qex sends the first signal, waits for the grace time, then sends `KILL`.
 /// A job that handles `SIGTERM` can thus write its files before it stops.
 pub fn kill(coord: &Arc<Coordinator>, id: uuid::Uuid, signal: i32, grace_secs: u64) -> Response {
-    let (pid, pid_start) = {
+    let (pid, pid_start, pid_ns) = {
         let mut state = coord.state.lock().unwrap();
         // Read the status file first. The supervisor writes the process id
         // there, and this command needs that value to signal the job.
@@ -84,7 +86,11 @@ pub fn kill(coord: &Arc<Coordinator>, id: uuid::Uuid, signal: i32, grace_secs: u
         }
 
         match job.status.pid {
-            Some(p) => (p, job.status.pid_start_token),
+            Some(p) => (
+                p,
+                job.status.pid_start_token,
+                job.status.pid_ns.clone().zip(job.status.pid_ns_init_start),
+            ),
             None => {
                 return Response::error(
                     ErrorKind::WrongState,
@@ -107,6 +113,12 @@ pub fn kill(coord: &Arc<Coordinator>, id: uuid::Uuid, signal: i32, grace_secs: u
         crate::enforce::mark_user_kill(&dir);
     }
 
+    // The check sits directly before the signal: a pid in a record is not a name (#163).
+    let pid_ns = pid_ns.as_ref().map(|(ns, init)| (ns.as_str(), *init));
+    if let Some(refusal) = refusal_before_the_first_signal(id, pid, pid_start, pid_ns) {
+        return refusal;
+    }
+
     // Signal the process group. The supervisor put the job in its own group,
     // so this call reaches each child of the job.
     let sent = unsafe { libc::killpg(pid, signal) };
@@ -116,14 +128,7 @@ pub fn kill(coord: &Arc<Coordinator>, id: uuid::Uuid, signal: i32, grace_secs: u
             // There is no process in that group. The job stopped in the moment
             // before this command. Report that result. A message that says
             // "the job received the signal" would be false.
-            log(&format!("job {id} has no process; it stopped already"));
-            return Response::error(
-                ErrorKind::WrongState,
-                format!(
-                    "the job {id} has no process. It stopped in the moment before this \
-                     command. Read `qex status {id}` for the result."
-                ),
-            );
+            return no_process(id);
         }
         return Response::error(
             ErrorKind::Internal,
@@ -155,10 +160,7 @@ pub fn kill(coord: &Arc<Coordinator>, id: uuid::Uuid, signal: i32, grace_secs: u
                     .and_then(|j| j.status.pid)
             };
 
-            if pid_now == Some(pid)
-                && crate::sys::job_pid_alive(pid)
-                && crate::sys::same_process_start(pid, pid_start)
-            {
+            if pid_now == Some(pid) && the_job_leads_its_group(pid, pid_start) {
                 unsafe {
                     libc::killpg(pid, libc::SIGKILL);
                 }
@@ -170,6 +172,73 @@ pub fn kill(coord: &Arc<Coordinator>, id: uuid::Uuid, signal: i32, grace_secs: u
     }
 
     Response::Ok
+}
+
+/// The test of both of kill's signals: the job's leader runs, leads its group and has the start
+/// time that the record gives.
+fn the_job_leads_its_group(pid: i32, pid_start: Option<u64>) -> bool {
+    crate::sys::job_pid_alive(pid) && crate::sys::same_process_start(pid, pid_start)
+}
+
+/// Gives the refusal when group `pid` may not get kill's first signal, or `None`: a leader that
+/// is no longer the job leaves a signal only for what the job left, as reap decides it.
+fn refusal_before_the_first_signal(
+    id: uuid::Uuid,
+    pid: i32,
+    pid_start: Option<u64>,
+    pid_ns: Option<(&str, u64)>,
+) -> Option<Response> {
+    if the_job_leads_its_group(pid, pid_start) {
+        return None;
+    }
+    if the_leader_left_its_group(pid, pid_start) {
+        log(&format!(
+            "job {id}: qex leaves the process group {pid} alone: the job's leader {pid} runs \
+             with the recorded start but leads another group"
+        ));
+        return Some(unconfirmed(id));
+    }
+    match crate::supervisor::check_what_the_job_left(id, pid, pid_start, pid_ns) {
+        LeftGroup::TheJobs => None,
+        LeftGroup::Nothing => Some(no_process(id)),
+        LeftGroup::Unverified => Some(unconfirmed(id)),
+    }
+}
+
+/// Says yes for a live process at `pid`, not a zombie, with the recorded start, that leads
+/// another group than `pid`: the job's leader left its group.
+fn the_leader_left_its_group(pid: i32, pid_start: Option<u64>) -> bool {
+    if pid <= 0 || pid_start.is_none() || unsafe { libc::kill(pid, 0) } != 0 {
+        return false;
+    }
+    let group = unsafe { libc::getpgid(pid) };
+    !crate::sys::process_is_zombie(pid)
+        && crate::sys::same_process_start(pid, pid_start)
+        && group > 0
+        && group != pid
+}
+
+/// The refusal for a job with no process left in its group.
+fn no_process(id: uuid::Uuid) -> Response {
+    log(&format!("job {id} has no process; it stopped already"));
+    Response::error(
+        ErrorKind::WrongState,
+        format!(
+            "the job {id} has no process. It stopped in the moment before this \
+             command. Read `qex status {id}` for the result."
+        ),
+    )
+}
+
+/// The refusal for a group whose members qex could not verify as the job's.
+fn unconfirmed(id: uuid::Uuid) -> Response {
+    Response::error(
+        ErrorKind::WrongState,
+        format!(
+            "qex could not confirm that the processes left in the group of the job {id} are its \
+             own, so it sent no signal. The log of the coordinator says why."
+        ),
+    )
 }
 
 /// Deletes the record of one job.

@@ -7,6 +7,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-12: the rest of the grace after qex's TERM ends once the job's process group is empty (issue #139).
 // Modified by the local-resource-coordinator fork, 2026-11-12: reap releases the state lock while it signals the job's group and takes it again to write the record; a fault there ends the coordinator with the code 101, and a debug-only switch makes one for the tests (issue #140).
 // Modified by the local-resource-coordinator fork, 2026-11-13: log_without_panic is visible to the crate, for recovery's stop thread (issue #162).
+// Modified by the local-resource-coordinator fork, 2026-11-13: the check in kill_what_the_job_left is its own function with three verdicts, so qex kill uses it before its first signal (issue #163).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -407,23 +408,32 @@ pub(crate) fn stop_process_group(
     }
 }
 
-/// Sends SIGKILL to what a job left in its group once its leader ended: a zombie leader keeps the
-/// group id reserved, and a collected one leaves group N with pid N free (see `collected_group`).
-pub(crate) fn kill_what_the_job_left(
+/// What `check_what_the_job_left` found in the group of a job whose leader is no longer the job.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum LeftGroup {
+    /// The group holds only what the job left, so it may get a signal.
+    TheJobs,
+    /// No group of the job is left to signal: the number is held by another process, or the
+    /// group is empty.
+    Nothing,
+    /// The group has members that qex could not verify; the coordinator log says why.
+    Unverified,
+}
+
+/// Checks the group of a job whose leader ended: a zombie leader keeps the group id reserved, and
+/// a collected one leaves group N with pid N free (see `collected_group`).
+pub(crate) fn check_what_the_job_left(
     id: uuid::Uuid,
     pid: i32,
     recorded_start: Option<u64>,
     recorded_ns: Option<(&str, u64)>,
-) {
+) -> LeftGroup {
     if sys::zombie_group_leader(pid) && sys::same_process_start(pid, recorded_start) {
-        unsafe {
-            libc::killpg(pid, libc::SIGKILL);
-        }
-        return;
+        return LeftGroup::TheJobs;
     }
     // Pid N held (0 or EPERM) is the zombie case or another process, never a collected leader.
     if pid <= 0 || unsafe { libc::kill(pid, 0) } == 0 || !last_error_is(libc::ESRCH) {
-        return;
+        return LeftGroup::Nothing;
     }
     let verdict = if unsafe { libc::killpg(pid, 0) } == 0 {
         collected_group(pid, recorded_start, recorded_ns)
@@ -433,13 +443,29 @@ pub(crate) fn kill_what_the_job_left(
         Err("qex may signal none of its members".to_string())
     };
     match verdict {
-        Ok(true) => unsafe {
+        Ok(true) => LeftGroup::TheJobs,
+        Ok(false) => LeftGroup::Nothing,
+        Err(reason) => {
+            log(&format!(
+                "job {id}: qex leaves the process group {pid} alone: {reason}"
+            ));
+            LeftGroup::Unverified
+        }
+    }
+}
+
+/// Sends SIGKILL to what a job left in its group once its leader ended, when
+/// `check_what_the_job_left` finds the group the job's.
+pub(crate) fn kill_what_the_job_left(
+    id: uuid::Uuid,
+    pid: i32,
+    recorded_start: Option<u64>,
+    recorded_ns: Option<(&str, u64)>,
+) {
+    if check_what_the_job_left(id, pid, recorded_start, recorded_ns) == LeftGroup::TheJobs {
+        unsafe {
             libc::killpg(pid, libc::SIGKILL);
-        },
-        Ok(false) => {}
-        Err(reason) => log(&format!(
-            "job {id}: qex leaves the process group {pid} alone: {reason}"
-        )),
+        }
     }
 }
 
