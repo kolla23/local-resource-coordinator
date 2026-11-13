@@ -30,6 +30,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-12: the /proc helpers read bytes, and the two watcher tests stop their shell's process group on a failure too (issue #157).
 // Modified by the local-resource-coordinator fork, 2026-11-12: recovery and reap of a leader alone in its group, which TERM ends, finish without the rest of the grace (issue #139).
 // Modified by the local-resource-coordinator fork, 2026-11-12: tests that reap serves a command and takes a qex kill during its TERM wait, and that a fault there ends the coordinator with the code 101 and recovery finishes the job (issue #140).
+// Modified by the local-resource-coordinator fork, 2026-11-13: tests that recovery's TERM wait holds back no command (the first answer, an answer after the TERM, a kill, a dedupe re-run), that its stop hook runs after the failed record, and that a fault in its signal step ends the coordinator with the code 101 (issue #162).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -5900,6 +5901,244 @@ fn a_coordinator_killed_in_recoverys_term_wait_leaves_the_job_to_the_next_recove
     h.killed_in_term_wait_then_recovered(&job, leftover.0, stopped.pid, &line);
 }
 
+/// A recovered job that ignores TERM does not hold back the coordinator's first answer for the
+/// grace: the first command answers at once, and the job still ends failed and stopped (#162).
+#[test]
+#[cfg(unix)]
+fn recoverys_term_wait_does_not_delay_the_first_answer() {
+    let h = Harness::with_default_config("twfirst");
+    let job = h.submit_unheld_job(&["sh", "-c", "trap '' TERM; sleep 600"]);
+    // The hook copies the record on disk as it runs, so the test sees what it saw.
+    let copy = h.root.join("hook-record.json");
+    let mark = h.root.join("hook.txt");
+    h.write_config(&format!(
+        "[peers]\nenabled = false\n\
+         [budget]\ncpu = \"3\"\n\
+         [defaults]\nmem = \"256MB\"\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [hooks]\non_stop = [\"sh\", \"-c\", \
+         \"cp \\\"$QEX_JOB_DIR/status.json\\\" {}; echo \\\"$QEX_STATE\\\" >> {}\"]\n",
+        copy.display(),
+        mark.display()
+    ));
+    h.kill_coordinator_and_supervisor(&job);
+    assert!(Harness::runs(job.leader), "the leader runs");
+
+    let start = Instant::now();
+    let listed = h.qex(&["list"]);
+    let took = start.elapsed();
+    let on_disk = h.record(&job.id)["state"].clone();
+    eprintln!("restart-to-answer: {} ms", took.as_millis());
+    assert!(
+        Harness::runs(job.leader),
+        "the answer must come inside the grace, before the KILL"
+    );
+    assert_eq!(
+        on_disk, "running",
+        "the record is written only after the stop"
+    );
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&listed.stdout);
+    let row = stdout.lines().find(|l| l.starts_with(&job.id[..8]));
+    assert!(
+        row.is_some_and(|r| r.contains("running")),
+        "list shows the job running: {stdout}"
+    );
+    // The grace is 2 s: 1000 ms tells an answer after the TERM wait from one before it.
+    assert!(
+        took < Duration::from_millis(1000),
+        "the first answer must not wait out the grace: {took:?}"
+    );
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.status_json(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.contains("; qex stopped the job process"),
+        "recovery must stop the live job process: {error}"
+    );
+    Harness::poll_until("the leader is killed", Duration::from_secs(20), || {
+        !Harness::runs(job.leader)
+    });
+    h.until(
+        "the stop hook wrote its line",
+        Duration::from_secs(30),
+        || !h.hook_lines().is_empty(),
+    );
+    assert_eq!(
+        h.hook_lines(),
+        vec!["failed".to_string()],
+        "the coordinator runs the stop hook with the failed state"
+    );
+    assert_eq!(h.hook_origin(&job.id), "coordinator");
+    let seen: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&copy).unwrap()).unwrap();
+    assert_eq!(
+        seen["state"], "failed",
+        "the hook runs after the failed record is on disk: {seen}"
+    );
+}
+
+/// After the job got recovery's TERM, a command still answers inside the grace: the coordinator
+/// does not wait out the TERM wait of a job that ignores TERM (#162).
+#[test]
+#[cfg(unix)]
+fn recovery_answers_after_its_term_reached_the_job() {
+    let h = Harness::with_default_config("twterm");
+    let mark = h.root.join("term.txt");
+    let script = format!(
+        "trap '' TERM; sleep 600 & trap 'echo term >> {}' TERM; while :; do wait; done",
+        mark.display()
+    );
+    let job = h.submit_unheld_job(&["sh", "-c", &script]);
+    h.kill_coordinator_and_supervisor(&job);
+    assert!(Harness::runs(job.leader), "the leader runs");
+
+    h.qex(&["list"]);
+    Harness::poll_until("the job got the TERM", Duration::from_secs(20), || {
+        std::fs::read_to_string(&mark).is_ok_and(|t| t.contains("term"))
+    });
+    let start = Instant::now();
+    let listed = h.qex(&["list"]);
+    let took = start.elapsed();
+    let in_grace = Harness::runs(job.leader);
+    eprintln!("term-to-answer: {} ms", took.as_millis());
+    assert!(
+        in_grace,
+        "the answer must come inside the grace, before the KILL"
+    );
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert!(
+        took < Duration::from_millis(1000),
+        "a command in the TERM wait must not wait out the grace: {took:?}"
+    );
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    Harness::poll_until("the leader is killed", Duration::from_secs(20), || {
+        !Harness::runs(job.leader)
+    });
+}
+
+/// A `qex kill` that arrives while recovery waits out the grace for a leader that ignores TERM
+/// signals the group at once, and the record of recovery stays its own (#162).
+#[test]
+#[cfg(unix)]
+fn recovery_takes_a_kill_during_the_term_wait() {
+    let h = Harness::with_default_config("twkill");
+    let job = h.submit_unheld_job(&["sh", "-c", "trap '' TERM; sleep 600"]);
+    h.kill_coordinator_and_supervisor(&job);
+    assert!(Harness::runs(job.leader), "the leader runs");
+
+    let start = Instant::now();
+    let out = h.qex(&["kill", &job.id]);
+    let took = start.elapsed();
+    eprintln!("kill-during-recovery: {} ms", took.as_millis());
+    assert!(
+        Harness::runs(job.leader),
+        "the kill must return inside the grace, before the KILL"
+    );
+    assert!(
+        took < Duration::from_millis(1000),
+        "the TERM wait must not hold the kill: {took:?}"
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "kill must succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log")).unwrap();
+    let id: uuid::Uuid = job.id.parse().unwrap();
+    assert!(
+        log.contains(&format!("job {id} received the signal 15")),
+        "the kill must signal the group: {log}"
+    );
+
+    Harness::poll_until("the job is failed", Duration::from_secs(20), || {
+        h.record(&job.id)["state"].as_str() == Some("failed")
+    });
+    let error = h.record(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.starts_with(
+            "the coordinator stopped, and the supervisor of this job did not continue"
+        ) && error.contains("; qex stopped the job process"),
+        "the stop thread finishes with recovery's text after a kill: {error}"
+    );
+    Harness::poll_until("the leader is killed", Duration::from_secs(20), || {
+        !Harness::runs(job.leader)
+    });
+}
+
+/// A re-run with the key of a job that recovery stops gets that job's id while the job operates,
+/// and its wait ends with the failed state that the stop gives (#162).
+#[test]
+#[cfg(unix)]
+fn a_rerun_during_recoverys_term_wait_gets_the_lost_jobs_id() {
+    let h = Harness::with_default_config("twdedupe");
+    let id = h.submit(&[
+        "submit",
+        "--dedupe-key",
+        "rerun",
+        "--",
+        "sh",
+        "-c",
+        "trap '' TERM; sleep 600",
+    ]);
+    h.until("the job operates", Duration::from_secs(45), || {
+        let s = h.status_json(&id);
+        s["state"].as_str() == Some("running")
+            && s["supervisor_pid"].as_i64().is_some()
+            && s["pid"].as_i64().is_some()
+    });
+    let s = h.status_json(&id);
+    let job = UnheldJob {
+        leader: s["pid"].as_i64().unwrap() as i32,
+        supervisor: s["supervisor_pid"].as_i64().unwrap() as i32,
+        id,
+    };
+    h.kill_coordinator_and_supervisor(&job);
+    assert!(Harness::runs(job.leader), "the leader runs");
+
+    let start = Instant::now();
+    let rerun = h.submit(&["submit", "--dedupe-key", "rerun", "--", "true"]);
+    let in_grace = Harness::runs(job.leader);
+    eprintln!("restart-to-rerun: {} ms", start.elapsed().as_millis());
+    assert_eq!(
+        rerun, job.id,
+        "the re-run gets the id of the job that still operates"
+    );
+    assert!(
+        in_grace,
+        "the re-run must come inside the grace, before the KILL"
+    );
+    let waited = h.qex(&["wait", &rerun]);
+    assert_eq!(
+        waited.status.code(),
+        Some(121),
+        "the wait ends with the failure"
+    );
+    assert_eq!(h.state_of(&rerun), "failed");
+    Harness::poll_until("the leader is killed", Duration::from_secs(20), || {
+        !Harness::runs(job.leader)
+    });
+}
+
 /// A coordinator killed in reap's TERM wait leaves the job to the next recovery, which fails it
 /// and kills what the collected leader left (#143).
 #[test]
@@ -6060,11 +6299,14 @@ fn recovery_ends_the_term_wait_once_the_group_is_empty() {
     h.kill_coordinator_and_supervisor(&job);
     assert!(!Harness::stopped(job.leader), "the leader runs");
 
-    // Recovery runs before the coordinator serves, so this command waits for it.
+    // The first command starts recovery; the record comes when recovery's signal step ends.
     let start = Instant::now();
     h.qex(&["list"]);
+    Harness::poll_until("the job is failed", Duration::from_secs(20), || {
+        h.record(&job.id)["state"].as_str() == Some("failed")
+    });
     let took = start.elapsed();
-    eprintln!("recovery-to-served: {} ms", took.as_millis());
+    eprintln!("recovery-to-failed: {} ms", took.as_millis());
     Harness::poll_until("the leader is stopped", Duration::from_secs(20), || {
         Harness::stopped(job.leader)
     });
