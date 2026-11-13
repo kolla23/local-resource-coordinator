@@ -6,6 +6,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: once the system collected a job's leader, recovery and reap check every member of its group before the SIGKILL; after qex's TERM the group gets the rest of the grace; a refused group gets one log line; the record's pid_ns and pid_ns_init_start, written with the pid, must name this pid namespace (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-12: the rest of the grace after qex's TERM ends once the job's process group is empty (issue #139).
 // Modified by the local-resource-coordinator fork, 2026-11-12: reap releases the state lock while it signals the job's group and takes it again to write the record; a fault there ends the coordinator with the code 101, and a debug-only switch makes one for the tests (issue #140).
+// Modified by the local-resource-coordinator fork, 2026-11-13: log_without_panic is visible to the crate, for recovery's stop thread (issue #162).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -334,7 +335,7 @@ const PANIC_IN_SIGNAL_STEP: &str = "QEX_TEST_PANIC_IN_REAP_SIGNAL_STEP";
 
 /// Writes a line as `daemon::log` does, but ignores a failed write: println! panics then, and
 /// these lines run where a panic would skip the exit or poison the state lock.
-fn log_without_panic(message: &str) {
+pub(crate) fn log_without_panic(message: &str) {
     use std::io::Write as _;
     let mut out = std::io::stdout();
     let _ = writeln!(out, "[{}] {message}", sys::now_secs());

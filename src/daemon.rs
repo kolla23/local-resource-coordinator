@@ -7,6 +7,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: recovery skips a record whose ids differ from its folder's name, and its second read keeps the checked record when the disk one names another job (issue #135).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the start makes the socket directory again when a sweep deleted it after its mkdir or before the pid lock, and a debug-only pause tests it (issue #132).
 // Modified by the local-resource-coordinator fork, 2026-11-03: recovery passes the job id and the record's pid namespace to stop_process_group and kill_what_the_job_left, which also handle a collected leader, and clears it with the pid (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-13: recovery stops a job that lost its supervisor on a thread of its own, so the first answer does not wait for the TERM grace, and writes the failed record when the stop ends; a fault there ends the coordinator with the code 101, and a debug-only switch makes one for the tests (issue #162).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1642,7 +1643,7 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                     status.id
                 ));
                 crate::hook::fire_detached(&path, &status);
-            } else if job_alive(&status) {
+            } else if let Some(pid) = status.pid.filter(|_| job_alive(&status)) {
                 // The supervisor is gone, and the job process continues. No
                 // process will ever write the result: the supervisor was the
                 // parent of the job, and the exit code of the job goes to that
@@ -1660,29 +1661,12 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                 if let Some(text) = crate::supervisor::supervisor_log_tail(&path) {
                     note.push_str(&format!(". The supervisor said: {text}"));
                 }
-                if let Some(pid) = status.pid {
-                    log(&format!(
-                        "job {} lost its supervisor, and the job process {pid} \
-                         continues; qex stops the job now",
-                        status.id
-                    ));
-                    crate::supervisor::stop_process_group(
-                        status.id,
-                        pid,
-                        status.pid_start_token,
-                        status.pid_ns.as_deref().zip(status.pid_ns_init_start),
-                    );
-                    note.push_str("; qex stopped the job process");
-                }
-                status.state = JobState::Failed;
-                status.finished_at = Some(sys::now_secs());
-                status.blocked_reason = None;
-                status.error = Some(note);
-                retire_the_pids(&mut status);
-                job::write_status(&path, &status).ok();
-                // This coordinator made the job terminal, so this coordinator
-                // tells the person. The supervisor is gone and cannot.
-                crate::hook::fire_detached(&path, &status);
+                // The stop can take the whole TERM grace, so it runs off the startup path, and
+                // the job stays active until it ends (#162).
+                let coord2 = Arc::clone(coord);
+                let (id, dir, start) = (status.id, path.clone(), status.pid_start_token);
+                let ns = status.pid_ns.clone().zip(status.pid_ns_init_start);
+                std::thread::spawn(move || stop_lost_job(coord2, id, dir, pid, start, ns, note));
             } else if requeue_unstarted(&mut status, supervisor_was_recorded) {
                 // `starting` is written before the supervisor creates the job
                 // process. With neither process alive and no job pid ever
@@ -1816,6 +1800,74 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Names the variable that makes recovery's signal step fail. **This variable exists for the
+/// tests of qex**, and a release build does not read it.
+#[cfg(debug_assertions)]
+const PANIC_IN_RECOVERY_SIGNAL_STEP: &str = "QEX_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP";
+
+/// Stops the group of a job that recovery found without its supervisor, then fails the job, as
+/// `supervisor::reap` does; recovery runs it on a thread, so the grace holds back no answer.
+fn stop_lost_job(
+    coord: Arc<Coordinator>,
+    id: uuid::Uuid,
+    dir: std::path::PathBuf,
+    pid: i32,
+    start: Option<u64>,
+    ns: Option<(String, u64)>,
+    note: String,
+) {
+    let outcome = std::panic::catch_unwind(move || {
+        log(&format!(
+            "job {id} lost its supervisor, and the job process {pid} \
+             continues; qex stops the job now"
+        ));
+        // A test of qex makes the signal step fail here; a release build has no switch.
+        #[cfg(debug_assertions)]
+        if std::env::var_os(PANIC_IN_RECOVERY_SIGNAL_STEP).is_some() {
+            panic!("{PANIC_IN_RECOVERY_SIGNAL_STEP} is set: recovery's signal step fails here");
+        }
+        let ns = ns.as_ref().map(|(ns, init)| (ns.as_str(), *init));
+        crate::supervisor::stop_process_group(id, pid, start, ns);
+        note + "; qex stopped the job process"
+    });
+    let note = match outcome {
+        Ok(note) => note,
+        // A fault here must not leave the job active with its claim: end the coordinator, so
+        // the next recovery fails the job and stops what it left.
+        Err(_) => {
+            crate::supervisor::log_without_panic(&format!(
+                "job {id}: a fault in qex ended recovery's signal step; the coordinator stops \
+                 now, and the next coordinator's recovery fails the job and stops what it left"
+            ));
+            unsafe { libc::_exit(101) }
+        }
+    };
+
+    let mut state = coord.state.lock().unwrap();
+    match state.jobs.get_mut(&id) {
+        Some(job) if job.status.state.is_active() => {
+            job.status.state = JobState::Failed;
+            job.status.finished_at = Some(sys::now_secs());
+            job.status.blocked_reason = None;
+            job.status.error = Some(note);
+            retire_the_pids(&mut job.status);
+            let status = job.status.clone();
+            job::write_status(&dir, &status).ok();
+            // This coordinator made the job terminal, so this coordinator
+            // tells the person. The supervisor is gone and cannot.
+            crate::hook::fire_detached(&dir, &status);
+            state.publish_changes();
+        }
+        Some(job) => crate::supervisor::log_without_panic(&format!(
+            "job {id} is {} once recovery's signal step ended, so recovery leaves its record alone",
+            job.status.state.as_str()
+        )),
+        None => {}
+    }
+    drop(state);
+    coord.notify();
 }
 
 /// Tests if a file was written in the current start of the machine.
