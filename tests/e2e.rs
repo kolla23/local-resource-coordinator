@@ -6139,6 +6139,83 @@ fn a_rerun_during_recoverys_term_wait_gets_the_lost_jobs_id() {
     });
 }
 
+/// A fault in recovery's signal step ends the coordinator with the code 101 and leaves the
+/// record `running`; the next coordinator fails the job and stops its group (#162).
+#[test]
+#[cfg(unix)]
+fn a_fault_in_recoverys_signal_step_ends_the_coordinator_and_the_next_recovery_finishes_the_job() {
+    // The switch that makes the signal step fail exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to fail recovery's signal step");
+        return;
+    }
+    let mut h = Harness::with_default_config("recfault");
+    let (job, leftover) = h.unheld_leftover_job();
+    h.kill_coordinator_and_supervisor(&job);
+    assert!(Harness::runs(job.leader), "the leader runs");
+
+    h.extra_env
+        .push(("QEX_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP".into(), "1".into()));
+    let log_path = h.root.join("coordinator.log");
+    let log = std::fs::File::create(&log_path).unwrap();
+    let mut daemon = h
+        .command(&["daemon"])
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .spawn()
+        .expect("qex daemon did not start");
+    let mut status = None;
+    Harness::poll_until("the coordinator ends", Duration::from_secs(30), || {
+        status = daemon.try_wait().ok().flatten();
+        status.is_some()
+    });
+    let text = std::fs::read_to_string(&log_path).unwrap_or_default();
+    assert_eq!(
+        status.and_then(|s| s.code()),
+        Some(101),
+        "the fault must end the coordinator with 101: {status:?}: {text}"
+    );
+    let id: uuid::Uuid = job.id.parse().unwrap();
+    let term_line = format!(
+        "job {id} lost its supervisor, and the job process {} continues; qex stops the job now",
+        job.leader
+    );
+    let term_at = text.find(&term_line);
+    let panic_at = text.find("QEX_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP is set");
+    let fault_at = text.find(&format!(
+        "job {id}: a fault in qex ended recovery's signal step"
+    ));
+    assert!(
+        term_at.is_some() && term_at < panic_at && panic_at < fault_at,
+        "the log must hold the TERM line, the panic and the fault line, in order: {text}"
+    );
+    assert_eq!(h.record(&job.id)["state"].as_str(), Some("running"));
+    assert!(
+        Harness::runs(job.leader) && Harness::runs(leftover.0),
+        "the fault came before the TERM, and the exit sent no signal"
+    );
+
+    // The next coordinator, without the variable.
+    h.extra_env.clear();
+    h.until("the job is failed", Duration::from_secs(30), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let error = h.record(&job.id)["error"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        error.starts_with(
+            "the coordinator stopped, and the supervisor of this job did not continue"
+        ) && error.contains("; qex stopped the job process"),
+        "the next recovery must stop the live job process: {error}"
+    );
+    assert_eq!(h.refusals_of(&job.id, job.leader), 0);
+    Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
+        Harness::stopped(leftover.0)
+    });
+}
+
 /// A coordinator killed in reap's TERM wait leaves the job to the next recovery, which fails it
 /// and kills what the collected leader left (#143).
 #[test]
