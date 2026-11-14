@@ -8,7 +8,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-12: reap releases the state lock while it signals the job's group and takes it again to write the record; a fault there ends the coordinator with the code 101, and a debug-only switch makes one for the tests (issue #140).
 // Modified by the local-resource-coordinator fork, 2026-11-13: log_without_panic is visible to the crate, for recovery's stop thread (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-13: the check in kill_what_the_job_left is its own function with three verdicts, so qex kill uses it before its first signal (issue #163).
-// Modified by the local-resource-coordinator fork, 2026-11-13: a debug-only pause before kill_what_the_job_left's check, for the tests (issue #162).
+// Modified by the local-resource-coordinator fork, 2026-11-13: a debug-only pause before kill_what_the_job_left's check, for the tests, and group_has_no_process, recovery's probe (issue #162).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -482,6 +482,12 @@ pub(crate) fn kill_what_the_job_left(
             libc::killpg(pid, libc::SIGKILL);
         }
     }
+}
+
+/// Says that group `pid` holds no process, with one call and no member scan, so recovery can
+/// fail such a job before it serves; a group it may not probe counts as holding one.
+pub(crate) fn group_has_no_process(pid: i32) -> bool {
+    pid <= 0 || (unsafe { libc::killpg(pid, 0) } != 0 && last_error_is(libc::ESRCH))
 }
 
 /// Checks group N of a collected leader: neither Linux nor macOS gives number N to a new process
