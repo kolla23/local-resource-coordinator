@@ -8,6 +8,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: the start makes the socket directory again when a sweep deleted it after its mkdir or before the pid lock, and a debug-only pause tests it (issue #132).
 // Modified by the local-resource-coordinator fork, 2026-11-03: recovery passes the job id and the record's pid namespace to stop_process_group and kill_what_the_job_left, which also handle a collected leader, and clears it with the pid (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-13: recovery stops a job that lost its supervisor on a thread of its own, so the first answer does not wait for the TERM grace, and writes the failed record when the stop ends; a fault there ends the coordinator with the code 101, and a debug-only switch makes one for the tests (issue #162).
+// Modified by the local-resource-coordinator fork, 2026-11-13: recovery kills what a job with an ended leader left in its group on the stop thread, so the first answer does not wait for the member scan; a job whose group holds no process is failed at once, with no call (issue #162).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -1666,7 +1667,9 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                 let coord2 = Arc::clone(coord);
                 let (id, dir, start) = (status.id, path.clone(), status.pid_start_token);
                 let ns = status.pid_ns.clone().zip(status.pid_ns_init_start);
-                std::thread::spawn(move || stop_lost_job(coord2, id, dir, pid, start, ns, note));
+                let leader = (pid, start, ns);
+                let mode = LostLeader::Runs;
+                std::thread::spawn(move || stop_lost_job(coord2, id, dir, leader, mode, note));
             } else if requeue_unstarted(&mut status, supervisor_was_recorded) {
                 // `starting` is written before the supervisor creates the job
                 // process. With neither process alive and no job pid ever
@@ -1678,6 +1681,21 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                     "job {} lost its supervisor before its process started; it is in the queue again",
                     status.id
                 ));
+            } else if let Some(pid) = status
+                .pid
+                .filter(|&pid| same_boot && !crate::supervisor::group_has_no_process(pid))
+            {
+                // The check of what the job left can list every process, so it runs off the
+                // startup path, and the job stays active until it ends (#162).
+                let note = String::from(
+                    "the coordinator stopped, and neither the job nor its supervisor continued",
+                );
+                let coord2 = Arc::clone(coord);
+                let (id, dir, start) = (status.id, path.clone(), status.pid_start_token);
+                let ns = status.pid_ns.clone().zip(status.pid_ns_init_start);
+                let leader = (pid, start, ns);
+                let mode = LostLeader::Ended;
+                std::thread::spawn(move || stop_lost_job(coord2, id, dir, leader, mode, note));
             } else {
                 status.state = JobState::Failed;
                 status.finished_at = Some(sys::now_secs());
@@ -1693,15 +1711,6 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                      continued"
                         .to_string()
                 });
-                // A job process of this start, zombie or collected, can leave a group: kill it.
-                if let Some(pid) = status.pid.filter(|_| same_boot) {
-                    crate::supervisor::kill_what_the_job_left(
-                        status.id,
-                        pid,
-                        status.pid_start_token,
-                        status.pid_ns.as_deref().zip(status.pid_ns_init_start),
-                    );
-                }
                 retire_the_pids(&mut status);
                 job::write_status(&path, &status).ok();
                 log(&format!(
@@ -1807,30 +1816,49 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
 #[cfg(debug_assertions)]
 const PANIC_IN_RECOVERY_SIGNAL_STEP: &str = "QEX_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP";
 
-/// Stops the group of a job that recovery found without its supervisor, then fails the job, as
-/// `supervisor::reap` does; recovery runs it on a thread, so the grace holds back no answer.
+/// What recovery found of the leader of a job that lost its supervisor.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LostLeader {
+    /// The leader runs, so its group gets the TERM and the grace.
+    Runs,
+    /// The leader ended, and its group may hold what the job left.
+    Ended,
+}
+
+/// Stops the group of a job that recovery found without its supervisor, or kills what it left,
+/// then fails the job, as `supervisor::reap` does; on a thread, so the stop holds back no answer.
 fn stop_lost_job(
     coord: Arc<Coordinator>,
     id: uuid::Uuid,
     dir: std::path::PathBuf,
-    pid: i32,
-    start: Option<u64>,
-    ns: Option<(String, u64)>,
+    leader: (i32, Option<u64>, Option<(String, u64)>),
+    mode: LostLeader,
     note: String,
 ) {
     let outcome = std::panic::catch_unwind(move || {
-        log(&format!(
-            "job {id} lost its supervisor, and the job process {pid} \
-             continues; qex stops the job now"
-        ));
+        let (pid, start, ns) = leader;
+        if mode == LostLeader::Runs {
+            log(&format!(
+                "job {id} lost its supervisor, and the job process {pid} \
+                 continues; qex stops the job now"
+            ));
+        }
         // A test of qex makes the signal step fail here; a release build has no switch.
         #[cfg(debug_assertions)]
         if std::env::var_os(PANIC_IN_RECOVERY_SIGNAL_STEP).is_some() {
             panic!("{PANIC_IN_RECOVERY_SIGNAL_STEP} is set: recovery's signal step fails here");
         }
         let ns = ns.as_ref().map(|(ns, init)| (ns.as_str(), *init));
-        crate::supervisor::stop_process_group(id, pid, start, ns);
-        note + "; qex stopped the job process"
+        match mode {
+            LostLeader::Runs => {
+                crate::supervisor::stop_process_group(id, pid, start, ns);
+                note + "; qex stopped the job process"
+            }
+            LostLeader::Ended => {
+                crate::supervisor::kill_what_the_job_left(id, pid, start, ns);
+                note
+            }
+        }
     });
     let note = match outcome {
         Ok(note) => note,
@@ -1855,6 +1883,11 @@ fn stop_lost_job(
             retire_the_pids(&mut job.status);
             let status = job.status.clone();
             job::write_status(&dir, &status).ok();
+            if mode == LostLeader::Ended {
+                crate::supervisor::log_without_panic(&format!(
+                    "job {id} was active but its processes are gone; the state is now failed"
+                ));
+            }
             // This coordinator made the job terminal, so this coordinator
             // tells the person. The supervisor is gone and cannot.
             crate::hook::fire_detached(&dir, &status);

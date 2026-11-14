@@ -8,6 +8,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-12: reap releases the state lock while it signals the job's group and takes it again to write the record; a fault there ends the coordinator with the code 101, and a debug-only switch makes one for the tests (issue #140).
 // Modified by the local-resource-coordinator fork, 2026-11-13: log_without_panic is visible to the crate, for recovery's stop thread (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-13: the check in kill_what_the_job_left is its own function with three verdicts, so qex kill uses it before its first signal (issue #163).
+// Modified by the local-resource-coordinator fork, 2026-11-13: a debug-only pause before kill_what_the_job_left's check, for the tests, and group_has_no_process, recovery's probe (issue #162).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can
@@ -454,6 +455,11 @@ pub(crate) fn check_what_the_job_left(
     }
 }
 
+/// Pauses `kill_what_the_job_left` before its check, in milliseconds. **This variable exists for
+/// the tests of qex**, and a release build does not read it.
+#[cfg(debug_assertions)]
+const PAUSE_BEFORE_LEFTOVER_KILL: &str = "QEX_TEST_PAUSE_BEFORE_LEFTOVER_KILL_MS";
+
 /// Sends SIGKILL to what a job left in its group once its leader ended, when
 /// `check_what_the_job_left` finds the group the job's.
 pub(crate) fn kill_what_the_job_left(
@@ -462,11 +468,26 @@ pub(crate) fn kill_what_the_job_left(
     recorded_start: Option<u64>,
     recorded_ns: Option<(&str, u64)>,
 ) {
+    // A test makes the check slow here, as a hung `ps` does on macOS (#164); `qex kill` runs the
+    // check without this function, so its own check is not paused.
+    #[cfg(debug_assertions)]
+    if let Some(ms) = std::env::var(PAUSE_BEFORE_LEFTOVER_KILL)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        std::thread::sleep(Duration::from_millis(ms));
+    }
     if check_what_the_job_left(id, pid, recorded_start, recorded_ns) == LeftGroup::TheJobs {
         unsafe {
             libc::killpg(pid, libc::SIGKILL);
         }
     }
+}
+
+/// Says that group `pid` holds no process, with one call and no member scan, so recovery can
+/// fail such a job before it serves; a group it may not probe counts as holding one.
+pub(crate) fn group_has_no_process(pid: i32) -> bool {
+    pid <= 0 || (unsafe { libc::killpg(pid, 0) } != 0 && last_error_is(libc::ESRCH))
 }
 
 /// Checks group N of a collected leader: neither Linux nor macOS gives number N to a new process
