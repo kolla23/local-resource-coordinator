@@ -5,6 +5,8 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: once the system collected a job's leader, recovery and reap check every member of its group before the SIGKILL; after qex's TERM the group gets the rest of the grace; a refused group gets one log line; the record's pid_ns and pid_ns_init_start, written with the pid, must name this pid namespace (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-12: the rest of the grace after qex's TERM ends once the job's process group is empty (issue #139).
+// Modified by the local-resource-coordinator fork, 2026-11-14: a debug-only pause before the time limit's TERM, for the tests (issue #171).
+// Modified by the local-resource-coordinator fork, 2026-11-14: the time limit's TERM and KILL go to the job's group only while the job's pid is unreaped (issue #171).
 // Modified by the local-resource-coordinator fork, 2026-11-12: reap releases the state lock while it signals the job's group and takes it again to write the record; a fault there ends the coordinator with the code 101, and a debug-only switch makes one for the tests (issue #140).
 // Modified by the local-resource-coordinator fork, 2026-11-13: log_without_panic is visible to the crate, for recovery's stop thread (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-13: the check in kill_what_the_job_left is its own function with three verdicts, so qex kill uses it before its first signal (issue #163).
@@ -460,6 +462,11 @@ pub(crate) fn check_what_the_job_left(
 #[cfg(debug_assertions)]
 const PAUSE_BEFORE_LEFTOVER_KILL: &str = "QEX_TEST_PAUSE_BEFORE_LEFTOVER_KILL_MS";
 
+/// Pauses the time limit's timer before its TERM, in milliseconds. **This variable exists for the
+/// tests of qex**, and a release build does not read it.
+#[cfg(debug_assertions)]
+const PAUSE_BEFORE_TIMER_TERM: &str = "QEX_TEST_PAUSE_BEFORE_TIMER_TERM_MS";
+
 /// Sends SIGKILL to what a job left in its group once its leader ended, when
 /// `check_what_the_job_left` finds the group the job's.
 pub(crate) fn kill_what_the_job_left(
@@ -481,6 +488,26 @@ pub(crate) fn kill_what_the_job_left(
         unsafe {
             libc::killpg(pid, libc::SIGKILL);
         }
+    }
+}
+
+/// Sends `signal` to group `pid` from the time limit's timer, with `released` held and only while
+/// it reads false: until then the job's pid is unreaped, so group `pid` is the job's (#171).
+fn signal_unless_released(released: &std::sync::Mutex<bool>, pid: i32, signal: i32) {
+    // A poisoned lock counts as released.
+    if let Ok(done) = released.lock() {
+        if !*done {
+            unsafe {
+                libc::killpg(pid, signal);
+            }
+        }
+    }
+}
+
+/// Tells the time limit's timer that the job's pid is no longer proven reserved.
+fn mark_released(released: &std::sync::Mutex<bool>) {
+    if let Ok(mut done) = released.lock() {
+        *done = true;
     }
 }
 
@@ -882,9 +909,12 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     // Each side thus changes the value from RACE_OPEN with one atomic
     // operation. One side only can win.
     let outcome = Arc::new(std::sync::atomic::AtomicU8::new(RACE_OPEN));
+    // True once the job's pid is no longer proven reserved; the timer reads it under the lock.
+    let released = Arc::new(std::sync::Mutex::new(false));
 
     if let Some(limit) = spec.timeout {
         let outcome = Arc::clone(&outcome);
+        let released = Arc::clone(&released);
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(limit));
 
@@ -901,15 +931,19 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
             {
                 return;
             }
+            // A test holds the timer here, after it took the race and before its TERM.
+            #[cfg(debug_assertions)]
+            if let Some(ms) = std::env::var(PAUSE_BEFORE_TIMER_TERM)
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+            {
+                std::thread::sleep(Duration::from_millis(ms));
+            }
 
             // Signal the process group, so each child of the job stops.
-            unsafe {
-                libc::killpg(pid, libc::SIGTERM);
-            }
+            signal_unless_released(&released, pid, libc::SIGTERM);
             std::thread::sleep(Duration::from_secs(10));
-            unsafe {
-                libc::killpg(pid, libc::SIGKILL);
-            }
+            signal_unless_released(&released, pid, libc::SIGKILL);
         });
     }
 
@@ -924,6 +958,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     let reserved = match wait_without_reaping(pid) {
         Ok(()) => true,
         Err(e) => {
+            mark_released(&released);
             log(&format!(
                 "the wait for the job {id} (pid {pid}) failed: {e}. qex sends no signal to that \
                  process group, because the machine can give that pid to another process."
@@ -957,7 +992,8 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     // the state and says what it cannot prove.
     oom_watch.record(&dir);
 
-    // Release the process id. Each signal above is complete.
+    // Release the process id. Each signal above is complete, and the timer sends no more.
+    mark_released(&released);
     let exit = child.wait().context("waiting for the job")?;
 
     // Complete the copy of each stream. Each process of the job stopped, so
