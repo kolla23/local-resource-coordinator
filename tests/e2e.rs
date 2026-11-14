@@ -3725,7 +3725,7 @@ echo free=yes
 t=0; d=
 while [ $t -lt 3 ]; do
   echo $((n - 1)) > /proc/sys/kernel/ns_last_pid
-  setsid sleep 60 &
+  setsid env --default-signal=TERM sleep 60 &
   d=$!
   [ "$d" = "$n" ] && break
   kill -9 "$d"; wait "$d" 2>/dev/null; t=$((t+1))
