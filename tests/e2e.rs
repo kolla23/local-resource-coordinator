@@ -3710,6 +3710,7 @@ echo 299 > /proc/sys/kernel/ns_last_pid || { echo "probe=no: ns_last_pid"; exit 
 p=$(sh -c 'echo $$')
 [ "$p" = 300 ] || { echo "probe=no: the forced pid is $p"; exit 0; }
 echo probe=ok
+echo "sigign=$(sed -n 's/^SigIgn:[[:space:]]*//p' /proc/self/status)"
 id=$("$q" submit --timeout 1s -- "$@") || { echo "submit=failed"; exit 0; }
 dir="$XDG_STATE_HOME/qex/jobs/$id"
 i=0; while [ ! -e "$dir/hook-started" ] && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done
@@ -3830,7 +3831,9 @@ fn check_the_freed_pid(r: &std::collections::HashMap<String, String>, field: &st
 #[test]
 fn the_time_limits_kill_spares_a_new_group_on_the_jobs_freed_pid() {
     let h = Harness::new("timerfreedkill", FREED_PID_CONFIG);
-    let r = run_the_freed_pid_driver(&h, "12", &["sleep", "60"]);
+    // The job must end on the TERM, before the reap; on CI's ubuntu-22.04 a plain sleep outlived it.
+    let job = ["env", "--default-signal=TERM", "sleep", "60"];
+    let r = run_the_freed_pid_driver(&h, "12", &job);
     check_the_freed_pid(&r, "signal", 15);
     let out = &r["output"];
     let sup = r.get("supervisor").map(String::as_str).unwrap_or("");

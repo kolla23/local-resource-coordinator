@@ -11,6 +11,8 @@
 # runs the Stop hook's test and shellcheck.
 # Modified by the local-resource-coordinator fork, 2026-11-10: the macOS
 # comment names macos-15 (GitHub retired the macos-14 runner).
+# Modified by the local-resource-coordinator fork, 2026-11-14: the ubuntu-24.04
+# Test leg allows unprivileged user namespaces before the e2e step (issue #171).
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -141,6 +143,10 @@ jobs:
       # The end-to-end tests start real processes, and a coordinator makes a
       # decision from the load of the machine. Two of these tests together on a
       # shared machine change that load, so they run two at a time at the most.
+      # Ubuntu 24.04's AppArmor refuses the user namespaces that two e2e tests need (#171).
+      - name: Allow unprivileged user namespaces
+        if: matrix.os == 'ubuntu-24.04'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: The end-to-end tests
         run: cargo test --features test-fixtures --test e2e -- --test-threads=2
 
