@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the hook.log that `note` makes, and the doc of `note` says so (R3 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-11-01: run and note set 0600 on a hook.log that exists, with a unit test; a test comment no longer says run opened no file (issue #56).
 // Modified by the local-resource-coordinator fork, 2026-11-02: run and note open hook.log with O_NOFOLLOW (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-14: a failed test of the hook's state sends no signal to its group, and its verdict says so; a debug-only test switch reaps the hook before that test (issue #178).
 //! This module runs the command that qex starts when a job stops.
 //!
 //! The hook is a property of the machine and of the person at it, and not a
@@ -76,6 +77,11 @@ const END_OF_A_HOOK: Duration = Duration::from_secs(10);
 
 /// The name of the file that holds the output of the hook.
 const LOG_FILE: &str = "hook.log";
+
+/// Reaps the hook before the test of its state, then pauses, in milliseconds. **This variable
+/// exists for the tests of qex**, and a release build does not read it.
+#[cfg(debug_assertions)]
+const REAP_HOOK_BEFORE_ITS_TEST: &str = "QEX_TEST_REAP_HOOK_BEFORE_ITS_TEST_MS";
 
 /// The time that a hook gets after `TERM` and before `KILL`.
 const GRACE: Duration = Duration::from_secs(2);
@@ -452,6 +458,18 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
     let cut_seen = cut_flag.clone();
     let copier = std::thread::spawn(move || capture(reader, out, &cut_seen));
 
+    // A test reaps the hook here, as another reaper would, so the test of its state fails (#178).
+    #[cfg(debug_assertions)]
+    if let Some(ms) = std::env::var(REAP_HOOK_BEFORE_ITS_TEST)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        unsafe {
+            libc::waitpid(pid, std::ptr::null_mut(), 0);
+        }
+        std::thread::sleep(Duration::from_millis(ms));
+    }
+
     // Wait for the hook. Stop it at the time limit, and stop it also when its
     // output goes above the size limit.
     let deadline = start + limit;
@@ -463,11 +481,6 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
             Ok(Some(_)) => break,
             Ok(None) => {}
             Err(e) => {
-                // qex cannot tell if the hook stopped, so it stops the hook.
-                // A process that qex cannot see must not stay on the machine.
-                unsafe {
-                    libc::killpg(pid, libc::SIGKILL);
-                }
                 // TAKE THE DEAD PROCESS OUT OF THE PROCESS TABLE.
                 //
                 // `Child` does not do this when it is dropped, so a return
@@ -479,10 +492,13 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
                 //
                 // The `wait` is safe HERE and not in `stop`. There, a second
                 // signal follows, and a `wait` before it would let the machine
-                // give the same number to a different process. Here the signal
-                // is already sent and no other follows.
+                // give the same number to a different process. Here no signal is sent at all: the
+                // failed wait leaves the pid unproven, as in `wait_without_reaping` (#178).
                 child.wait().ok();
-                return Ok(format!("gave an error at a test of its state: {e}"));
+                return Ok(format!(
+                    "gave an error at a test of its state: {e}. qex sent no signal to its process \
+                     group, because the system can give that pid to another process."
+                ));
             }
         }
 
