@@ -33,6 +33,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-13: tests that recovery's TERM wait holds back no command (the first answer, an answer after the TERM, a kill, a dedupe re-run), that its stop hook runs after the failed record, and that a fault in its signal step ends the coordinator with the code 101 (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-13: six tests for the identity check before qex kill's first signal: a decoy, a zombie leader of another or the recorded start, a collected leader's group that passes or fails reap's check, and a leader that left its group (issue #163).
 // Modified by the local-resource-coordinator fork, 2026-11-13: tests that recovery's check of what a job with an ended leader left holds back no command (the first answer, a kill that signals or refuses, a dedupe re-run), and that a lost job with an empty group is failed at the first answer (issue #162).
+// Modified by the local-resource-coordinator fork, 2026-11-14: three tests of the time limit's signals: its KILL still ends a job that ignores TERM, and its TERM and KILL spare a new group on the job's freed pid, forced in a user and pid namespace (issue #171).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -3668,6 +3669,206 @@ fn a_job_that_reaches_its_time_limit_has_the_state_timeout() {
     h.until("the job stops", Duration::from_secs(30), || {
         h.state_of(&id) == "timeout"
     });
+}
+
+/// The time limit's KILL ends a job that ignores TERM, 10 s after the TERM, with the state
+/// `timeout`: the fix of #171 must keep this KILL.
+#[cfg(unix)]
+#[test]
+fn the_time_limits_kill_stops_a_job_that_ignores_term() {
+    let h = Harness::with_default_config("timerkill");
+    let id = h.submit(&[
+        "submit",
+        "--timeout",
+        "1s",
+        "--",
+        "sh",
+        "-c",
+        "trap '' TERM; sleep 60",
+    ]);
+    h.until("the job stops", Duration::from_secs(30), || {
+        h.state_of(&id) == "timeout"
+    });
+    let s = h.status_json(&id);
+    assert_eq!(
+        s["signal"], 9,
+        "only the timer's KILL ends this leader: {s}"
+    );
+    assert!(s["exit_code"].is_null(), "a signal ended the leader: {s}");
+    let ran = s["finished_at"].as_u64().unwrap() - s["started_at"].as_u64().unwrap();
+    assert!(
+        ran >= 10,
+        "the KILL comes 10 s after the TERM, the job ran {ran} s: {s}"
+    );
+}
+
+/// The driver of the freed-pid rows, run as pid 1 of a new user and pid namespace: `$1` qex, `$2`
+/// the seconds to wait after the hook's mark, the rest the job. It prints `key=value` lines.
+#[cfg(target_os = "linux")]
+const FREED_PID_DRIVER: &str = r#"q="$1"; delay="$2"; shift 2
+echo 299 > /proc/sys/kernel/ns_last_pid || { echo "probe=no: ns_last_pid"; exit 0; }
+p=$(sh -c 'echo $$')
+[ "$p" = 300 ] || { echo "probe=no: the forced pid is $p"; exit 0; }
+echo probe=ok
+id=$("$q" submit --timeout 1s -- "$@") || { echo "submit=failed"; exit 0; }
+dir="$XDG_STATE_HOME/qex/jobs/$id"
+i=0; while [ ! -e "$dir/hook-started" ] && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done
+echo "record=$(tr -d '\n' < "$dir/status.json")"
+[ -e "$dir/hook-started" ] || { echo mark=no; exit 0; }
+echo mark=yes
+n=$(tr -d '\n ' < "$dir/status.json" | sed -n 's/.*"last_pid":\([0-9]*\).*/\1/p')
+s=$(tr -d '\n ' < "$dir/status.json" | sed -n 's/.*"supervisor_pid":\([0-9]*\).*/\1/p')
+echo "n=$n"
+[ -n "$n" ] && [ ! -e "/proc/$n" ] || { echo free=no; exit 0; }
+echo free=yes
+t=0; d=
+while [ $t -lt 3 ]; do
+  echo $((n - 1)) > /proc/sys/kernel/ns_last_pid
+  setsid sleep 60 &
+  d=$!
+  [ "$d" = "$n" ] && break
+  kill -9 "$d"; wait "$d" 2>/dev/null; t=$((t+1))
+done
+[ "$d" = "$n" ] || { echo forced=no; exit 0; }
+echo forced=yes
+i=0
+while [ "$(cut -d' ' -f5 /proc/$d/stat)" != "$d" ] && [ $i -lt 20 ]; do sleep 0.1; i=$((i+1)); done
+echo "pgid=$(cut -d' ' -f5 /proc/$d/stat)"
+start=$(cut -d' ' -f22 /proc/$d/stat)
+sleep "$delay"
+echo "supervisor=$(cut -d' ' -f2,3 /proc/$s/stat 2>/dev/null || echo gone)"
+st=$(cut -d' ' -f3 /proc/$d/stat 2>/dev/null || echo gone)
+[ "$(cut -d' ' -f22 /proc/$d/stat 2>/dev/null)" = "$start" ] || st=gone
+echo "decoy=$st"
+if [ "$st" = Z ] || [ "$st" = gone ]; then wait "$d"; echo "decoy_status=$?"; fi
+"#;
+
+/// The config of the freed-pid rows: a stop hook that marks its start in the job's folder and then
+/// keeps the supervisor alive for 20 s.
+#[cfg(target_os = "linux")]
+const FREED_PID_CONFIG: &str = "[peers]\nenabled = false\n[budget]\ncpu = \"3\"\n\
+     [defaults]\nmem = \"256MB\"\n[system]\nreserve_mem = \"0\"\nmax_pressure = 100\n[hooks]\n\
+     on_stop = [\"sh\", \"-c\", 'touch \"$QEX_JOB_DIR/hook-started\"; exec sleep 20']\n";
+
+/// Runs `FREED_PID_DRIVER` in a new user and pid namespace, for a job with `--timeout 1s`, in a
+/// harness made with `FREED_PID_CONFIG`.
+#[cfg(target_os = "linux")]
+fn run_the_freed_pid_driver(
+    h: &Harness,
+    delay: &str,
+    job: &[&str],
+) -> std::collections::HashMap<String, String> {
+    let mut cmd = Command::new("unshare");
+    cmd.args(["--kill-child", "-Urpf", "--mount-proc", "sh", "-c"])
+        .arg(FREED_PID_DRIVER)
+        .arg("sh")
+        .arg(env!("CARGO_BIN_EXE_qex"))
+        .arg(delay)
+        .args(job);
+    isolate(&mut cmd, &h.root, &h.peers_dir);
+    cmd.envs(h.extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    let out = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| panic!("`unshare` did not start: {e}"));
+    let out = out.wait_with_output().expect("reading the driver's output");
+    let text = format!(
+        "{}\n{}",
+        describe_stream("stdout", &out.stdout),
+        describe_stream("stderr", &out.stderr)
+    );
+    let lines: std::collections::HashMap<String, String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    if lines.get("probe").map(String::as_str) != Some("ok") {
+        let apparmor =
+            std::fs::read_to_string("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+                .map(|v| v.trim().to_string())
+                .unwrap_or_else(|_| "no such file".into());
+        panic!(
+            "not evaluated: this row needs unprivileged user and pid namespaces \
+             (apparmor_restrict_unprivileged_userns: {apparmor})\n{text}"
+        );
+    }
+    let mut all = lines;
+    all.insert("output".into(), text);
+    all
+}
+
+/// Checks the driver's preconditions: the hook's mark, the record, the freed pid and the decoy
+/// that took it and leads its own group.
+#[cfg(target_os = "linux")]
+fn check_the_freed_pid(r: &std::collections::HashMap<String, String>, field: &str, value: i64) {
+    let out = &r["output"];
+    assert_eq!(
+        r.get("mark").map(String::as_str),
+        Some("yes"),
+        "the hook's mark: {out}"
+    );
+    let record: serde_json::Value = serde_json::from_str(&r["record"]).expect("the record");
+    assert_eq!(record["state"], "timeout", "the record's state: {out}");
+    assert_eq!(record[field], value, "the record's {field}: {out}");
+    assert_eq!(
+        r.get("free").map(String::as_str),
+        Some("yes"),
+        "pid N free: {out}"
+    );
+    assert_eq!(
+        r.get("forced").map(String::as_str),
+        Some("yes"),
+        "the decoy is pid N: {out}"
+    );
+    assert_eq!(r.get("pgid"), r.get("n"), "the decoy leads group N: {out}");
+}
+
+/// The time limit's KILL, 10 s after its TERM, spares a new group that took the job's freed pid
+/// while the supervisor runs the stop hook (#171).
+#[cfg(target_os = "linux")]
+#[test]
+fn the_time_limits_kill_spares_a_new_group_on_the_jobs_freed_pid() {
+    let h = Harness::new("timerfreedkill", FREED_PID_CONFIG);
+    let r = run_the_freed_pid_driver(&h, "12", &["sleep", "60"]);
+    check_the_freed_pid(&r, "signal", 15);
+    let out = &r["output"];
+    let sup = r.get("supervisor").map(String::as_str).unwrap_or("");
+    assert!(
+        sup.starts_with("(qex) ") && !sup.ends_with(" Z"),
+        "the supervisor must outlive the timer's KILL, 12 s after the mark: {out}"
+    );
+    assert!(
+        !matches!(r.get("decoy").map(String::as_str), Some("Z") | Some("gone")),
+        "the timer's KILL reached the decoy on the job's freed pid: {out}"
+    );
+}
+
+/// The time limit's TERM spares a new group that took the job's freed pid, when the job ended on
+/// its own after the timer took the race (#171).
+#[cfg(target_os = "linux")]
+#[test]
+fn the_time_limits_term_spares_a_new_group_on_the_jobs_freed_pid() {
+    // The switch exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the timer");
+        return;
+    }
+    let mut h = Harness::new("timerfreedterm", FREED_PID_CONFIG);
+    h.extra_env
+        .push(("QEX_TEST_PAUSE_BEFORE_TIMER_TERM_MS".into(), "4000".into()));
+    let r = run_the_freed_pid_driver(&h, "5", &["sh", "-c", "sleep 2; exit 3"]);
+    check_the_freed_pid(&r, "exit_code", 3);
+    let out = &r["output"];
+    let sup = r.get("supervisor").map(String::as_str).unwrap_or("");
+    assert!(
+        sup.starts_with("(qex) ") && !sup.ends_with(" Z"),
+        "the supervisor must outlive the timer's TERM, 5 s after the mark: {out}"
+    );
+    assert!(
+        !matches!(r.get("decoy").map(String::as_str), Some("Z") | Some("gone")),
+        "the timer's TERM reached the decoy on the job's freed pid: {out}"
+    );
 }
 
 /// A job that never starts must give up and say what it waited for.

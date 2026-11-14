@@ -5,6 +5,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: stop_process_group, reap and recovery count a zombie job process as ended and SIGKILL what its group left (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: once the system collected a job's leader, recovery and reap check every member of its group before the SIGKILL; after qex's TERM the group gets the rest of the grace; a refused group gets one log line; the record's pid_ns and pid_ns_init_start, written with the pid, must name this pid namespace (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-12: the rest of the grace after qex's TERM ends once the job's process group is empty (issue #139).
+// Modified by the local-resource-coordinator fork, 2026-11-14: a debug-only pause before the time limit's TERM, for the tests (issue #171).
 // Modified by the local-resource-coordinator fork, 2026-11-12: reap releases the state lock while it signals the job's group and takes it again to write the record; a fault there ends the coordinator with the code 101, and a debug-only switch makes one for the tests (issue #140).
 // Modified by the local-resource-coordinator fork, 2026-11-13: log_without_panic is visible to the crate, for recovery's stop thread (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-13: the check in kill_what_the_job_left is its own function with three verdicts, so qex kill uses it before its first signal (issue #163).
@@ -460,6 +461,11 @@ pub(crate) fn check_what_the_job_left(
 #[cfg(debug_assertions)]
 const PAUSE_BEFORE_LEFTOVER_KILL: &str = "QEX_TEST_PAUSE_BEFORE_LEFTOVER_KILL_MS";
 
+/// Pauses the time limit's timer before its TERM, in milliseconds. **This variable exists for the
+/// tests of qex**, and a release build does not read it.
+#[cfg(debug_assertions)]
+const PAUSE_BEFORE_TIMER_TERM: &str = "QEX_TEST_PAUSE_BEFORE_TIMER_TERM_MS";
+
 /// Sends SIGKILL to what a job left in its group once its leader ended, when
 /// `check_what_the_job_left` finds the group the job's.
 pub(crate) fn kill_what_the_job_left(
@@ -900,6 +906,14 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
                 .is_err()
             {
                 return;
+            }
+            // A test holds the timer here, after it took the race and before its TERM.
+            #[cfg(debug_assertions)]
+            if let Some(ms) = std::env::var(PAUSE_BEFORE_TIMER_TERM)
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+            {
+                std::thread::sleep(Duration::from_millis(ms));
             }
 
             // Signal the process group, so each child of the job stops.
