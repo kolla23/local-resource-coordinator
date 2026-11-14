@@ -6,6 +6,8 @@
 # and build jobs run on macos-15 (GitHub retired the macos-14 runner).
 # Modified by the local-resource-coordinator fork, 2026-11-14: the ubuntu-24.04
 # Test leg allows unprivileged user namespaces before the e2e step (issue #171).
+# Modified by the local-resource-coordinator fork, 2026-11-14: that step's
+# comment names the namespace rows without a count (issue #178).
 name: Release
 
 # ONE workflow makes the release, from the tag.
@@ -252,7 +254,7 @@ jobs:
       - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --bins
-      # Ubuntu 24.04's AppArmor refuses the user namespaces that two e2e tests need (#171).
+      # Ubuntu 24.04's AppArmor refuses the user namespaces of the freed-pid e2e tests (#171, #178).
       - if: matrix.os == 'ubuntu-24.04'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: cargo test --features test-fixtures --test e2e -- --test-threads=2
