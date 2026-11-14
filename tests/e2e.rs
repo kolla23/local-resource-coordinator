@@ -32,6 +32,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-12: tests that reap serves a command and takes a qex kill during its TERM wait, and that a fault there ends the coordinator with the code 101 and recovery finishes the job (issue #140).
 // Modified by the local-resource-coordinator fork, 2026-11-13: tests that recovery's TERM wait holds back no command (the first answer, an answer after the TERM, a kill, a dedupe re-run), that its stop hook runs after the failed record, and that a fault in its signal step ends the coordinator with the code 101 (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-13: six tests for the identity check before qex kill's first signal: a decoy, a zombie leader of another or the recorded start, a collected leader's group that passes or fails reap's check, and a leader that left its group (issue #163).
+// Modified by the local-resource-coordinator fork, 2026-11-13: tests that recovery's check of what a job with an ended leader left holds back no command (the first answer, a kill that signals or refuses, a dedupe re-run), and that a lost job with an empty group is failed at the first answer (issue #162).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -6410,6 +6411,297 @@ fn recovery_answers_after_its_term_reached_the_job() {
     Harness::poll_until("the leader is killed", Duration::from_secs(20), || {
         !Harness::runs(job.leader)
     });
+}
+
+/// Sets the switch that pauses recovery's check of what a job left, or says the build has none.
+#[cfg(unix)]
+fn pause_the_leftover_check(h: &mut Harness) -> bool {
+    // The switch exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the leftover check");
+        return false;
+    }
+    h.extra_env.push((
+        "QEX_TEST_PAUSE_BEFORE_LEFTOVER_KILL_MS".into(),
+        "3000".into(),
+    ));
+    true
+}
+
+/// A slow check of what a collected leader left does not hold back the coordinator's first
+/// answer; the job stays `running` until the KILL, then ends failed and runs its hook (#162).
+#[test]
+#[cfg(unix)]
+fn recoverys_member_scan_does_not_delay_the_first_answer() {
+    let mut h = Harness::with_default_config("scanfirst");
+    let (job, leftover) = h.unheld_leftover_job();
+    // The hook copies the record on disk as it runs, so the test sees what it saw.
+    let copy = h.root.join("hook-record.json");
+    let mark = h.root.join("hook.txt");
+    h.write_config(&format!(
+        "[peers]\nenabled = false\n\
+         [budget]\ncpu = \"3\"\n\
+         [defaults]\nmem = \"256MB\"\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [hooks]\non_stop = [\"sh\", \"-c\", \
+         \"cp \\\"$QEX_JOB_DIR/status.json\\\" {}; echo \\\"$QEX_STATE\\\" >> {}\"]\n",
+        copy.display(),
+        mark.display()
+    ));
+    h.kill_all_but(&job, &[leftover.0]);
+    if !pause_the_leftover_check(&mut h) {
+        return;
+    }
+
+    let start = Instant::now();
+    let listed = h.qex(&["list"]);
+    let took = start.elapsed();
+    let on_disk = h.record(&job.id)["state"].clone();
+    let leftover_ran = Harness::runs(leftover.0);
+    eprintln!("restart-to-answer: {} ms", took.as_millis());
+    assert_eq!(
+        on_disk, "running",
+        "(a) the record is written after the KILL"
+    );
+    assert!(leftover_ran, "(b) the leftover runs at the first answer");
+    assert!(
+        listed.status.success(),
+        "(c) {}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&listed.stdout);
+    let row = stdout.lines().find(|l| l.starts_with(&job.id[..8]));
+    assert!(
+        row.is_some_and(|r| r.contains("running")),
+        "(d) list shows the job running: {stdout}"
+    );
+    // The check pauses 3000 ms: 1000 ms tells an answer after the check from one before it.
+    assert!(
+        took < Duration::from_millis(1000),
+        "(e) the first answer must not wait for the check: {took:?}"
+    );
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    let failed_at = Instant::now();
+    assert_eq!(
+        h.record(&job.id)["error"].as_str(),
+        Some(FINAL_BRANCH),
+        "(f) recovery's final branch"
+    );
+    assert_eq!(
+        h.refusals_of(&job.id, job.leader),
+        0,
+        "(g) the group passed its checks"
+    );
+    Harness::poll_until(
+        "(h) the leftover is stopped within 500 ms of the failed record",
+        Duration::from_millis(500),
+        || Harness::stopped(leftover.0),
+    );
+    eprintln!("failed-to-killed: {} ms", failed_at.elapsed().as_millis());
+    h.until(
+        "the stop hook wrote its line",
+        Duration::from_secs(30),
+        || !h.hook_lines().is_empty(),
+    );
+    assert_eq!(
+        h.hook_lines(),
+        vec!["failed".to_string()],
+        "(i) one hook line"
+    );
+    assert_eq!(h.hook_origin(&job.id), "coordinator", "(i) hook origin");
+    let seen: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&copy).unwrap()).unwrap();
+    assert_eq!(
+        seen["state"], "failed",
+        "(i) the hook runs after the failed record is on disk: {seen}"
+    );
+}
+
+/// A `qex kill` while recovery's check of what a job left is paused signals the job's group at
+/// once, and the record still ends with recovery's text (#162).
+#[test]
+#[cfg(unix)]
+fn recovery_takes_a_kill_before_it_kills_what_the_job_left() {
+    let mut h = Harness::with_default_config("scankill");
+    let (job, leftover) = h.unheld_leftover_job();
+    h.kill_all_but(&job, &[leftover.0]);
+    if !pause_the_leftover_check(&mut h) {
+        return;
+    }
+
+    let start = Instant::now();
+    let out = h.qex(&["kill", &job.id]);
+    let took = start.elapsed();
+    let on_disk = h.record(&job.id)["state"].clone();
+    let leftover_ran = Harness::runs(leftover.0);
+    eprintln!("kill-before-check: {} ms", took.as_millis());
+    assert_eq!(
+        on_disk, "running",
+        "(a) the record is written after the KILL"
+    );
+    assert!(leftover_ran, "(b) the leftover ignores the TERM and runs");
+    assert_signalled_reply(&out);
+    let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log")).unwrap();
+    let id: uuid::Uuid = job.id.parse().unwrap();
+    assert!(
+        log.contains(&format!("job {id} received the signal 15")),
+        "(c) the kill must signal the group: {log}"
+    );
+    assert!(
+        took < Duration::from_millis(1000),
+        "(d) the check must not hold the kill: {took:?}"
+    );
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    assert_eq!(
+        h.record(&job.id)["error"].as_str(),
+        Some(FINAL_BRANCH),
+        "(e) recovery's final branch, not a kill"
+    );
+    Harness::poll_until(
+        "(f) the leftover is killed",
+        Duration::from_secs(20),
+        || Harness::stopped(leftover.0),
+    );
+    assert_eq!(h.refusals_of(&job.id, job.leader), 0, "(g) no refusal");
+}
+
+/// A `qex kill` while recovery's check is paused leaves a group it cannot verify alone, and so
+/// does recovery's own check (#162).
+#[test]
+#[cfg(unix)]
+fn a_kill_in_recoverys_window_leaves_an_unverified_group_alone() {
+    let mut h = Harness::with_default_config("scanunver");
+    let (job, leftover) = h.unheld_leftover_job();
+    h.kill_all_but(&job, &[leftover.0]);
+    h.plant_in_status(&job.id, |v| {
+        let token = v["pid_start_token"]
+            .as_u64()
+            .expect("the record has a start time");
+        v["pid_start_token"] = serde_json::Value::from(token + 1_000_000_000_000);
+    });
+    if !pause_the_leftover_check(&mut h) {
+        return;
+    }
+
+    let start = Instant::now();
+    let out = h.qex(&["kill", &job.id, "--signal", "KILL"]);
+    let took = start.elapsed();
+    eprintln!("unverified-kill: {} ms", took.as_millis());
+    assert_unconfirmed_reply(&out, &job.id);
+    assert!(
+        took < Duration::from_millis(1000),
+        "(b) the check must not hold the kill: {took:?}"
+    );
+
+    h.until("the job is failed", Duration::from_secs(20), || {
+        h.state_of(&job.id) == "failed"
+    });
+    assert_eq!(
+        h.record(&job.id)["error"].as_str(),
+        Some(FINAL_BRANCH),
+        "(c) recovery's final branch"
+    );
+    assert!(Harness::runs(leftover.0), "(d) the group is left alone");
+    assert_eq!(
+        h.refusals_of(&job.id, job.leader),
+        2,
+        "(e) one refusal line from kill and one from recovery"
+    );
+}
+
+/// A re-run with the key of a job whose leftovers recovery checks gets that job's id, and its
+/// wait ends with the failed state (#162).
+#[test]
+#[cfg(unix)]
+fn a_rerun_before_recovery_kills_what_the_job_left_gets_the_lost_jobs_id() {
+    let mut h = Harness::with_default_config("scandedupe");
+    let file = h.root.join("leftover.pid");
+    let file_text = file.to_str().unwrap().to_string();
+    let id = h.submit(&[
+        "submit",
+        "--dedupe-key",
+        "rerun",
+        "--",
+        "sh",
+        "-c",
+        LEFTOVER_JOB,
+        "sh",
+        &file_text,
+    ]);
+    h.until("the job operates", Duration::from_secs(45), || {
+        let s = h.status_json(&id);
+        s["state"].as_str() == Some("running")
+            && s["supervisor_pid"].as_i64().is_some()
+            && s["pid"].as_i64().is_some()
+    });
+    let s = h.status_json(&id);
+    let job = UnheldJob {
+        leader: s["pid"].as_i64().unwrap() as i32,
+        supervisor: s["supervisor_pid"].as_i64().unwrap() as i32,
+        id,
+    };
+    let leftover = h.leftover_in_group(&file, job.leader);
+    h.kill_all_but(&job, &[leftover.0]);
+    if !pause_the_leftover_check(&mut h) {
+        return;
+    }
+
+    let rerun = h.submit(&["submit", "--dedupe-key", "rerun", "--", "true"]);
+    let leftover_ran = Harness::runs(leftover.0);
+    assert_eq!(
+        rerun, job.id,
+        "(a) the re-run gets the id of the job that still operates"
+    );
+    assert!(leftover_ran, "(b) the re-run came before the KILL");
+    let waited = h.qex(&["wait", &rerun]);
+    assert_eq!(
+        waited.status.code(),
+        Some(121),
+        "(c) the wait ends with the failure"
+    );
+    assert_eq!(h.state_of(&rerun), "failed", "(c) the state");
+    Harness::poll_until(
+        "(d) the leftover is killed",
+        Duration::from_secs(20),
+        || Harness::stopped(leftover.0),
+    );
+}
+
+/// A lost job whose group holds no process is failed before the coordinator's first answer, as
+/// before #162: only a group with a process waits for recovery's check.
+#[test]
+#[cfg(unix)]
+fn a_lost_job_with_an_empty_group_is_failed_at_the_first_answer() {
+    let mut h = Harness::with_default_config("scanempty");
+    let job = h.submit_unheld_job(&["sleep", "600"]);
+    h.kill_coordinator_and_supervisor(&job);
+    unsafe { libc::kill(job.leader, libc::SIGKILL) };
+    // `stopped` counts a zombie as stopped; the group is empty only once the leader is collected.
+    Harness::poll_until(
+        "the system collected the leader",
+        Duration::from_secs(30),
+        || unsafe { libc::kill(job.leader, 0) } != 0,
+    );
+    if !pause_the_leftover_check(&mut h) {
+        return;
+    }
+
+    let listed = h.qex(&["list"]);
+    let stdout = String::from_utf8_lossy(&listed.stdout);
+    let row = stdout.lines().find(|l| l.starts_with(&job.id[..8]));
+    assert!(
+        row.is_some_and(|r| r.contains("failed")),
+        "(a) list shows the job failed: {stdout}"
+    );
+    let record = h.record(&job.id);
+    assert_eq!(record["state"].as_str(), Some("failed"), "(b) on disk");
+    assert_eq!(record["error"].as_str(), Some(FINAL_BRANCH), "(c) the text");
 }
 
 /// A `qex kill` that arrives while recovery waits out the grace for a leader that ignores TERM
