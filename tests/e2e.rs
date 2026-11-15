@@ -35,6 +35,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-13: tests that recovery's check of what a job with an ended leader left holds back no command (the first answer, a kill that signals or refuses, a dedupe re-run), and that a lost job with an empty group is failed at the first answer (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-14: three tests of the time limit's signals: its KILL still ends a job that ignores TERM, and its TERM and KILL spare a new group on the job's freed pid, forced in a user and pid namespace (issue #171).
 // Modified by the local-resource-coordinator fork, 2026-11-14: a test that a failed test of the stop hook's state sends no signal and spares a new group on its freed pid, on the runner the three freed-pid tests now share (issue #178).
+// Modified by the local-resource-coordinator fork, 2026-11-14: the time limit's KILL test times its job with the test's own monotonic clock, not with the record's two wall-clock seconds (issue #181).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -3678,6 +3679,7 @@ fn a_job_that_reaches_its_time_limit_has_the_state_timeout() {
 #[test]
 fn the_time_limits_kill_stops_a_job_that_ignores_term() {
     let h = Harness::with_default_config("timerkill");
+    let t0 = Instant::now();
     let id = h.submit(&[
         "submit",
         "--timeout",
@@ -3690,16 +3692,25 @@ fn the_time_limits_kill_stops_a_job_that_ignores_term() {
     h.until("the job stops", Duration::from_secs(30), || {
         h.state_of(&id) == "timeout"
     });
+    let took = t0.elapsed();
     let s = h.status_json(&id);
     assert_eq!(
         s["signal"], 9,
         "only the timer's KILL ends this leader: {s}"
     );
     assert!(s["exit_code"].is_null(), "a signal ended the leader: {s}");
-    let ran = s["finished_at"].as_u64().unwrap() - s["started_at"].as_u64().unwrap();
+    let started_at = s["started_at"].as_u64().unwrap();
+    let finished_at = s["finished_at"].as_u64().unwrap();
+    eprintln!(
+        "submit-to-timeout: {} ms; started_at {started_at}, finished_at {finished_at}",
+        took.as_millis()
+    );
+    // The record's times are wall-clock seconds, which a clock step moves (issue #181), so the
+    // test's own clock times the run: TERM at the 1 s limit, then 10 s to the KILL.
     assert!(
-        ran >= 10,
-        "the KILL comes 10 s after the TERM, the job ran {ran} s: {s}"
+        took >= Duration::from_secs(11),
+        "the KILL comes 10 s after the TERM, which comes 1 s after the start; took {} ms: {s}",
+        took.as_millis()
     );
 }
 
