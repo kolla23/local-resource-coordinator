@@ -3679,7 +3679,6 @@ fn a_job_that_reaches_its_time_limit_has_the_state_timeout() {
 #[test]
 fn the_time_limits_kill_stops_a_job_that_ignores_term() {
     let h = Harness::with_default_config("timerkill");
-    let t0 = Instant::now();
     let id = h.submit(&[
         "submit",
         "--timeout",
@@ -3689,6 +3688,10 @@ fn the_time_limits_kill_stops_a_job_that_ignores_term() {
         "-c",
         "trap '' TERM; sleep 60",
     ]);
+    h.until("the job starts", Duration::from_secs(30), || {
+        h.state_of(&id) == "running"
+    });
+    let t0 = Instant::now();
     h.until("the job stops", Duration::from_secs(30), || {
         h.state_of(&id) == "timeout"
     });
@@ -3702,14 +3705,14 @@ fn the_time_limits_kill_stops_a_job_that_ignores_term() {
     let started_at = s["started_at"].as_u64().unwrap();
     let finished_at = s["finished_at"].as_u64().unwrap();
     eprintln!(
-        "submit-to-timeout: {} ms; started_at {started_at}, finished_at {finished_at}",
+        "running-to-timeout: {} ms; started_at {started_at}, finished_at {finished_at}",
         took.as_millis()
     );
-    // The record's times are wall-clock seconds, which a clock step moves (issue #181), so the
-    // test's own clock times the run: TERM at the 1 s limit, then 10 s to the KILL.
+    // The record's times are wall-clock seconds, which a clock step moves (issue #181); the
+    // test's clock starts at `running`, so a held start cannot hide an early KILL.
     assert!(
-        took >= Duration::from_secs(11),
-        "the KILL comes 10 s after the TERM, which comes 1 s after the start; took {} ms: {s}",
+        took >= Duration::from_secs(10),
+        "the KILL comes 10 s after the TERM; running to timeout took {} ms: {s}",
         took.as_millis()
     );
 }
