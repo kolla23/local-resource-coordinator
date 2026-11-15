@@ -9,6 +9,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: recovery passes the job id and the record's pid namespace to stop_process_group and kill_what_the_job_left, which also handle a collected leader, and clears it with the pid (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-13: recovery stops a job that lost its supervisor on a thread of its own, so the first answer does not wait for the TERM grace, and writes the failed record when the stop ends; a fault there ends the coordinator with the code 101, and a debug-only switch makes one for the tests (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-13: recovery kills what a job with an ended leader left in its group on the stop thread, so the first answer does not wait for the member scan; a job whose group holds no process is failed at once, with no call (issue #162).
+// Modified by the local-resource-coordinator fork, 2026-11-15: a Submit whose id names a known job, a submission in progress or an entry in jobs/ is refused before anything is written (issue #165).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -227,6 +228,9 @@ pub struct State {
     /// would leave a gap between the two steps. Two submissions in that gap
     /// would both start a job, which is the fault that the key removes.
     pub dedupe: BTreeMap<String, uuid::Uuid>,
+    /// The ids of the submissions between their id test and their insert. An id is tested
+    /// and held in ONE lock operation, as a key of `dedupe` is, so two cannot both pass.
+    pub submitting: std::collections::BTreeSet<uuid::Uuid>,
     /// The time of the last command from a CLI process.
     pub last_contact: Instant,
     /// The time when the queue became empty, for the oversized job rule.
@@ -721,6 +725,7 @@ impl State {
             retiring: Vec::new(),
             queue: Vec::new(),
             dedupe: BTreeMap::new(),
+            submitting: Default::default(),
             last_contact: Instant::now(),
             idle_since: None,
             next_sequence: 1,
@@ -949,6 +954,22 @@ impl State {
         }
     }
 
+    /// Says why a submission cannot take this id, or `None` when no job and no submission
+    /// in progress holds it. The directory of the id is a separate test, in `handle_submit`.
+    pub fn id_in_use(&self, id: uuid::Uuid) -> Option<String> {
+        let holder = match self.known(id) {
+            Some(job) => format!("a job in the state `{}`", job.state()),
+            None if self.submitting.contains(&id) => {
+                String::from("a submission that is in progress")
+            }
+            None => return None,
+        };
+        Some(format!(
+            "qex refuses this submission: the id {id} already names {holder}.\n\
+             A job id names one job for ever. Send the work under a new id, as `qex submit` does."
+        ))
+    }
+
     /// Puts a job in the memory of the coordinator, and in the index.
     pub fn insert_job(&mut self, job: Job) {
         let id = job.status.id;
@@ -961,6 +982,7 @@ impl State {
             },
         );
         self.stopped.remove(&id);
+        self.submitting.remove(&id);
         self.jobs.insert(id, job);
     }
 
@@ -1131,6 +1153,7 @@ impl Coordinator {
                 retiring: Vec::new(),
                 queue: Vec::new(),
                 dedupe: BTreeMap::new(),
+                submitting: Default::default(),
                 last_contact: Instant::now(),
                 idle_since: Some(Instant::now()),
                 next_sequence: 1,
@@ -2881,7 +2904,7 @@ fn handle_submit(
     let mut pause_warning: Option<String> = None;
     let mut pause_reason: Option<String> = None;
 
-    let warning = {
+    let (warning, dir) = {
         let mut state = coord.state.lock().unwrap();
         for dep in spec.needs.iter().chain(spec.after.iter()) {
             if state.known(*dep).is_none() {
@@ -2940,7 +2963,40 @@ fn handle_submit(
                     deduplicated: true,
                 };
             }
+        }
 
+        // An id names one job for ever (#165). This test comes after the dedupe hit, which
+        // answers a resend with its job, and before the key is held: a refused id holds no key.
+        if let Some(reason) = state.id_in_use(id) {
+            return Response::error(ErrorKind::WrongState, reason);
+        }
+
+        // The memory is not the whole truth: `qex clean` or recovery can leave a directory with
+        // no job. Tested before the key is held, as the id is; the look does not follow a link.
+        let dir = match paths::job_dir(&id) {
+            Ok(d) => d,
+            Err(e) => return Response::error(ErrorKind::Internal, e.to_string()),
+        };
+        match std::fs::symlink_metadata(&dir) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            found => {
+                let (kind, what) = match found {
+                    Ok(_) => (ErrorKind::WrongState, String::from("already exists")),
+                    Err(e) => (ErrorKind::Internal, format!("cannot be read ({e})")),
+                };
+                return Response::error(
+                    kind,
+                    format!(
+                        "qex refuses this submission: {} {what}, and this coordinator \
+                         holds no job for the id {id}.\nSend the work under a new id, as \
+                         `qex submit` does.",
+                        dir.display()
+                    ),
+                );
+            }
+        }
+
+        if let Some(key) = spec.dedupe_key.clone() {
             // Hold the key for this job now, before the lock goes. A second
             // submission with the same key finds this id, whatever moment it
             // arrives in.
@@ -2997,7 +3053,7 @@ fn handle_submit(
             return Response::error(ErrorKind::WrongState, reason);
         }
 
-        match crate::sched::size_check(&state.cfg, spec.cpu, spec.mem) {
+        let warning = match crate::sched::size_check(&state.cfg, spec.cpu, spec.mem) {
             crate::sched::Size::Fits => None,
             crate::sched::Size::TooBig(reason) => {
                 use crate::config::OversizedPolicy;
@@ -3029,7 +3085,10 @@ fn handle_submit(
                     }
                 }
             }
-        }
+        };
+        // Hold the id after the last refusal of this lock, so only the disk steps free it.
+        state.submitting.insert(id);
+        (warning, dir)
     };
 
     // The pause REPLACES the capacity reason in the record; it never stands
@@ -3057,14 +3116,6 @@ fn handle_submit(
         (None, size) => size,
     };
 
-    let dir = match paths::job_dir(&id) {
-        Ok(d) => d,
-        Err(e) => {
-            release_dedupe(&mut coord.state.lock().unwrap(), id);
-            return Response::error(ErrorKind::Internal, e.to_string());
-        }
-    };
-
     // Write the record before the answer. If the coordinator stops now, the
     // job is still in the queue after the restart.
     if let Err(e) = (|| -> Result<()> {
@@ -3076,7 +3127,7 @@ fn handle_submit(
         // This job does not exist, so it must not hold its key. Without this
         // step, the key would name a job with no record for ever, and each
         // later submission with that key would give an id that answers nothing.
-        release_dedupe(&mut coord.state.lock().unwrap(), id);
+        release_submission(&mut coord.state.lock().unwrap(), id);
         return Response::error(
             ErrorKind::Internal,
             format!("qex could not write the job record: {e:#}"),
@@ -3120,6 +3171,12 @@ fn handle_submit(
 /// the cost is not important.
 pub fn release_dedupe(state: &mut State, id: uuid::Uuid) {
     state.dedupe.retain(|_, holder| *holder != id);
+}
+
+/// Frees what a submission that made no job held: its dedupe key and its id.
+fn release_submission(state: &mut State, id: uuid::Uuid) {
+    release_dedupe(state, id);
+    state.submitting.remove(&id);
 }
 
 fn handle_wait(coord: &Arc<Coordinator>, id: uuid::Uuid) -> Response {
@@ -4384,6 +4441,29 @@ mem = \"1GB\"
             return;
         }
         panic!("the clock moved on every attempt, so the edge was never tested");
+    }
+
+    /// The hold on an id ends when its job enters the memory, so no id stays held for ever.
+    /// No command shows the set of held ids, so this test reads it.
+    #[test]
+    fn a_job_that_enters_the_memory_frees_the_hold_on_its_id() {
+        let mut state = empty_state();
+        let spec = spec_with_key("k");
+        let id = spec.id;
+        state.submitting.insert(id);
+        assert!(state
+            .id_in_use(id)
+            .is_some_and(|why| why.contains("in progress")));
+        let status = JobStatus::new(&spec);
+        state.insert_job(Job {
+            spec,
+            status: status.into(),
+            supervisor_pid: None,
+        });
+        assert!(state.submitting.is_empty());
+        assert!(state
+            .id_in_use(id)
+            .is_some_and(|why| why.contains("the state `queued`")));
     }
 
     /// A submission that holds the key writes its record after it takes the
