@@ -34,6 +34,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-13: six tests for the identity check before qex kill's first signal: a decoy, a zombie leader of another or the recorded start, a collected leader's group that passes or fails reap's check, and a leader that left its group (issue #163).
 // Modified by the local-resource-coordinator fork, 2026-11-13: tests that recovery's check of what a job with an ended leader left holds back no command (the first answer, a kill that signals or refuses, a dedupe re-run), and that a lost job with an empty group is failed at the first answer (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-14: three tests of the time limit's signals: its KILL still ends a job that ignores TERM, and its TERM and KILL spare a new group on the job's freed pid, forced in a user and pid namespace (issue #171).
+// Modified by the local-resource-coordinator fork, 2026-11-14: a test that a failed test of the stop hook's state sends no signal and spares a new group on its freed pid, on the runner the three freed-pid tests now share (issue #178).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -3751,17 +3752,18 @@ const FREED_PID_CONFIG: &str = "[peers]\nenabled = false\n[budget]\ncpu = \"3\"\
      [defaults]\nmem = \"256MB\"\n[system]\nreserve_mem = \"0\"\nmax_pressure = 100\n[hooks]\n\
      on_stop = [\"sh\", \"-c\", 'touch \"$QEX_JOB_DIR/hook-started\"; exec sleep 20']\n";
 
-/// Runs `FREED_PID_DRIVER` in a new user and pid namespace, for a job with `--timeout 1s`, in a
-/// harness made with `FREED_PID_CONFIG`.
+/// Runs `driver` (`FREED_PID_DRIVER` or `HOOK_FREED_PID_DRIVER`) in a new user and pid namespace,
+/// with qex, `delay` and `job` as its arguments, in the harness `h`.
 #[cfg(target_os = "linux")]
 fn run_the_freed_pid_driver(
     h: &Harness,
+    driver: &str,
     delay: &str,
     job: &[&str],
 ) -> std::collections::HashMap<String, String> {
     let mut cmd = Command::new("unshare");
     cmd.args(["--kill-child", "-Urpf", "--mount-proc", "sh", "-c"])
-        .arg(FREED_PID_DRIVER)
+        .arg(driver)
         .arg("sh")
         .arg(env!("CARGO_BIN_EXE_qex"))
         .arg(delay)
@@ -3833,7 +3835,7 @@ fn the_time_limits_kill_spares_a_new_group_on_the_jobs_freed_pid() {
     let h = Harness::new("timerfreedkill", FREED_PID_CONFIG);
     // The job must end on the TERM, before the reap; on CI's ubuntu-22.04 a plain sleep outlived it.
     let job = ["env", "--default-signal=TERM", "sleep", "60"];
-    let r = run_the_freed_pid_driver(&h, "12", &job);
+    let r = run_the_freed_pid_driver(&h, FREED_PID_DRIVER, "12", &job);
     check_the_freed_pid(&r, "signal", 15);
     let out = &r["output"];
     let sup = r.get("supervisor").map(String::as_str).unwrap_or("");
@@ -3860,7 +3862,7 @@ fn the_time_limits_term_spares_a_new_group_on_the_jobs_freed_pid() {
     let mut h = Harness::new("timerfreedterm", FREED_PID_CONFIG);
     h.extra_env
         .push(("QEX_TEST_PAUSE_BEFORE_TIMER_TERM_MS".into(), "4000".into()));
-    let r = run_the_freed_pid_driver(&h, "5", &["sh", "-c", "sleep 2; exit 3"]);
+    let r = run_the_freed_pid_driver(&h, FREED_PID_DRIVER, "5", &["sh", "-c", "sleep 2; exit 3"]);
     check_the_freed_pid(&r, "exit_code", 3);
     let out = &r["output"];
     let sup = r.get("supervisor").map(String::as_str).unwrap_or("");
@@ -3871,6 +3873,100 @@ fn the_time_limits_term_spares_a_new_group_on_the_jobs_freed_pid() {
     assert!(
         !matches!(r.get("decoy").map(String::as_str), Some("Z") | Some("gone")),
         "the timer's TERM reached the decoy on the job's freed pid: {out}"
+    );
+}
+
+/// The driver of the hook's freed-pid row, run as pid 1 of a new user and pid namespace: `$1` qex,
+/// `$2` the seconds to wait after the hook's verdict. It prints `key=value` lines.
+#[cfg(target_os = "linux")]
+const HOOK_FREED_PID_DRIVER: &str = r#"q="$1"; delay="$2"
+echo 299 > /proc/sys/kernel/ns_last_pid || { echo "probe=no: ns_last_pid"; exit 0; }
+p=$(sh -c 'echo $$')
+[ "$p" = 300 ] || { echo "probe=no: the forced pid is $p"; exit 0; }
+echo probe=ok
+id=$("$q" submit -- true) || { echo "submit=failed"; exit 0; }
+dir="$XDG_STATE_HOME/qex/jobs/$id"
+i=0; while [ ! -s "$dir/hook-pid" ] && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done
+n=$(tr -d '\n' < "$dir/hook-pid" 2>/dev/null)
+echo "n=$n"
+[ -n "$n" ] || { echo mark=no; exit 0; }
+echo mark=yes
+i=0; while [ -e "/proc/$n" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+[ ! -e "/proc/$n" ] || { echo free=no; exit 0; }
+echo free=yes
+t=0; d=
+while [ $t -lt 3 ]; do
+  echo $((n - 1)) > /proc/sys/kernel/ns_last_pid
+  setsid env --default-signal=TERM sleep 60 &
+  d=$!
+  [ "$d" = "$n" ] && break
+  kill -9 "$d"; wait "$d" 2>/dev/null; t=$((t+1))
+done
+[ "$d" = "$n" ] || { echo forced=no; exit 0; }
+echo forced=yes
+i=0
+while [ "$(cut -d' ' -f5 /proc/$d/stat)" != "$d" ] && [ $i -lt 20 ]; do sleep 0.1; i=$((i+1)); done
+echo "pgid=$(cut -d' ' -f5 /proc/$d/stat)"
+start=$(cut -d' ' -f22 /proc/$d/stat)
+v="qex: the stop hook"
+l="$dir/hook.log"
+if grep -q "$v" "$l" 2>/dev/null; then echo early=yes; else echo early=no; fi
+i=0; while ! grep -q "$v" "$l" 2>/dev/null && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done
+echo "hook_log=$(tr '\n' ' ' < "$l" 2>/dev/null)"
+sleep "$delay"
+st=$(cut -d' ' -f3 /proc/$d/stat 2>/dev/null || echo gone)
+[ "$(cut -d' ' -f22 /proc/$d/stat 2>/dev/null)" = "$start" ] || st=gone
+echo "decoy=$st"
+if [ "$st" = Z ] || [ "$st" = gone ]; then wait "$d"; echo "decoy_status=$?"; fi
+"#;
+
+/// The stop hook spares a new group that took its freed pid when the test of its state fails
+/// (#178).
+#[cfg(target_os = "linux")]
+#[test]
+fn the_hooks_failed_state_test_spares_a_new_group_on_its_freed_pid() {
+    // The switch exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to reap the hook");
+        return;
+    }
+    let mut h = Harness::new(
+        "hookfreedpid",
+        "[peers]\nenabled = false\n[budget]\ncpu = \"3\"\n\
+         [defaults]\nmem = \"256MB\"\n[system]\nreserve_mem = \"0\"\nmax_pressure = 100\n[hooks]\n\
+         on_stop = [\"sh\", \"-c\", 'echo $$ > \"$QEX_JOB_DIR/hook-pid\"']\n",
+    );
+    h.extra_env.push((
+        "QEX_TEST_REAP_HOOK_BEFORE_ITS_TEST_MS".into(),
+        "3000".into(),
+    ));
+    let r = run_the_freed_pid_driver(&h, HOOK_FREED_PID_DRIVER, "1", &[]);
+    let out = &r["output"];
+    for (field, want) in [
+        ("mark", "yes"),
+        ("free", "yes"),
+        ("forced", "yes"),
+        ("early", "no"),
+    ] {
+        assert_eq!(
+            r.get(field).map(String::as_str),
+            Some(want),
+            "{field}: {out}"
+        );
+    }
+    assert_eq!(r.get("pgid"), r.get("n"), "the decoy leads group N: {out}");
+    let log = r.get("hook_log").map(String::as_str).unwrap_or("");
+    assert!(
+        log.contains("gave an error at a test of its state"),
+        "the test of the hook's state must have failed: {out}"
+    );
+    assert!(
+        !matches!(r.get("decoy").map(String::as_str), Some("Z") | Some("gone")),
+        "the hook's KILL reached the decoy on its freed pid: {out}"
+    );
+    assert!(
+        log.contains("qex sent no signal to its process group"),
+        "the verdict must say that qex sent no signal: {out}"
     );
 }
 
