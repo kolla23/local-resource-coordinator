@@ -36,6 +36,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-14: three tests of the time limit's signals: its KILL still ends a job that ignores TERM, and its TERM and KILL spare a new group on the job's freed pid, forced in a user and pid namespace (issue #171).
 // Modified by the local-resource-coordinator fork, 2026-11-14: a test that a failed test of the stop hook's state sends no signal and spares a new group on its freed pid, on the runner the three freed-pid tests now share (issue #178).
 // Modified by the local-resource-coordinator fork, 2026-11-14: the time limit's KILL test times its job with the test's own monotonic clock, not with the record's two wall-clock seconds (issue #181).
+// Modified by the local-resource-coordinator fork, 2026-11-15: five tests of a Submit whose id is in use: a running job and its keyed resend, a stopped job, a submission in progress, an entry in jobs/, and an id that a refusal or a failed write frees (issue #165).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -18665,6 +18666,271 @@ fn two_requests_for_one_lock_stand_apart() {
     assert!(words.contains("the lock `gpu0` is free"), "{words}");
     h.until("the job takes the lock", Duration::from_secs(45), || {
         h.has_started(&job)
+    });
+}
+
+/// Sends one request line on the socket of the coordinator, as a client that is not the CLI
+/// does, and gives the answer.
+fn raw_request(h: &Harness, request: &serde_json::Value) -> serde_json::Value {
+    use std::io::{BufRead, BufReader, Write};
+
+    let socket = h.root.join("state/qex/run/s");
+    let stream = std::os::unix::net::UnixStream::connect(&socket)
+        .unwrap_or_else(|e| panic!("no socket at {}: {e}", socket.display()));
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    let mut writer = stream.try_clone().unwrap();
+    writer.write_all(format!("{request}\n").as_bytes()).unwrap();
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line).unwrap();
+    json_of(&line)
+}
+
+/// A Submit that carries the spec of the job `model` under the id `id`.
+fn submit_request(h: &Harness, model: &str, id: &str) -> serde_json::Value {
+    let text = std::fs::read_to_string(h.job_dir(model).join("spec.json")).unwrap();
+    let mut spec = json_of(&text);
+    spec["id"] = id.into();
+    serde_json::json!({ "op": "submit", "spec": spec, "submitter": [] })
+}
+
+/// The answer is the refusal of #165: it names the id and what holds it.
+fn assert_id_refused(answer: &serde_json::Value, id: &str, holder: &str) {
+    assert_eq!(answer["result"], "error", "{answer}");
+    assert_eq!(answer["kind"], "wrong_state", "{answer}");
+    let message = answer["message"].as_str().unwrap();
+    assert!(
+        message.contains(id) && message.contains(holder),
+        "{message}"
+    );
+}
+
+/// The CLI mints a new id per submission, but any socket client can send a known one (#165): a
+/// resend under the job's own dedupe key gets that job, any other is refused and holds no key.
+#[test]
+fn a_submit_that_reuses_a_known_job_id_is_refused() {
+    let h = Harness::with_default_config("reuseid");
+    let id = h.submit(&["submit", "--dedupe-key", "live", "--", "sleep", "30"]);
+    h.until("the job starts", Duration::from_secs(45), || {
+        h.has_started(&id)
+    });
+    let before = h.record(&id);
+    assert_eq!(before["state"], "running", "{before}");
+    let unchanged = |step: &str| {
+        let after = h.record(&id);
+        for field in ["state", "pid", "supervisor_pid", "sequence"] {
+            assert_eq!(after[field], before[field], "{step}, {field}: {after}");
+        }
+    };
+
+    // The dedupe hit comes before the id test, so the resend gets its own job.
+    let resend = raw_request(&h, &submit_request(&h, &id, &id));
+    assert_eq!(resend["result"], "submitted", "{resend}");
+    assert_eq!(resend["deduplicated"], true, "{resend}");
+    assert_eq!(resend["id"], id.as_str(), "{resend}");
+    unchanged("resend");
+
+    let mut request = submit_request(&h, &id, &id);
+    request["spec"]["dedupe_key"] = "reused".into();
+    let answer = raw_request(&h, &request);
+    let after = h.record(&id);
+    assert_eq!(
+        answer["result"], "error",
+        "{answer}\nstatus.json after: {after}"
+    );
+    assert_id_refused(&answer, &id, "a job in the state `running`");
+    unchanged("refused");
+    // The refused request held no dedupe key: the next submission with it is a new job.
+    let other = h.submit(&["submit", "--dedupe-key", "reused", "--", "true"]);
+    assert_ne!(other, id);
+    h.stop(&id);
+}
+
+/// The id of a stopped job is refused too, once the job left the live map and after a restart,
+/// and its record keeps its result (#165).
+#[test]
+fn a_submit_that_reuses_the_id_of_a_stopped_job_leaves_its_result() {
+    let h = Harness::with_default_config("reusedone");
+    let id = h.submit(&["submit", "--", "sh", "-c", "exit 3"]);
+    h.until("the job fails", Duration::from_secs(45), || {
+        h.state_of(&id) == "failed"
+    });
+    // The status of a job that left the live map comes from the disk, so the mark shows it.
+    h.plant_in_status(&id, |record| record["error"] = "planted".into());
+    h.until(
+        "the job leaves the live map",
+        Duration::from_secs(45),
+        || h.status_json(&id)["error"] == "planted",
+    );
+
+    let request = submit_request(&h, &id, &id);
+    let refused = |round: &str| {
+        let answer = raw_request(&h, &request);
+        let record = h.record(&id);
+        assert_eq!(
+            answer["result"], "error",
+            "{round}: {answer}\nstatus.json after: {record}"
+        );
+        assert_id_refused(&answer, &id, "a job in the state `failed`");
+        assert_eq!(record["state"], "failed", "{round}: {record}");
+        assert_eq!(record["exit_code"], 3, "{round}: {record}");
+    };
+    refused("stopped");
+    // The second request asks a coordinator that read the record from the disk.
+    h.stop_coordinator();
+    h.coordinator_pid();
+    refused("recovered");
+}
+
+/// Two submissions of one new id at the same moment make one job: the second is refused while
+/// the first still writes its record (#165).
+#[test]
+fn two_submits_of_one_new_id_at_once_make_one_job() {
+    // The switch that pauses the coordinator exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the coordinator");
+        return;
+    }
+    const PAUSE: Duration = Duration::from_secs(4);
+    let mut h = Harness::with_default_config("twoids");
+    let model = h.submit(&["submit", "--", "true"]);
+    h.until("the model job ends", Duration::from_secs(45), || {
+        h.state_of(&model) == "completed"
+    });
+    // The switch pauses the first mkdir in jobs/, so a new coordinator takes it after the model.
+    h.stop_coordinator();
+    let jobs = h.root.join("state/qex/jobs");
+    h.extra_env.push((
+        "QEX_TEST_PAUSE_AFTER_MKDIR_IN".into(),
+        format!("{} {}", PAUSE.as_millis(), jobs.display()),
+    ));
+    h.coordinator_pid();
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = submit_request(&h, &model, &id);
+    let (first, second) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| (raw_request(&h, &request), Instant::now()));
+        let made = || h.job_dir(&id).exists();
+        Harness::poll_until("the first submission makes its directory", PAUSE * 5, made);
+        let second = (raw_request(&h, &request), Instant::now());
+        (first.join().unwrap(), second)
+    });
+    assert_eq!(
+        second.0["result"], "error",
+        "second: {}\nfirst: {}",
+        second.0, first.0
+    );
+    assert_id_refused(&second.0, &id, "a submission that is in progress");
+    // The race, or the test proves nothing: the refusal came while the first still paused.
+    assert!(second.1 < first.1, "the second answer came after the first");
+    assert_eq!(first.0["result"], "submitted", "{}", first.0);
+    assert_eq!(first.0["id"], id.as_str(), "{}", first.0);
+    h.until("the one job ends", Duration::from_secs(45), || {
+        h.state_of(&id) == "completed"
+    });
+    let rows = h
+        .list_json()
+        .iter()
+        .filter(|job| job["id"] == id.as_str())
+        .count();
+    assert_eq!(rows, 1);
+}
+
+/// An id that names a directory or a link in jobs/, with no job for it, is refused, nothing is
+/// written, the dedupe key keeps its job, and the id is free once the directory is gone (#165).
+#[test]
+fn a_submit_whose_id_names_an_entry_in_the_jobs_directory_is_refused() {
+    let h = Harness::with_default_config("reusedir");
+    let model = h.submit(&["submit", "--dedupe-key", "done", "--", "true"]);
+    h.until("the model job ends", Duration::from_secs(45), || {
+        h.state_of(&model) == "completed"
+    });
+    let (dir, link) = (
+        uuid::Uuid::new_v4().to_string(),
+        uuid::Uuid::new_v4().to_string(),
+    );
+    std::fs::create_dir(h.job_dir(&dir)).unwrap();
+    let outside = h.root.join("outside");
+    std::os::unix::fs::symlink(&outside, h.job_dir(&link)).unwrap();
+
+    // The model's spec carries the key with no window, so the key misses and the id is tested.
+    for id in [&dir, &link] {
+        let answer = raw_request(&h, &submit_request(&h, &model, id));
+        assert_eq!(answer["result"], "error", "{answer}");
+        let holder = format!("{} already exists", h.job_dir(id).display());
+        assert_id_refused(&answer, id, &holder);
+    }
+    assert_eq!(std::fs::read_dir(h.job_dir(&dir)).unwrap().count(), 0);
+    assert!(
+        !outside.exists(),
+        "the coordinator made the target of the link"
+    );
+    let listed = h.list_json();
+    let named = |job: &serde_json::Value| job["id"] == dir.as_str() || job["id"] == link.as_str();
+    assert!(!listed.iter().any(named), "{listed:?}");
+    // The refusals left the key with the model: a window that reaches back to it finds it.
+    let mut later = submit_request(&h, &model, &uuid::Uuid::new_v4().to_string());
+    later["spec"]["dedupe_window"] = 3600.into();
+    let found = raw_request(&h, &later);
+    assert_eq!(found["deduplicated"], true, "{found}");
+    assert_eq!(found["id"], model.as_str(), "{found}");
+    // The refusal held nothing: the id makes a job once the directory is gone.
+    std::fs::remove_dir(h.job_dir(&dir)).unwrap();
+    let taken = raw_request(&h, &submit_request(&h, &model, &dir));
+    assert_eq!(taken["result"], "submitted", "{taken}");
+}
+
+/// A submission that made no job leaves its id free: after a refusal by a test of the lock that
+/// holds the id, the last one included, and after a failed write, the id makes a job (#165).
+#[test]
+fn a_submit_that_made_no_job_leaves_its_id_free() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // A test that runs as root writes anywhere, so it cannot make this fault.
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    let h = Harness::new(
+        "freeid",
+        "[peers]\nenabled = false\n\
+         [budget]\ncpu = \"3\"\n\
+         [defaults]\nmem = \"256MB\"\n\
+         [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
+         [queue]\noversized = \"reject\"\n",
+    );
+    let model = h.submit(&["submit", "--", "true"]);
+    let jobs = h.root.join("state/qex/jobs");
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = submit_request(&h, &model, &id);
+
+    // The test of the dependencies refuses, as before.
+    let mut needs_nobody = request.clone();
+    needs_nobody["spec"]["needs"] = serde_json::json!([uuid::Uuid::new_v4().to_string()]);
+    let refused = raw_request(&h, &needs_nobody);
+    assert_eq!(refused["kind"], "no_such_job", "{refused}");
+
+    // The size test is the last refusal of the lock, so the id test passed and the hold is next.
+    let mut too_big = request.clone();
+    too_big["spec"]["cpu"] = serde_json::json!(64);
+    let rejected = raw_request(&h, &too_big);
+    assert_eq!(rejected["kind"], "wrong_state", "{rejected}");
+    let message = rejected["message"].as_str().unwrap();
+    assert!(
+        message.contains("64 cores") && message.contains("reject"),
+        "{message}"
+    );
+
+    std::fs::set_permissions(&jobs, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let failed = raw_request(&h, &request);
+    std::fs::set_permissions(&jobs, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(failed["kind"], "internal", "{failed}");
+    assert!(!h.job_dir(&id).exists(), "{failed}");
+
+    let again = raw_request(&h, &request);
+    assert_eq!(again["result"], "submitted", "{again}");
+    h.until("the job ends", Duration::from_secs(45), || {
+        h.state_of(&id) == "completed"
     });
 }
 
