@@ -12,6 +12,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-15: a Submit whose id names a known job, a submission in progress or an entry in jobs/ is refused before anything is written (issue #165).
 // Modified by the local-resource-coordinator fork, 2026-11-15: a submission holds its dedupe key beside the entry of an earlier job until its own job exists, so a refused or failed Submit leaves that job the key (issue #188).
 // Modified by the local-resource-coordinator fork, 2026-11-16: a keyed Submit that meets a submission in progress under its key waits for it to end, then gets its job or makes its own, so a dedupe answer always names a job (issue #190).
+// Modified by the local-resource-coordinator fork, 2026-11-16: a Submit whose record write fails removes its job directory before it frees its id, and names a directory it could not remove in the answer and the log (issue #187).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -3199,15 +3200,27 @@ fn handle_submit(
         job::write_status(&dir, &status)?;
         Ok(())
     })() {
+        // The lock saw no entry at this path and the id is still held, so what is there now is
+        // this submission's. It goes before the hold does, or a resend would meet it (#187).
+        let kept = match std::fs::remove_dir_all(&dir) {
+            Err(r) if r.kind() != std::io::ErrorKind::NotFound => Some(format!(
+                "qex could not remove {} after the failed write: {r}. Delete that directory; \
+                 until it goes, qex refuses the id {id}.",
+                dir.display()
+            )),
+            _ => None,
+        };
         // This job does not exist, so it must not hold its key. Without this
         // step, the key would name a job with no record for ever, and each
         // later submission with that key would give an id that answers nothing.
         release_submission(&mut coord.state.lock().unwrap(), id);
         coord.notify();
-        return Response::error(
-            ErrorKind::Internal,
-            format!("qex could not write the job record: {e:#}"),
-        );
+        let mut message = format!("qex could not write the job record: {e:#}");
+        if let Some(kept) = kept {
+            log(&kept);
+            message = format!("{message}\n{kept}");
+        }
+        return Response::error(ErrorKind::Internal, message);
     }
 
     let name_for_history = spec.name.clone();
