@@ -38,6 +38,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-14: the time limit's KILL test times its job with the test's own monotonic clock, not with the record's two wall-clock seconds (issue #181).
 // Modified by the local-resource-coordinator fork, 2026-11-15: five tests of a Submit whose id is in use: a running job and its keyed resend, a stopped job, a submission in progress, an entry in jobs/, and an id that a refusal or a failed write frees (issue #165).
 // Modified by the local-resource-coordinator fork, 2026-11-15: three tests that a keyed Submit refused by the pool test or the size test, or whose record write fails, leaves the dedupe key with an earlier completed job (issue #188).
+// Modified by the local-resource-coordinator fork, 2026-11-16: two tests that a keyed Submit which meets a submission in progress under its key waits for it, and gets an id that names a job when that submission fails (issue #190).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -6178,6 +6179,16 @@ impl Harness {
             .collect();
         eprintln!("refusal lines: {lines:?}");
         lines
+    }
+
+    /// The coordinator log's lines that hold `phrase`.
+    fn log_lines(&self, phrase: &str) -> Vec<String> {
+        let log = std::fs::read_to_string(self.root.join("state/qex/run/daemon.log"))
+            .expect("the coordinator writes its log");
+        log.lines()
+            .filter(|l| l.contains(phrase))
+            .map(str::to_string)
+            .collect()
     }
 
     /// How many lines of the coordinator log leave group `group` of job `id` alone.
@@ -18836,6 +18847,205 @@ fn two_submits_of_one_new_id_at_once_make_one_job() {
         .filter(|job| job["id"] == id.as_str())
         .count();
     assert_eq!(rows, 1);
+}
+
+/// A coordinator whose first mkdir in jobs/ pauses for `pause`, after a model job completed under
+/// the key `build:/k` (safe form `build_k`). Gives the harness and the model's id.
+fn a_paused_coordinator_after_a_model_under_build_k(
+    tag: &str,
+    pause: Duration,
+) -> (Harness, String) {
+    let mut h = Harness::with_default_config(tag);
+    let model = h.submit(&["submit", "--dedupe-key", "build:/k", "--", "true"]);
+    h.until("the model job ends", Duration::from_secs(45), || {
+        h.state_of(&model) == "completed"
+    });
+    h.stop_coordinator();
+    let jobs = h.root.join("state/qex/jobs");
+    h.extra_env.push((
+        "QEX_TEST_PAUSE_AFTER_MKDIR_IN".into(),
+        format!("{} {}", pause.as_millis(), jobs.display()),
+    ));
+    h.coordinator_pid();
+    (h, model)
+}
+
+/// Two keyed Submits that meet a submission in progress under their key, whose record write then
+/// fails, get one id that names one job (#190).
+#[test]
+fn a_keyed_submit_that_meets_a_failed_submission_gets_an_id_that_names_a_job() {
+    // The switch that pauses the coordinator exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the coordinator");
+        return;
+    }
+    const PAUSE: Duration = Duration::from_secs(4);
+    let (h, model) = a_paused_coordinator_after_a_model_under_build_k("keyedfail", PAUSE);
+
+    // The model's spec carries the key with no window, so the key misses the completed model.
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = submit_request(&h, &model, &id);
+    let keyed = [
+        "submit",
+        "--json",
+        "--dedupe-key",
+        "build:/k",
+        "--",
+        "sleep",
+        "30",
+    ];
+    let (first, seconds, sent) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| (raw_request(&h, &request), Instant::now()));
+        let made = || h.job_dir(&id).exists();
+        Harness::poll_until("the first submission makes its directory", PAUSE * 5, made);
+        // The directory goes during the pause, so the first record write fails.
+        std::fs::remove_dir(h.job_dir(&id)).unwrap();
+        let sent = Instant::now();
+        let seconds: Vec<_> = (0..2)
+            .map(|_| {
+                scope.spawn(|| {
+                    (
+                        h.qex_within(&keyed, Duration::from_secs(60)),
+                        Instant::now(),
+                    )
+                })
+            })
+            .collect();
+        let seconds: Vec<_> = seconds.into_iter().map(|s| s.join().unwrap()).collect();
+        (first.join().unwrap(), seconds, sent)
+    });
+    // The race, or the test proves nothing: the seconds were sent while the first still paused.
+    assert!(
+        sent < first.1,
+        "the seconds were sent after the first answer"
+    );
+    assert_eq!(first.0["kind"], "internal", "{}", first.0);
+    let answers: Vec<serde_json::Value> = seconds
+        .iter()
+        .map(|(out, _)| {
+            let said = String::from_utf8_lossy(&out.stderr);
+            assert!(out.status.success(), "{said}");
+            json_of(&String::from_utf8_lossy(&out.stdout))
+        })
+        .collect();
+    let given = answers[0]["id"].as_str().unwrap().to_string();
+    assert_eq!(answers[1]["id"], given.as_str(), "{answers:?}");
+    let status = h.qex(&["status", &given]);
+    assert!(
+        status.status.success(),
+        "the id {given} names no job: {answers:?}\n{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    assert_ne!(
+        given, id,
+        "the failed submission's id was given: {answers:?}"
+    );
+    let made = answers
+        .iter()
+        .filter(|a| a["deduplicated"] == false)
+        .count();
+    assert_eq!(made, 1, "{answers:?}");
+    let waits = h.log_lines("waits for the submission");
+    let line = format!("the dedupe key `build_k` waits for the submission {id}");
+    assert_eq!(waits.len(), 2, "{waits:?}");
+    assert!(
+        waits
+            .iter()
+            .all(|l| l.contains(&line) && !l.contains("build:/k")),
+        "{waits:?}"
+    );
+    for (_, done) in &seconds {
+        let after = done.duration_since(first.1);
+        assert!(
+            after < Duration::from_secs(15),
+            "a waiter answered {after:?} after the first"
+        );
+    }
+    h.until("the job starts", Duration::from_secs(45), || {
+        h.has_started(&given)
+    });
+    let listed = h.list_json();
+    let rows = listed.iter().filter(|j| j["id"] == given.as_str()).count();
+    assert_eq!(rows, 1, "{listed:?}");
+    h.stop(&given);
+}
+
+/// A keyed Submit that meets a submission in progress under its key waits through a wake that is
+/// not the end of the hold, then gets that submission's job (#190).
+#[test]
+fn a_keyed_submit_that_meets_a_submission_in_progress_waits_for_its_job() {
+    // The switch that pauses the coordinator exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the coordinator");
+        return;
+    }
+    const PAUSE: Duration = Duration::from_secs(8);
+    let (h, model) = a_paused_coordinator_after_a_model_under_build_k("keyedwait", PAUSE);
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = submit_request(&h, &model, &id);
+    let line = format!("the dedupe key `build_k` waits for the submission {id}");
+    // No window: the answer must not depend on whether the first's job has completed.
+    let keyed = ["submit", "--json", "--dedupe-key", "build:/k", "--", "true"];
+    let (first, second, sent, line_seen, extra) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| (raw_request(&h, &request), Instant::now()));
+        let made = || h.job_dir(&id).exists();
+        Harness::poll_until("the first submission makes its directory", PAUSE * 5, made);
+        let sent = Instant::now();
+        let second = scope.spawn(|| h.qex_within(&keyed, Duration::from_secs(60)));
+        let mut line_seen = false;
+        while sent.elapsed() < Duration::from_secs(4) {
+            if h.log_lines(&line).len() == 1 {
+                line_seen = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // A job with no key: its insert wakes the waiter while the first still holds the key.
+        let extra = h.qex_within(&["submit", "--json", "--", "true"], Duration::from_secs(60));
+        (
+            first.join().unwrap(),
+            second.join().unwrap(),
+            sent,
+            line_seen,
+            extra,
+        )
+    });
+    assert!(sent < first.1, "the second was sent after the first answer");
+    assert_eq!(first.0["result"], "submitted", "{}", first.0);
+    assert_eq!(first.0["id"], id.as_str(), "{}", first.0);
+    let said = String::from_utf8_lossy(&second.stderr);
+    assert!(second.status.success(), "{said}");
+    assert!(said.contains("and that job is in the state `"), "{said}");
+    let answer = json_of(&String::from_utf8_lossy(&second.stdout));
+    assert_eq!(answer["id"], id.as_str(), "{answer}");
+    assert_eq!(answer["deduplicated"], true, "{answer}");
+    let waits = h.log_lines("waits for the submission");
+    assert_eq!(waits.len(), 1, "{waits:?}");
+    assert!(
+        waits[0].contains(&line) && !waits[0].contains("build:/k"),
+        "{waits:?}"
+    );
+    assert!(
+        line_seen,
+        "race: the wait line did not show within 4 s, so this run proves nothing"
+    );
+    assert!(
+        extra.status.success(),
+        "race: the job with no key failed, so this run proves nothing: {}",
+        String::from_utf8_lossy(&extra.stderr)
+    );
+    let again = h.log_lines("and waits again");
+    assert!(
+        !again.is_empty(),
+        "race: no wake met the waiter while the first held the key, so this run proves nothing"
+    );
+    let woke = format!("`build_k` woke while the submission {id} held that key");
+    assert_eq!(again.len(), 1, "{again:?}");
+    assert!(again[0].contains(&woke), "{again:?}");
+    let listed = h.list_json();
+    let rows = listed.iter().filter(|j| j["id"] == id.as_str()).count();
+    assert_eq!(rows, 1, "{listed:?}");
 }
 
 /// An id that names a directory or a link in jobs/, with no job for it, is refused, nothing is
