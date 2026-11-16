@@ -11,6 +11,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-13: recovery kills what a job with an ended leader left in its group on the stop thread, so the first answer does not wait for the member scan; a job whose group holds no process is failed at once, with no call (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-15: a Submit whose id names a known job, a submission in progress or an entry in jobs/ is refused before anything is written (issue #165).
 // Modified by the local-resource-coordinator fork, 2026-11-15: a submission holds its dedupe key beside the entry of an earlier job until its own job exists, so a refused or failed Submit leaves that job the key (issue #188).
+// Modified by the local-resource-coordinator fork, 2026-11-16: a keyed Submit that meets a submission in progress under its key waits for it to end, then gets its job or makes its own, so a dedupe answer always names a job (issue #190).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -117,10 +118,12 @@ pub struct Stopped {
     pub caused_by: Option<uuid::Uuid>,
     pub needs: Vec<uuid::Uuid>,
     pub after: Vec<uuid::Uuid>,
+    /// The dedupe key of the job's spec, as given. Memory only: a key wait reads it.
+    pub dedupe_key: Option<String>,
 }
 
 impl Stopped {
-    pub fn of(s: &JobStatus) -> Self {
+    pub fn of(s: &JobStatus, dedupe_key: Option<String>) -> Self {
         Self {
             row: crate::proto::JobRow::of(s),
             group_name: s.group_name.clone(),
@@ -129,6 +132,7 @@ impl Stopped {
             caused_by: s.caused_by,
             needs: s.needs.clone(),
             after: s.after.clone(),
+            dedupe_key,
         }
     }
 
@@ -191,6 +195,25 @@ impl Known<'_> {
             Known::Stopped(s) => s.caused_by,
         }
     }
+
+    /// The dedupe key the job was submitted with, as given.
+    pub fn dedupe_key(&self) -> Option<&str> {
+        match self {
+            Known::Live(j) => j.spec.dedupe_key.as_deref(),
+            Known::Stopped(s) => s.dedupe_key.as_deref(),
+        }
+    }
+}
+
+/// One turn of a keyed submission's wait for a submission in progress under its key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyTurn {
+    /// The holder waited on made its job under this key: the answer is that job.
+    Answer(uuid::Uuid),
+    /// This submission in progress holds the key: wait for it.
+    Wait(uuid::Uuid),
+    /// No submission in progress holds the key: run the tests of the key.
+    Free,
 }
 
 /// The data of the coordinator.
@@ -223,7 +246,7 @@ pub struct State {
     /// and writes it in ONE lock operation. Two agents that run the same script
     /// in the same moment thus cannot both find the key free: the first one
     /// holds the key in `submitting` before it gives the lock back, and the
-    /// second one finds that id. The entry here changes when the job exists.
+    /// second one waits for that hold to end, then gets the job it made. The entry changes then.
     ///
     /// A test that read the job list, gave the lock back, and then inserted
     /// would leave a gap between the two steps. Two submissions in that gap
@@ -832,6 +855,33 @@ impl State {
         held
     }
 
+    /// Gives the submission in progress that holds this dedupe key, if one does.
+    pub fn key_held_in_progress(&self, key: &str) -> Option<uuid::Uuid> {
+        for (id, held) in &self.submitting {
+            if held.as_deref() == Some(key) {
+                return Some(*id);
+            }
+        }
+        None
+    }
+
+    /// Decides one turn of a keyed submission's wait. `waited_on` is the holder it waited for
+    /// last; that holder's own job and key decide, since the key's entry can be replaced.
+    pub fn key_wait_turn(&self, key: &str, waited_on: Option<uuid::Uuid>) -> KeyTurn {
+        if let Some(id) = waited_on {
+            if self
+                .known(id)
+                .is_some_and(|job| job.dedupe_key() == Some(key))
+            {
+                return KeyTurn::Answer(id);
+            }
+        }
+        match self.key_held_in_progress(key) {
+            Some(id) => KeyTurn::Wait(id),
+            None => KeyTurn::Free,
+        }
+    }
+
     /// Gives the job that holds this dedupe key now.
     ///
     /// `window` comes from the submission that asks, and not from the job that
@@ -850,10 +900,8 @@ impl State {
     ///   * A job that SUCCEEDED inside the window: it holds the key.
     ///   * Every other job: the key is free.
     pub fn dedupe_holder(&self, key: &str, window: u64) -> Option<uuid::Uuid> {
-        for (id, held) in &self.submitting {
-            if held.as_deref() == Some(key) {
-                return Some(*id);
-            }
+        if let Some(id) = self.key_held_in_progress(key) {
+            return Some(id);
         }
         let id = *self.dedupe.get(key)?;
         let (state, finished_at) = match self.known(id) {
@@ -1057,7 +1105,7 @@ impl State {
             if !job.status.state.is_terminal() {
                 continue;
             }
-            let entry = Stopped::of(&job.status);
+            let entry = Stopped::of(&job.status, job.spec.dedupe_key.clone());
             self.jobs.remove(id);
             self.events.forget(id);
             self.stopped.insert(*id, entry);
@@ -2915,6 +2963,39 @@ fn handle_submit(
 
     let (warning, dir) = {
         let mut state = coord.state.lock().unwrap();
+        // A submission in progress that holds the key may still fail, so wait for it to end. Its
+        // own job and key decide the answer: a later job can replace the key's entry (#190).
+        let mut answer: Option<uuid::Uuid> = None;
+        if let Some(key) = &spec.dedupe_key {
+            let shown = crate::job::safe_name(key);
+            let (mut waited, mut woke) = (None, false);
+            loop {
+                match state.key_wait_turn(key, waited) {
+                    KeyTurn::Answer(holder) => {
+                        answer = Some(holder);
+                        break;
+                    }
+                    KeyTurn::Free => break,
+                    KeyTurn::Wait(holder) => {
+                        if waited.is_none() {
+                            log(&format!(
+                                "a submission with the dedupe key `{shown}` \
+                                 waits for the submission {holder}"
+                            ));
+                        } else if !woke {
+                            woke = true;
+                            log(&format!(
+                                "a submission with the dedupe key `{shown}` \
+                                 woke while the submission {holder} held that key, and waits again"
+                            ));
+                        }
+                        waited = Some(holder);
+                        let wait = coord.changed.wait_timeout(state, Duration::from_secs(30));
+                        state = wait.unwrap().0;
+                    }
+                }
+            }
+        }
         for dep in spec.needs.iter().chain(spec.after.iter()) {
             if state.known(*dep).is_none() {
                 return Response::error(
@@ -2942,11 +3023,11 @@ fn handle_submit(
             // request.
             state.refresh_active();
 
-            if let Some(other) = state.dedupe_holder(&key, spec.dedupe_window) {
+            if let Some(other) = answer.or_else(|| state.dedupe_holder(&key, spec.dedupe_window)) {
                 let doing = match state.known(other) {
                     Some(j) => format!("is in the state `{}`", j.state()),
-                    // The record is not written yet, so the state is the state
-                    // of every new job.
+                    // Only a map entry with no record reaches this arm: a holder in progress is
+                    // waited for above, and a waited answer names a known job.
                     None => String::from("starts now"),
                 };
                 // Show the SAFE form of the key. The key is text that another
@@ -3122,6 +3203,7 @@ fn handle_submit(
         // step, the key would name a job with no record for ever, and each
         // later submission with that key would give an id that answers nothing.
         release_submission(&mut coord.state.lock().unwrap(), id);
+        coord.notify();
         return Response::error(
             ErrorKind::Internal,
             format!("qex could not write the job record: {e:#}"),
@@ -4510,5 +4592,74 @@ mem = \"1GB\"
         release_dedupe(&mut state, id);
         assert!(state.dedupe.is_empty());
         assert_eq!(state.dedupe_holder("k", 3600), None);
+    }
+
+    /// Ends the hold of the spec's id by putting its job in the memory, in `job_state`.
+    fn insert_held(state: &mut State, spec: JobSpec, job_state: JobState, finished: Option<u64>) {
+        let mut status = JobStatus::new(&spec);
+        status.state = job_state;
+        status.finished_at = finished;
+        state.insert_job(Job {
+            spec,
+            status: status.into(),
+            supervisor_pid: None,
+        });
+    }
+
+    /// A waiter gets its holder's job after another submission under the key took the key's
+    /// entry, and after that job left `jobs` for `stopped` (#190).
+    #[test]
+    fn a_waiter_gets_the_job_of_its_holder_after_another_submission_took_the_key() {
+        let mut state = empty_state();
+        let spec = spec_with_key("k");
+        let holder = spec.id;
+        state.submitting.insert(holder, Some("k".into()));
+        assert_eq!(state.key_wait_turn("k", None), KeyTurn::Wait(holder));
+        let ten_back = sys::now_secs() - 10;
+        insert_held(&mut state, spec, JobState::Completed, Some(ten_back));
+        assert_eq!(state.dedupe_holder("k", 0), None);
+
+        // A later submission passes the zero window and takes the key's entry.
+        let later = spec_with_key("k");
+        let taker = later.id;
+        state.submitting.insert(taker, Some("k".into()));
+        insert_held(&mut state, later, JobState::Queued, None);
+        assert_eq!(state.dedupe_holder("k", 0), Some(taker));
+        assert_eq!(
+            state.key_wait_turn("k", Some(holder)),
+            KeyTurn::Answer(holder)
+        );
+        assert_eq!(state.key_wait_turn("k", None), KeyTurn::Free);
+
+        state.publish_changes();
+        state.retire_stopped(&[holder]);
+        assert!(state.stopped.contains_key(&holder) && !state.jobs.contains_key(&holder));
+        assert_eq!(
+            state.key_wait_turn("k", Some(holder)),
+            KeyTurn::Answer(holder)
+        );
+    }
+
+    /// A waiter is not given its failed holder's id when that id names no job, or a job made
+    /// under another key (#190).
+    #[test]
+    fn a_waiter_is_not_given_its_failed_holders_id_under_another_key() {
+        let mut state = empty_state();
+        let holder = uuid::Uuid::new_v4();
+        state.submitting.insert(holder, Some("k".into()));
+        assert_eq!(state.key_wait_turn("k", None), KeyTurn::Wait(holder));
+        release_submission(&mut state, holder);
+        assert_eq!(state.key_wait_turn("k", Some(holder)), KeyTurn::Free);
+
+        let mut spec = spec_with_key("other");
+        spec.id = holder;
+        state.submitting.insert(holder, Some("other".into()));
+        insert_held(&mut state, spec, JobState::Queued, None);
+        assert_eq!(state.key_wait_turn("k", Some(holder)), KeyTurn::Free);
+        // The job is known and only its key differs, so the `Free` above is the key compare.
+        assert_eq!(
+            state.key_wait_turn("other", Some(holder)),
+            KeyTurn::Answer(holder)
+        );
     }
 }
