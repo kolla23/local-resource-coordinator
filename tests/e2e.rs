@@ -39,6 +39,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-15: five tests of a Submit whose id is in use: a running job and its keyed resend, a stopped job, a submission in progress, an entry in jobs/, and an id that a refusal or a failed write frees (issue #165).
 // Modified by the local-resource-coordinator fork, 2026-11-15: three tests that a keyed Submit refused by the pool test or the size test, or whose record write fails, leaves the dedupe key with an earlier completed job (issue #188).
 // Modified by the local-resource-coordinator fork, 2026-11-16: two tests that a keyed Submit which meets a submission in progress under its key waits for it, and gets an id that names a job when that submission fails (issue #190).
+// Modified by the local-resource-coordinator fork, 2026-11-16: four tests of a Submit whose record write fails: its job directory goes and its id makes a job; a keyed resend that waited makes the job; a link at the directory is removed and not followed; a directory that cannot be removed is named in the answer and the log; and the failed-mkdir test checks that no leftover is named (issue #187).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -18849,6 +18850,198 @@ fn two_submits_of_one_new_id_at_once_make_one_job() {
     assert_eq!(rows, 1);
 }
 
+/// A Submit whose record write fails leaves no directory behind, so its id makes a job (#187).
+#[test]
+fn a_submit_whose_record_write_fails_leaves_no_job_directory() {
+    // The switch that pauses the coordinator exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the coordinator");
+        return;
+    }
+    const PAUSE: Duration = Duration::from_secs(4);
+    let mut h = Harness::with_default_config("faileddir");
+    let model = h.submit(&["submit", "--", "true"]);
+    h.until("the model job ends", Duration::from_secs(45), || {
+        h.state_of(&model) == "completed"
+    });
+    // The switch pauses the first mkdir in jobs/, so a new coordinator takes it after the model.
+    h.stop_coordinator();
+    let jobs = h.root.join("state/qex/jobs");
+    h.extra_env.push((
+        "QEX_TEST_PAUSE_AFTER_MKDIR_IN".into(),
+        format!("{} {}", PAUSE.as_millis(), jobs.display()),
+    ));
+    h.coordinator_pid();
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = submit_request(&h, &model, &id);
+    let dir = h.job_dir(&id);
+    let (failed, planted) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| (raw_request(&h, &request), Instant::now()));
+        let made = || dir.exists();
+        Harness::poll_until("the submission makes its directory", PAUSE * 5, made);
+        // Nobody can rename a file over a directory, so the write of status.json fails.
+        std::fs::create_dir_all(dir.join("status.json/in-the-way")).unwrap();
+        let planted = Instant::now();
+        (first.join().unwrap(), planted)
+    });
+    // The fault, or the test proves nothing: the plant came while the submission still paused.
+    assert!(planted < failed.1, "the plant came after the answer");
+    assert_eq!(failed.0["kind"], "internal", "{}", failed.0);
+    let message = failed.0["message"].as_str().unwrap();
+    assert!(message.contains("status.json"), "{message}");
+    assert!(
+        !dir.exists(),
+        "the failed submission left {}",
+        dir.display()
+    );
+
+    let again = raw_request(&h, &request);
+    assert_eq!(again["result"], "submitted", "{again}");
+    h.until("the job ends", Duration::from_secs(45), || {
+        h.state_of(&id) == "completed"
+    });
+}
+
+/// A keyed resend that waits for a failed Submit makes the job under its id: the id stays held
+/// until the directory is gone, so no resend meets it (#187).
+#[test]
+fn a_resend_that_waits_for_a_failed_submit_makes_the_job() {
+    // The switch that pauses the coordinator exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the coordinator");
+        return;
+    }
+    const PAUSE: Duration = Duration::from_secs(4);
+    let (h, model) = a_paused_coordinator_after_a_model_under_build_k("heldgone", PAUSE);
+    // The model's spec carries the key, so a resend waits for the submission in progress.
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = submit_request(&h, &model, &id);
+    let dir = h.job_dir(&id);
+    // Many files, so the removal takes longer than a waiter needs to wake and look.
+    let plant = h.root.join("plant");
+    std::fs::create_dir(&plant).unwrap();
+    for n in 0..5000 {
+        std::fs::write(plant.join(n.to_string()), b"").unwrap();
+    }
+    let (failed, again, sent) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| (raw_request(&h, &request), Instant::now()));
+        let made = || dir.exists();
+        Harness::poll_until("the submission makes its directory", PAUSE * 5, made);
+        std::fs::rename(&plant, dir.join("status.json")).unwrap();
+        let sent = Instant::now();
+        let again = scope.spawn(|| raw_request(&h, &request));
+        (first.join().unwrap(), again.join().unwrap(), sent)
+    });
+    // The race, or the test proves nothing: the resend waited while the first still held the id.
+    assert!(sent < failed.1, "the resend was sent after the answer");
+    assert_eq!(failed.0["kind"], "internal", "{}", failed.0);
+    let waits = h.log_lines(&format!("waits for the submission {id}"));
+    assert_eq!(waits.len(), 1, "{waits:?}");
+    assert_eq!(again["result"], "submitted", "{again}");
+    assert_eq!(again["id"], id.as_str(), "{again}");
+    h.until("the job ends", Duration::from_secs(45), || {
+        h.state_of(&id) == "completed"
+    });
+}
+
+/// A link that takes the place of the job directory during a failed Submit is removed, and
+/// nothing behind it is: the removal does not follow a link (#187).
+#[test]
+fn a_link_at_the_job_directory_of_a_failed_submit_is_not_followed() {
+    // The switch that pauses the coordinator exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the coordinator");
+        return;
+    }
+    const PAUSE: Duration = Duration::from_secs(4);
+    let (h, model) = a_paused_coordinator_after_a_model_under_build_k("linkdir", PAUSE);
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = submit_request(&h, &model, &id);
+    let dir = h.job_dir(&id);
+    // A directory outside jobs/ whose status.json is a directory, so the write fails there.
+    let outside = h.root.join("outside");
+    std::fs::create_dir_all(outside.join("status.json/in-the-way")).unwrap();
+    let (failed, planted) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| (raw_request(&h, &request), Instant::now()));
+        let made = || dir.exists();
+        Harness::poll_until("the submission makes its directory", PAUSE * 5, made);
+        std::fs::remove_dir(&dir).unwrap();
+        std::os::unix::fs::symlink(&outside, &dir).unwrap();
+        let planted = Instant::now();
+        (first.join().unwrap(), planted)
+    });
+    // The fault, or the test proves nothing: the write went through the link and failed there.
+    assert!(planted < failed.1, "the link came after the answer");
+    assert_eq!(failed.0["kind"], "internal", "{}", failed.0);
+    let message = failed.0["message"].as_str().unwrap();
+    assert!(message.contains("status.json"), "{message}");
+    assert!(
+        std::fs::symlink_metadata(&dir).is_err(),
+        "the link stays at {}",
+        dir.display()
+    );
+    assert!(
+        outside.join("status.json/in-the-way").exists(),
+        "the removal followed the link"
+    );
+
+    let again = raw_request(&h, &request);
+    assert_eq!(again["result"], "submitted", "{again}");
+    h.until("the job ends", Duration::from_secs(45), || {
+        h.state_of(&id) == "completed"
+    });
+}
+
+/// When the directory of a failed Submit cannot be removed, the answer and the log name it, and
+/// the id stays refused while it exists (#187).
+#[test]
+fn a_submit_whose_leftover_cannot_be_removed_names_it() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // The switch that pauses the coordinator exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the coordinator");
+        return;
+    }
+    // A test that runs as root deletes anywhere, so it cannot make this fault.
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    const PAUSE: Duration = Duration::from_secs(4);
+    let (h, model) = a_paused_coordinator_after_a_model_under_build_k("keptdir", PAUSE);
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = submit_request(&h, &model, &id);
+    let dir = h.job_dir(&id);
+    let plant = dir.join("status.json");
+    let (failed, planted) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| (raw_request(&h, &request), Instant::now()));
+        let made = || dir.exists();
+        Harness::poll_until("the submission makes its directory", PAUSE * 5, made);
+        // The write of status.json fails on the directory, and nobody empties a 0500 directory.
+        std::fs::create_dir_all(plant.join("in-the-way")).unwrap();
+        std::fs::set_permissions(&plant, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let planted = Instant::now();
+        (first.join().unwrap(), planted)
+    });
+    let kept = plant.join("in-the-way").exists();
+    // The harness deletes its root at the end, so the plant gets its mode back before a panic.
+    std::fs::set_permissions(&plant, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let again = raw_request(&h, &request);
+    assert!(planted < failed.1, "the plant came after the answer");
+    assert_eq!(failed.0["kind"], "internal", "{}", failed.0);
+    let message = failed.0["message"].as_str().unwrap();
+    assert!(message.contains("status.json"), "{message}");
+    assert!(
+        message.contains("qex could not remove") && message.contains(&id),
+        "{message}"
+    );
+    let lines = h.log_lines("qex could not remove");
+    assert!(lines.len() == 1 && lines[0].contains(&id), "{lines:?}");
+    assert!(kept, "the plant is gone: {message}");
+    assert_id_refused(&again, &id, "already exists");
+}
+
 /// A coordinator whose first mkdir in jobs/ pauses for `pause`, after a model job completed under
 /// the key `build:/k` (safe form `build_k`). Gives the harness and the model's id.
 fn a_paused_coordinator_after_a_model_under_build_k(
@@ -19137,6 +19330,9 @@ fn a_submit_that_made_no_job_leaves_its_id_free() {
     std::fs::set_permissions(&jobs, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(failed["kind"], "internal", "{failed}");
     assert!(!h.job_dir(&id).exists(), "{failed}");
+    // No directory was made, so the answer names none as left behind.
+    let message = failed["message"].as_str().unwrap();
+    assert!(!message.contains("qex could not remove"), "{message}");
 
     let again = raw_request(&h, &request);
     assert_eq!(again["result"], "submitted", "{again}");
