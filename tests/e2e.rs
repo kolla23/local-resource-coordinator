@@ -37,6 +37,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-14: a test that a failed test of the stop hook's state sends no signal and spares a new group on its freed pid, on the runner the three freed-pid tests now share (issue #178).
 // Modified by the local-resource-coordinator fork, 2026-11-14: the time limit's KILL test times its job with the test's own monotonic clock, not with the record's two wall-clock seconds (issue #181).
 // Modified by the local-resource-coordinator fork, 2026-11-15: five tests of a Submit whose id is in use: a running job and its keyed resend, a stopped job, a submission in progress, an entry in jobs/, and an id that a refusal or a failed write frees (issue #165).
+// Modified by the local-resource-coordinator fork, 2026-11-15: three tests that a keyed Submit refused by the pool test or the size test, or whose record write fails, leaves the dedupe key with an earlier completed job (issue #188).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -21050,6 +21051,94 @@ fn a_pool_claim_that_is_refused_gives_the_dedupe_key_back() {
         "completed",
         "the key of a refused job must be free"
     );
+}
+
+/// A coordinator with a pool and the size refusal, and a completed job under the key `kept`.
+fn a_completed_job_under_the_key_kept(tag: &str) -> (Harness, String) {
+    let h = Harness::new(
+        tag,
+        &pool_config("\"24GB\", \"24GB\"", "[queue]\noversized = \"reject\"\n"),
+    );
+    let done = h.submit(&["submit", "--dedupe-key", "kept", "--", "true"]);
+    h.ok(&["wait", &done, "--timeout", "45s"]);
+    assert_eq!(h.state_of(&done), "completed");
+    (h, done)
+}
+
+/// After `what`, a submission under `kept` with a window of one hour gets this job.
+fn assert_the_key_kept_gives(h: &Harness, job: &str, what: &str) {
+    let again = h.submit(&[
+        "submit",
+        "--dedupe-key",
+        "kept",
+        "--dedupe-window",
+        "1h",
+        "--",
+        "true",
+    ]);
+    assert_eq!(again, job, "after {what}, the window must reach this job");
+}
+
+/// A pool refusal of a keyed submission leaves the key with the earlier job (#188).
+#[test]
+fn a_pool_refusal_keeps_the_key_of_an_earlier_completed_job() {
+    let (h, done) = a_completed_job_under_the_key_kept("poolkeeps");
+    // No window, so the submission misses the completed job and reaches the pool test.
+    let out = h.qex(&["submit", "--dedupe-key", "kept", "--gpu", "8", "--", "true"]);
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && said.contains("of the pool `gpu`"),
+        "{said}"
+    );
+    assert_the_key_kept_gives(&h, &done, "the pool refusal");
+}
+
+/// The size refusal of a keyed submission leaves the key with the earlier job (#188).
+#[test]
+fn a_size_refusal_keeps_the_key_of_an_earlier_completed_job() {
+    let (h, done) = a_completed_job_under_the_key_kept("sizekeeps");
+    let out = h.qex(&[
+        "submit",
+        "--dedupe-key",
+        "kept",
+        "--cpu",
+        "64",
+        "--",
+        "true",
+    ]);
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && said.contains("oversized = \"reject\""),
+        "{said}"
+    );
+    assert_the_key_kept_gives(&h, &done, "the size refusal");
+}
+
+/// A failed record write of a keyed submission leaves the key with the earlier job, and the
+/// next job under the key takes it (#188).
+#[test]
+fn a_failed_record_write_keeps_the_key_of_an_earlier_completed_job() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // A test that runs as root writes anywhere, so it cannot make this fault.
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    let (h, done) = a_completed_job_under_the_key_kept("writekeeps");
+    let jobs = h.root.join("state/qex/jobs");
+    // The spec of the completed job carries the key with no window, so the key misses.
+    let request = submit_request(&h, &done, &uuid::Uuid::new_v4().to_string());
+    std::fs::set_permissions(&jobs, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let failed = raw_request(&h, &request);
+    std::fs::set_permissions(&jobs, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(failed["kind"], "internal", "{failed}");
+    assert_the_key_kept_gives(&h, &done, "the failed write");
+
+    // The key is not stuck: a submission with no window starts a job, and the key names it.
+    let next = h.submit(&["submit", "--dedupe-key", "kept", "--", "true"]);
+    assert_ne!(next, done);
+    h.ok(&["wait", &next, "--timeout", "45s"]);
+    assert_the_key_kept_gives(&h, &next, "the next job");
 }
 
 /// A job that claims a GPU must not also set the variable that qex writes.
