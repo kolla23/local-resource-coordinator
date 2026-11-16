@@ -10,6 +10,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-13: recovery stops a job that lost its supervisor on a thread of its own, so the first answer does not wait for the TERM grace, and writes the failed record when the stop ends; a fault there ends the coordinator with the code 101, and a debug-only switch makes one for the tests (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-13: recovery kills what a job with an ended leader left in its group on the stop thread, so the first answer does not wait for the member scan; a job whose group holds no process is failed at once, with no call (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-15: a Submit whose id names a known job, a submission in progress or an entry in jobs/ is refused before anything is written (issue #165).
+// Modified by the local-resource-coordinator fork, 2026-11-15: a submission holds its dedupe key beside the entry of an earlier job until its own job exists, so a refused or failed Submit leaves that job the key (issue #188).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -221,16 +222,16 @@ pub struct State {
     /// The coordinator is the single writer of this map, and it reads the map
     /// and writes it in ONE lock operation. Two agents that run the same script
     /// in the same moment thus cannot both find the key free: the first one
-    /// puts its id here before it gives the lock back, and the second one finds
-    /// that id.
+    /// holds the key in `submitting` before it gives the lock back, and the
+    /// second one finds that id. The entry here changes when the job exists.
     ///
     /// A test that read the job list, gave the lock back, and then inserted
     /// would leave a gap between the two steps. Two submissions in that gap
     /// would both start a job, which is the fault that the key removes.
     pub dedupe: BTreeMap<String, uuid::Uuid>,
-    /// The ids of the submissions between their id test and their insert. An id is tested
-    /// and held in ONE lock operation, as a key of `dedupe` is, so two cannot both pass.
-    pub submitting: std::collections::BTreeSet<uuid::Uuid>,
+    /// The submissions between their id test and their insert, each with the dedupe key it
+    /// holds. An id and a key are tested and held in ONE lock operation, so two cannot both pass.
+    pub submitting: BTreeMap<uuid::Uuid, Option<String>>,
     /// The time of the last command from a CLI process.
     pub last_contact: Instant,
     /// The time when the queue became empty, for the oversized job rule.
@@ -839,16 +840,21 @@ impl State {
     ///
     /// The rules, in order:
     ///
+    ///   * A submission in progress with this key (`submitting`): it holds the
+    ///     key, whatever job the entry names.
     ///   * No entry: the key is free.
-    ///   * An entry with no job record: a submission with this key is in
-    ///     progress in a different thread, and it holds the key. `clean`
-    ///     deletes the entry with the record, so this case cannot mean "the
-    ///     record went away".
+    ///   * An entry with no job record: held. `clean` deletes the entry with
+    ///     the record, and no other step makes this case.
     ///   * A job that has not stopped: it holds the key. This is the case that
     ///     the option exists for.
     ///   * A job that SUCCEEDED inside the window: it holds the key.
     ///   * Every other job: the key is free.
     pub fn dedupe_holder(&self, key: &str, window: u64) -> Option<uuid::Uuid> {
+        for (id, held) in &self.submitting {
+            if held.as_deref() == Some(key) {
+                return Some(*id);
+            }
+        }
         let id = *self.dedupe.get(key)?;
         let (state, finished_at) = match self.known(id) {
             Some(Known::Live(job)) => (job.status.state, job.status.finished_at),
@@ -959,7 +965,7 @@ impl State {
     pub fn id_in_use(&self, id: uuid::Uuid) -> Option<String> {
         let holder = match self.known(id) {
             Some(job) => format!("a job in the state `{}`", job.state()),
-            None if self.submitting.contains(&id) => {
+            None if self.submitting.contains_key(&id) => {
                 String::from("a submission that is in progress")
             }
             None => return None,
@@ -982,7 +988,10 @@ impl State {
             },
         );
         self.stopped.remove(&id);
-        self.submitting.remove(&id);
+        // The hold of the submission ends here, and its key names the job from this moment.
+        if let Some(Some(key)) = self.submitting.remove(&id) {
+            self.dedupe.insert(key, id);
+        }
         self.jobs.insert(id, job);
     }
 
@@ -2996,13 +3005,6 @@ fn handle_submit(
             }
         }
 
-        if let Some(key) = spec.dedupe_key.clone() {
-            // Hold the key for this job now, before the lock goes. A second
-            // submission with the same key finds this id, whatever moment it
-            // arrives in.
-            state.dedupe.insert(key, id);
-        }
-
         // Say now that this job waits for a pause, and not for capacity.
         //
         // An agent that submits a job into a paused queue must learn the true
@@ -3044,12 +3046,7 @@ fn handle_submit(
         // oversized` says. This is a change in kind from the cores and the
         // memory: an oversized memory job can run alone and swap, and that
         // result is data. Running alone does not make a fifth device.
-        //
-        // qex refuses this job, so it must not hold the dedupe key. A key that
-        // a refused job holds would stop each later submission, and no job
-        // would ever free it.
         if let Err(reason) = crate::sched::pool_check(&state.cfg, &spec) {
-            release_dedupe(&mut state, id);
             return Response::error(ErrorKind::WrongState, reason);
         }
 
@@ -3059,10 +3056,6 @@ fn handle_submit(
                 use crate::config::OversizedPolicy;
                 match state.cfg.queue.oversized {
                     OversizedPolicy::Reject => {
-                        // qex refuses this job, so it must not hold the key.
-                        // A key that a refused job holds would stop each later
-                        // submission, and no job would ever free it.
-                        release_dedupe(&mut state, id);
                         return Response::error(
                             ErrorKind::WrongState,
                             format!(
@@ -3086,8 +3079,9 @@ fn handle_submit(
                 }
             }
         };
-        // Hold the id after the last refusal of this lock, so only the disk steps free it.
-        state.submitting.insert(id);
+        // Hold the id and the key after the last refusal of this lock, so only the disk steps
+        // free them. A refused job holds no key, and an earlier job keeps its entry (#188).
+        state.submitting.insert(id, spec.dedupe_key.clone());
         (warning, dir)
     };
 
@@ -3173,9 +3167,8 @@ pub fn release_dedupe(state: &mut State, id: uuid::Uuid) {
     state.dedupe.retain(|_, holder| *holder != id);
 }
 
-/// Frees what a submission that made no job held: its dedupe key and its id.
+/// Frees what a submission that made no job held: its id and, with it, its dedupe key.
 fn release_submission(state: &mut State, id: uuid::Uuid) {
-    release_dedupe(state, id);
     state.submitting.remove(&id);
 }
 
@@ -4443,14 +4436,14 @@ mem = \"1GB\"
         panic!("the clock moved on every attempt, so the edge was never tested");
     }
 
-    /// The hold on an id ends when its job enters the memory, so no id stays held for ever.
+    /// The hold on an id ends when its job enters the memory, and the key it held names the job.
     /// No command shows the set of held ids, so this test reads it.
     #[test]
     fn a_job_that_enters_the_memory_frees_the_hold_on_its_id() {
         let mut state = empty_state();
         let spec = spec_with_key("k");
         let id = spec.id;
-        state.submitting.insert(id);
+        state.submitting.insert(id, Some("k".into()));
         assert!(state
             .id_in_use(id)
             .is_some_and(|why| why.contains("in progress")));
@@ -4461,6 +4454,7 @@ mem = \"1GB\"
             supervisor_pid: None,
         });
         assert!(state.submitting.is_empty());
+        assert_eq!(state.dedupe.get("k"), Some(&id));
         assert!(state
             .id_in_use(id)
             .is_some_and(|why| why.contains("the state `queued`")));
@@ -4474,9 +4468,36 @@ mem = \"1GB\"
     #[test]
     fn a_key_that_a_submission_reserved_is_taken_before_the_record_exists() {
         let mut state = empty_state();
+        let done = add(&mut state, "k", JobState::Completed, Some(sys::now_secs()));
         let id = uuid::Uuid::new_v4();
-        state.dedupe.insert("k".into(), id);
+        state.submitting.insert(id, Some("k".into()));
         assert_eq!(state.dedupe_holder("k", 0), Some(id));
+        assert_eq!(state.dedupe_holder("k", 3600), Some(id));
+
+        // The submission made no job (#188): the earlier job still has the key.
+        release_submission(&mut state, id);
+        assert_eq!(state.dedupe_holder("k", 0), None);
+        assert_eq!(state.dedupe_holder("k", 3600), Some(done));
+
+        // An entry that names no job still reads as held.
+        state.dedupe.insert("gone".into(), id);
+        assert_eq!(state.dedupe_holder("gone", 0), Some(id));
+    }
+
+    /// `qex clean` of the earlier job while a submission holds the key frees the entry, so a
+    /// submission that then fails leaves no key that names a job with no record (#188).
+    #[test]
+    fn a_clean_under_a_held_key_leaves_no_entry_when_the_submission_fails() {
+        let mut state = empty_state();
+        let done = add(&mut state, "k", JobState::Completed, Some(sys::now_secs()));
+        let id = uuid::Uuid::new_v4();
+        state.submitting.insert(id, Some("k".into()));
+        state.forget_job(done);
+        release_dedupe(&mut state, done);
+        assert_eq!(state.dedupe_holder("k", 3600), Some(id));
+        release_submission(&mut state, id);
+        assert!(state.dedupe.is_empty());
+        assert_eq!(state.dedupe_holder("k", 3600), None);
     }
 
     /// The record and the key go together. A key that named a job with no
