@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-17: the capability free-ids (issue #200).
 //! This module tells the CLI what the coordinator can do.
 //!
 //! # The fault that this module removes
@@ -185,6 +186,8 @@ pub const ALL: &[&str] = &[
     "dedupe",
     "dependencies",
     "events",
+    // A request name. A CLI that finds it missing leaves the directories it would ask about.
+    "free-ids",
     "groups",
     "history",
     "learn",

@@ -13,6 +13,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-15: a submission holds its dedupe key beside the entry of an earlier job until its own job exists, so a refused or failed Submit leaves that job the key (issue #188).
 // Modified by the local-resource-coordinator fork, 2026-11-16: a keyed Submit that meets a submission in progress under its key waits for it to end, then gets its job or makes its own, so a dedupe answer always names a job (issue #190).
 // Modified by the local-resource-coordinator fork, 2026-11-16: a Submit whose record write fails removes its job directory before it frees its id, and names a directory it could not remove in the answer and the log (issue #187).
+// Modified by the local-resource-coordinator fork, 2026-11-17: the FreeIds request says which ids no job and no submission in progress holds (issue #200).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has
@@ -2251,6 +2252,14 @@ fn handle(coord: &Arc<Coordinator>, request: Request, peer: Option<i32>) -> Resp
             grace_secs,
         } => crate::lifecycle::kill(coord, id, signal, grace_secs),
         Request::Clean { id } => crate::lifecycle::clean(coord, id),
+        Request::FreeIds { ids } => {
+            // One lock for the whole answer: the lock that a Submit tests and holds its id under.
+            let state = coord.state.lock().unwrap();
+            let free = |id: &uuid::Uuid| state.id_in_use(*id).is_none();
+            Response::FreeIds {
+                ids: ids.into_iter().filter(free).collect(),
+            }
+        }
         Request::Pause {
             target,
             reason,

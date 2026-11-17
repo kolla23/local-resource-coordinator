@@ -41,6 +41,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-16: two tests that a keyed Submit which meets a submission in progress under its key waits for it, and gets an id that names a job when that submission fails (issue #190).
 // Modified by the local-resource-coordinator fork, 2026-11-16: four tests of a Submit whose record write fails: its job directory goes and its id makes a job; a keyed resend that waited makes the job; a link at the directory is removed and not followed; a directory that cannot be removed is named in the answer and the log; and the failed-mkdir test checks that no leftover is named (issue #187).
 // Modified by the local-resource-coordinator fork, 2026-11-16: three tests that qex gc names a directory with no record that it could not remove, in its text and its JSON, with no control byte (issue #194).
+// Modified by the local-resource-coordinator fork, 2026-11-17: five tests that qex gc leaves the directory of a Submit in progress, leaves what an earlier coordinator cannot vouch for, asks in parts, removes what a killed coordinator left and stops on another answer (issue #200).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -11729,6 +11730,233 @@ fn gc_writes_no_control_byte_from_the_name_of_a_directory_that_stayed() {
     let mut on_disk = [esc.dir.to_str().unwrap(), plain.dir.to_str().unwrap()];
     on_disk.sort();
     assert_eq!(paths, on_disk, "{said}");
+}
+
+/// `qex gc` leaves the directory of a Submit that has not written its record yet, in the dry run
+/// too, and still removes a directory with no record that no submission holds (#200).
+#[test]
+fn gc_leaves_the_directory_of_a_submit_in_progress() {
+    // The switch that pauses the coordinator exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the coordinator");
+        return;
+    }
+    const PAUSE: Duration = Duration::from_secs(4);
+    let mut h = Harness::with_default_config("gcsubmit");
+    let model = h.submit(&["submit", "--", "true"]);
+    h.until("the model job ends", Duration::from_secs(45), || {
+        h.state_of(&model) == "completed"
+    });
+    // The switch pauses the first mkdir in jobs/, so a new coordinator takes it after the model.
+    h.stop_coordinator();
+    let jobs = h.root.join("state/qex/jobs");
+    h.extra_env.push((
+        "QEX_TEST_PAUSE_AFTER_MKDIR_IN".into(),
+        format!("{} {}", PAUSE.as_millis(), jobs.display()),
+    ));
+    h.coordinator_pid();
+
+    // No submission holds this one: its removal shows that the sweep ran in this run.
+    let stale = uuid::Uuid::new_v4().to_string();
+    std::fs::create_dir(h.job_dir(&stale)).unwrap();
+    std::fs::write(h.job_dir(&stale).join("blob"), vec![b'x'; 300]).unwrap();
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = submit_request(&h, &model, &id);
+    let dir = h.job_dir(&id);
+    let ask = serde_json::json!({ "op": "free_ids", "ids": [id, stale, model] });
+    let (first, would, out, free, swept, recordless) = std::thread::scope(|scope| {
+        let first = scope.spawn(|| (raw_request(&h, &request), Instant::now()));
+        let made = || dir.exists();
+        Harness::poll_until("the submission makes its directory", PAUSE * 5, made);
+        let would = h.qex(&["gc", "--dry-run", "--older-than", "1h"]);
+        let free = raw_request(&h, &ask);
+        let out = h.qex(&["gc", "--older-than", "1h"]);
+        let swept = Instant::now();
+        // The record is written once, so its absence now covers both gc runs.
+        let recordless = !dir.join("status.json").exists();
+        (first.join().unwrap(), would, out, free, swept, recordless)
+    });
+    // The race, or the test proves nothing: both runs ended while the submission still paused.
+    assert!(swept < first.1, "gc ended after the answer");
+    assert!(recordless, "a gc ran after the Submit wrote its record");
+    assert_eq!(
+        (
+            code_and_streams(&would),
+            code_and_streams(&out),
+            first.0["result"].as_str()
+        ),
+        (
+            (
+                Some(0),
+                "qex would delete 0 records, and 1 directory, with no record, and free 300B.\n\
+                 Nothing changed. Run the command without `--dry-run` to delete them.\n"
+                    .to_string(),
+                String::new()
+            ),
+            (
+                Some(0),
+                "qex deleted 0 records, and 1 directory, with no record, and freed 300B.\n"
+                    .to_string(),
+                String::new()
+            ),
+            Some("submitted")
+        ),
+        "gc counts and removes only the directory that no submission holds, and the Submit \
+         makes its job: {}",
+        first.0
+    );
+    assert!(!h.job_dir(&stale).exists(), "the stale directory must go");
+    // On the wire: the coordinator frees neither the submission in progress nor a job it holds.
+    assert_eq!(
+        free,
+        serde_json::json!({ "result": "free_ids", "ids": [stale] })
+    );
+    h.until("the job ends", Duration::from_secs(45), || {
+        h.state_of(&id) == "completed"
+    });
+}
+
+/// With a coordinator that cannot say which ids are free, `qex gc` leaves each directory with no
+/// record that is named like a job id, says so, and sends no request that it cannot read (#200).
+#[test]
+fn gc_leaves_what_an_earlier_coordinator_cannot_vouch_for() {
+    let c = ARecordingCoordinator::new("gcold", &["locks", "retries"]);
+    let jobs = c.root.join("state/qex/jobs");
+    let like_an_id = jobs.join(uuid::Uuid::new_v4().to_string());
+    let other = jobs.join("not-an-id");
+    for dir in [&like_an_id, &other] {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("blob"), vec![b'x'; 300]).unwrap();
+    }
+
+    let out = c.qex(&["gc", "--older-than", "1h"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(0),
+            "qex deleted 0 records, and 1 directory, with no record, and freed 300B.\n".to_string(),
+            "qex left 1 directory with no record in place: this coordinator is older and cannot \
+             say whether a submission holds it. Run qex gc again after that coordinator stops; \
+             it stops when no job operates.\n"
+                .to_string()
+        )
+    );
+    assert!(like_an_id.join("blob").exists() && !other.exists());
+    let ops = c.ops();
+    assert!(
+        ops.iter().any(|op| op == "capabilities") && !ops.iter().any(|op| op == "free_ids"),
+        "{ops:?}"
+    );
+}
+
+/// `qex gc` asks about more directories than one request carries, and removes each one (#200).
+#[test]
+fn gc_asks_about_more_directories_than_one_request_carries() {
+    let h = Harness::with_default_config("gcparts");
+    // The coordinator makes jobs/.
+    h.ok(&["list"]);
+    for _ in 0..501 {
+        std::fs::create_dir(h.job_dir(&uuid::Uuid::new_v4().to_string())).unwrap();
+    }
+
+    let out = h.qex(&["gc", "--older-than", "1h"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(0),
+            "qex deleted 0 records, and 501 directories, with no record, and freed 0B.\n"
+                .to_string(),
+            String::new()
+        )
+    );
+    let left = std::fs::read_dir(h.root.join("state/qex/jobs")).unwrap();
+    assert_eq!(left.count(), 0);
+}
+
+/// When the coordinator's answer is not the list of free ids, `qex gc` stops and removes
+/// nothing (#200).
+#[test]
+fn gc_removes_nothing_when_the_coordinator_does_not_say_which_ids_are_free() {
+    // This one says that it can answer, and then answers with an error.
+    let c = ARecordingCoordinator::new("gcbad", &["free-ids"]);
+    let dir = c.root.join("state/qex/jobs");
+    let dir = dir.join(uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let out = c.qex(&["gc", "--older-than", "1h"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(1),
+            String::new(),
+            "qex: qex could not read this request\n".to_string()
+        )
+    );
+    assert!(
+        dir.exists(),
+        "gc removed a directory that nothing vouched for"
+    );
+    let asked = c.ops().iter().filter(|op| *op == "free_ids").count();
+    assert_eq!(asked, 1);
+}
+
+/// A coordinator that dies between the directory and the record leaves a directory that no
+/// submission holds any more: the next `qex gc` removes it (#200).
+#[test]
+fn gc_removes_the_directory_that_a_killed_coordinator_left() {
+    use std::io::Write;
+
+    // The switch that pauses the coordinator exists in a debug build only.
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped: a release build has no test switch to pause the coordinator");
+        return;
+    }
+    const PAUSE: Duration = Duration::from_secs(4);
+    let mut h = Harness::with_default_config("gckilled");
+    let model = h.submit(&["submit", "--", "true"]);
+    h.until("the model job ends", Duration::from_secs(45), || {
+        h.state_of(&model) == "completed"
+    });
+    // The switch pauses the first mkdir in jobs/, so a new coordinator takes it after the model.
+    h.stop_coordinator();
+    let jobs = h.root.join("state/qex/jobs");
+    h.extra_env.push((
+        "QEX_TEST_PAUSE_AFTER_MKDIR_IN".into(),
+        format!("{} {}", PAUSE.as_millis(), jobs.display()),
+    ));
+    h.coordinator_pid();
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = submit_request(&h, &model, &id);
+    let dir = h.job_dir(&id);
+    let socket = h.root.join("state/qex/run/s");
+    let mut stream = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    stream.write_all(format!("{request}\n").as_bytes()).unwrap();
+    let made = || dir.exists();
+    Harness::poll_until("the submission makes its directory", PAUSE * 5, made);
+    // The coordinator dies in its pause, so the directory never gets its record.
+    h.stop_coordinator();
+    drop(stream);
+    assert!(dir.exists() && !dir.join("status.json").exists());
+
+    let out = h.qex(&["gc", "--older-than", "1h"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(0),
+            "qex deleted 0 records, and 1 directory, with no record, and freed 0B.\n".to_string(),
+            String::new()
+        )
+    );
+    assert!(
+        !dir.exists(),
+        "the directory of the dead submission must go"
+    );
 }
 
 /// `other_bytes` still counts the files of a state directory behind the user's own link (#101).
