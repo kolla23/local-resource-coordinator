@@ -4,6 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: find_id_on_disk skips a symbolic link in jobs/ (issue #129).
 // Modified by the local-resource-coordinator fork, 2026-11-03: qex gc counts a folder whose record names another id as one with no record (issue #135).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test record sets the new pid_ns fields (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-16: qex gc names each directory with no record that it could not remove, counts only what it removed, and gives the code 1 (issue #194).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -6835,32 +6836,29 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
         }
     }
 
-    let bytes: u64 = targets.iter().map(|(_, _, b)| b).sum::<u64>()
-        + orphans.iter().map(|(_, b)| b).sum::<u64>();
+    let record_bytes: u64 = targets.iter().map(|(_, _, b)| b).sum();
+    let bytes = record_bytes + orphans.iter().map(|(_, b)| b).sum::<u64>();
 
-    if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "older_than_secs": keep,
-                "dry_run": args.dry_run,
-                "jobs": targets.iter().map(|(id, name, _)| serde_json::json!({
-                    "id": id.to_string(), "name": name
-                })).collect::<Vec<_>>(),
-                "directories_with_no_record": orphans.len(),
-                // The key says what qex tested, and nothing more. A record stays
-                // because a job waits for it, OR because its pipeline has work
-                // left; the second is not a job that needs the record. An
-                // agent parses this key, so a key that names a need sends the
-                // agent to look for a job that does not exist.
-                "kept_because_work_has_not_stopped": held_back,
-                "bytes": bytes,
-            }))?
-        );
-    }
+    let mut answer = serde_json::json!({
+        "older_than_secs": keep,
+        "dry_run": args.dry_run,
+        "jobs": targets.iter().map(|(id, name, _)| serde_json::json!({
+            "id": id.to_string(), "name": name
+        })).collect::<Vec<_>>(),
+        "directories_with_no_record": orphans.len(),
+        // The key says what qex tested, and nothing more. A record stays
+        // because a job waits for it, OR because its pipeline has work
+        // left; the second is not a job that needs the record. An
+        // agent parses this key, so a key that names a need sends the
+        // agent to look for a job that does not exist.
+        "kept_because_work_has_not_stopped": held_back,
+        "bytes": bytes,
+    });
 
     if args.dry_run {
-        if !args.json {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&answer)?);
+        } else {
             println!(
                 "qex would delete {}, and {}, with no record, and free {}.",
                 count_of(targets.len(), "record"),
@@ -6878,16 +6876,23 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
             deleted += 1;
         }
     }
-    for (path, _) in &orphans {
-        std::fs::remove_dir_all(path).ok();
-    }
+    let (removed, removed_bytes, stayed) = remove_directories(&orphans);
+    let freed = record_bytes + removed_bytes;
 
-    if !args.json {
+    if args.json {
+        // After the removals, so the answer names each directory that stayed (#194).
+        answer["bytes"] = freed.into();
+        answer["directories_not_removed"] = stayed
+            .iter()
+            .map(|(path, error)| serde_json::json!({ "path": path, "error": error }))
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&answer)?);
+    } else {
         println!(
             "qex deleted {}, and {}, with no record, and freed {}.",
             count_of(deleted, "record"),
-            plural_directories(orphans.len()),
-            format_size(bytes)
+            plural_directories(removed),
+            format_size(freed)
         );
         if held_back > 0 {
             // "holds" and not "needs": a record can stay because a job waits
@@ -6909,7 +6914,37 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
             );
         }
     }
+    for (path, error) in &stayed {
+        // Somebody else chose the name of the directory, so it loses its control bytes.
+        let path = crate::job::printable(path);
+        eprintln!("qex could not remove {path}: {error}.");
+    }
+    if !stayed.is_empty() {
+        eprintln!(
+            "{} stayed. Fix the cause, then run qex gc again, or delete {} by hand.",
+            plural_directories(stayed.len()),
+            if stayed.len() == 1 { "it" } else { "them" }
+        );
+        return Ok(1);
+    }
     Ok(0)
+}
+
+/// Removes each directory with no record. Gives how many went and their bytes, and each one that
+/// stayed with its error; one that is already gone is neither, as nothing removed it here (#194).
+fn remove_directories(dirs: &[(std::path::PathBuf, u64)]) -> (usize, u64, Vec<(String, String)>) {
+    let (mut removed, mut freed, mut stayed) = (0usize, 0u64, Vec::new());
+    for (path, size) in dirs {
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => {
+                removed += 1;
+                freed += size;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => stayed.push((path.to_string_lossy().into_owned(), e.to_string())),
+        }
+    }
+    (removed, freed, stayed)
 }
 
 /// Gives the bytes one directory holds, subfolders included; a link counts as itself.
@@ -8198,5 +8233,32 @@ mod tests {
             text.contains("`test`"),
             "the message must name the stage that holds the fault: {text}"
         );
+    }
+
+    /// A directory that is already gone is no failure of `qex gc`, and gc did not remove it.
+    /// No run of the CLI reaches this: nothing can delete a directory between gc's two steps.
+    #[test]
+    fn a_directory_that_is_already_gone_neither_went_nor_stayed() {
+        let root =
+            crate::testutil::temp_dir().join(format!("qex-gc-gone-{}", uuid::Uuid::new_v4()));
+        let here = root.join("here");
+        std::fs::create_dir_all(&here).unwrap();
+        std::fs::write(here.join("blob"), b"12345").unwrap();
+        // A file where a directory must be: std cannot remove it as a directory.
+        let file = root.join("a-file");
+        std::fs::write(&file, b"1234567").unwrap();
+        let dirs = [(root.join("gone"), 3), (here.clone(), 5), (file.clone(), 7)];
+
+        let (removed, freed, stayed) = remove_directories(&dirs);
+
+        assert_eq!(
+            (removed, freed),
+            (1, 5),
+            "only the directory that was here went"
+        );
+        assert!(!here.exists());
+        let error = std::fs::remove_dir_all(&file).unwrap_err().to_string();
+        assert_eq!(stayed, [(file.to_string_lossy().into_owned(), error)]);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

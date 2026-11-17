@@ -40,6 +40,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-15: three tests that a keyed Submit refused by the pool test or the size test, or whose record write fails, leaves the dedupe key with an earlier completed job (issue #188).
 // Modified by the local-resource-coordinator fork, 2026-11-16: two tests that a keyed Submit which meets a submission in progress under its key waits for it, and gets an id that names a job when that submission fails (issue #190).
 // Modified by the local-resource-coordinator fork, 2026-11-16: four tests of a Submit whose record write fails: its job directory goes and its id makes a job; a keyed resend that waited makes the job; a link at the directory is removed and not followed; a directory that cannot be removed is named in the answer and the log; and the failed-mkdir test checks that no leftover is named (issue #187).
+// Modified by the local-resource-coordinator fork, 2026-11-16: three tests that qex gc names a directory with no record that it could not remove, in its text and its JSON, with no control byte (issue #194).
 //! End-to-end tests for qex.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -11484,6 +11485,250 @@ fn du_and_gc_do_not_walk_or_delete_through_a_link_in_jobs() {
         std::fs::read(outside.join("inner/small")).unwrap(),
         vec![b'y'; 4_000]
     );
+}
+
+/// A directory with no record in `jobs/` that only root can empty, with the error that std gives
+/// for its removal. It gets its mode back when this value goes, after a panic too (#194).
+struct CannotGo {
+    dir: PathBuf,
+    error: String,
+}
+
+impl Drop for CannotGo {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        // The harness deletes its root after this, and it cannot empty a 0500 directory.
+        std::fs::set_permissions(&self.dir, std::fs::Permissions::from_mode(0o700)).ok();
+    }
+}
+
+/// Plants in `jobs/` a directory with no record that holds 500 bytes and that only root can
+/// empty (#194).
+fn a_directory_with_no_record_that_cannot_go(h: &Harness, name: &str) -> CannotGo {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = h.job_dir(name);
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::write(dir.join("blob"), vec![b'x'; 500]).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    match std::fs::remove_dir_all(&dir) {
+        Err(e) => CannotGo {
+            dir,
+            error: e.to_string(),
+        },
+        // Root empties it, and so does a file system that keeps no modes.
+        Ok(()) => panic!(
+            "not evaluated: this user (euid {}) emptied a 0500 directory, so no removal fails here",
+            unsafe { libc::geteuid() }
+        ),
+    }
+}
+
+/// What a command gave: its code, its stdout and its stderr.
+fn code_and_streams(out: &Output) -> (Option<i32>, String, String) {
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// `qex gc` names a directory with no record that it could not remove, counts in its summary
+/// only what it removed, and gives the code 1; the dry run still counts what it found (#194).
+#[test]
+fn gc_names_a_directory_with_no_record_that_it_could_not_remove() {
+    let h = Harness::with_default_config("gc-stuck");
+    // The coordinator makes jobs/. It holds no record, so the summary counts directories only.
+    h.ok(&["list"]);
+    let goes = h.job_dir(&uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir(&goes).unwrap();
+    std::fs::write(goes.join("blob"), vec![b'x'; 300]).unwrap();
+    let stuck = a_directory_with_no_record_that_cannot_go(&h, &uuid::Uuid::new_v4().to_string());
+    let (stays, error) = (&stuck.dir, &stuck.error);
+
+    let would = h.qex(&["gc", "--dry-run", "--older-than", "0s"]);
+    let out = h.qex(&["gc", "--older-than", "0s"]);
+
+    assert_eq!(
+        code_and_streams(&would),
+        (
+            Some(0),
+            "qex would delete 0 records, and 2 directories, with no record, and free 800B.\n\
+             Nothing changed. Run the command without `--dry-run` to delete them.\n"
+                .to_string(),
+            String::new()
+        ),
+        "the dry run counts what it found"
+    );
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(1),
+            "qex deleted 0 records, and 1 directory, with no record, and freed 300B.\n".to_string(),
+            format!(
+                "qex could not remove {}: {error}.\n\
+                 1 directory stayed. Fix the cause, then run qex gc again, \
+                 or delete it by hand.\n",
+                stays.display()
+            )
+        ),
+        "the run counts what it removed, and names what stayed"
+    );
+    assert!(!goes.exists(), "the directory that can go must go");
+    assert_eq!(std::fs::read(stays.join("blob")).unwrap().len(), 500);
+}
+
+/// The JSON of `qex gc` comes after the removals and lists each directory that stayed. The JSON
+/// of the dry run keeps its keys, and a run after the cause went gives an empty list (#194).
+#[test]
+fn the_json_of_gc_lists_a_directory_that_it_could_not_remove() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Harness::with_default_config("gc-stuck-json");
+    let id = h.submit(&["submit", "--", "true"]);
+    h.ok(&["wait", &id, "--timeout", "45s"]);
+    let goes = h.job_dir(&uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir(&goes).unwrap();
+    std::fs::write(goes.join("blob"), vec![b'x'; 300]).unwrap();
+    let stuck = a_directory_with_no_record_that_cannot_go(&h, &uuid::Uuid::new_v4().to_string());
+    let (stays, error) = (&stuck.dir, &stuck.error);
+
+    let would = json_of(&h.ok(&["gc", "--dry-run", "--older-than", "0s", "--json"]));
+    let out = h.qex(&["gc", "--older-than", "0s", "--json"]);
+    // The cause goes, so the next run removes the directory.
+    std::fs::set_permissions(stays, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let again = h.qex(&["gc", "--older-than", "0s", "--json"]);
+
+    let mut keys: Vec<&str> = would
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "bytes",
+            "directories_with_no_record",
+            "dry_run",
+            "jobs",
+            "kept_because_work_has_not_stopped",
+            "older_than_secs"
+        ],
+        "the JSON of the dry run keeps its keys: {would}"
+    );
+    assert_eq!(would["directories_with_no_record"], 2, "{would}");
+
+    let (code, stdout, stderr) = code_and_streams(&out);
+    let said = json_of(&stdout);
+    assert_eq!(code, Some(1), "stdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        said["directories_not_removed"],
+        serde_json::json!([{ "path": stays.to_str().unwrap(), "error": error }]),
+        "{said}"
+    );
+    for key in [
+        "older_than_secs",
+        "jobs",
+        "directories_with_no_record",
+        "kept_because_work_has_not_stopped",
+    ] {
+        assert_eq!(said[key], would[key], "{key}: {said}");
+    }
+    assert_eq!(said["dry_run"], false, "{said}");
+    assert_eq!(said["jobs"][0]["id"].as_str(), Some(id.as_str()), "{said}");
+    assert_eq!(
+        du_bytes(&would, "bytes") - du_bytes(&said, "bytes"),
+        500,
+        "the bytes leave out the directory that stayed: {would} then {said}"
+    );
+    assert_eq!(
+        stderr,
+        format!(
+            "qex could not remove {}: {error}.\n\
+             1 directory stayed. Fix the cause, then run qex gc again, \
+             or delete it by hand.\n",
+            stays.display()
+        )
+    );
+    assert!(!h.job_dir(&id).exists() && !goes.exists(), "{said}");
+
+    let (code, stdout, stderr) = code_and_streams(&again);
+    let said = json_of(&stdout);
+    assert_eq!(code, Some(0), "stdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        said["directories_not_removed"],
+        serde_json::json!([]),
+        "{said}"
+    );
+    assert_eq!(said["directories_with_no_record"], 1, "{said}");
+    assert_eq!(du_bytes(&said, "bytes"), 500, "{said}");
+    assert_eq!(stderr, "");
+    assert!(
+        !stays.exists(),
+        "the mode came back, so the directory must go"
+    );
+}
+
+/// The name of a directory that stayed reaches the terminal with no control byte, and the JSON
+/// holds the path as it is on the disk (#194).
+#[test]
+fn gc_writes_no_control_byte_from_the_name_of_a_directory_that_stayed() {
+    let h = Harness::with_default_config("gc-stuck-esc");
+    h.ok(&["list"]);
+    let esc = a_directory_with_no_record_that_cannot_go(&h, "stuck\x1b[2Jdir");
+    let plain = a_directory_with_no_record_that_cannot_go(&h, "stuck-plain");
+    let (esc_error, plain_error) = (&esc.error, &plain.error);
+
+    let text = h.qex(&["gc", "--older-than", "0s"]);
+    let json = h.qex(&["gc", "--older-than", "0s", "--json"]);
+    for out in [&text, &json] {
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        for stream in [&out.stdout, &out.stderr] {
+            assert!(
+                !stream.contains(&0x1b),
+                "an ESC byte reached the output: {out:?}"
+            );
+        }
+    }
+    let (_, stdout, stderr) = code_and_streams(&text);
+    assert_eq!(
+        stdout,
+        "qex deleted 0 records, and 0 directories, with no record, and freed 0B.\n"
+    );
+    let mut lines: Vec<&str> = stderr.lines().collect();
+    assert_eq!(
+        lines.pop(),
+        Some(
+            "2 directories stayed. Fix the cause, then run qex gc again, \
+             or delete them by hand."
+        ),
+        "{stderr}"
+    );
+    lines.sort();
+    let mut named = [
+        format!(
+            "qex could not remove {}: {esc_error}.",
+            h.job_dir("stuck [2Jdir").display()
+        ),
+        format!(
+            "qex could not remove {}: {plain_error}.",
+            plain.dir.display()
+        ),
+    ];
+    named.sort();
+    assert_eq!(lines, named, "{stderr}");
+
+    let said = json_of(&String::from_utf8_lossy(&json.stdout));
+    let mut paths: Vec<&str> = said["directories_not_removed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["path"].as_str().unwrap())
+        .collect();
+    paths.sort();
+    let mut on_disk = [esc.dir.to_str().unwrap(), plain.dir.to_str().unwrap()];
+    on_disk.sort();
+    assert_eq!(paths, on_disk, "{said}");
 }
 
 /// `other_bytes` still counts the files of a state directory behind the user's own link (#101).
