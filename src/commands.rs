@@ -5,6 +5,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: qex gc counts a folder whose record names another id as one with no record (issue #135).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test record sets the new pid_ns fields (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-16: qex gc names each directory with no record that it could not remove, counts only what it removed, and gives the code 1 (issue #194).
+// Modified by the local-resource-coordinator fork, 2026-11-17: qex gc asks the coordinator which ids are free before it removes a directory with no record, so a Submit in progress keeps its directory (issue #200).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -6822,12 +6823,7 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
             if !is_real_dir(&entry) {
                 continue;
             }
-            let known = entry
-                .file_name()
-                .to_str()
-                .and_then(|n| n.parse::<uuid::Uuid>().ok())
-                .map(|id| jobs.iter().any(|j| j.id == id))
-                .unwrap_or(false);
+            let known = id_named_by(&path).is_some_and(|id| jobs.iter().any(|j| j.id == id));
             // A record that names another id is no job's record either (#135).
             let record = crate::job::read_status(&path);
             if !known && !record.is_ok_and(|s| crate::job::names_folder(s.id, &path)) {
@@ -6835,6 +6831,7 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
             }
         }
     }
+    let orphans = dirs_nothing_holds(&mut client, orphans)?;
 
     let record_bytes: u64 = targets.iter().map(|(_, _, b)| b).sum();
     let bytes = record_bytes + orphans.iter().map(|(_, b)| b).sum::<u64>();
@@ -6945,6 +6942,51 @@ fn remove_directories(dirs: &[(std::path::PathBuf, u64)]) -> (usize, u64, Vec<(S
         }
     }
     (removed, freed, stayed)
+}
+
+/// The number of ids that one `FreeIds` request carries.
+const FREE_IDS_PART: usize = 500;
+
+/// Keeps the directories with no record that nothing holds. A Submit makes its directory
+/// before its record, so only the coordinator can say that one named like a job id is free (#200).
+fn dirs_nothing_holds(
+    client: &mut Client,
+    found: Vec<(std::path::PathBuf, u64)>,
+) -> Result<Vec<(std::path::PathBuf, u64)>> {
+    let ids: Vec<uuid::Uuid> = found
+        .iter()
+        .filter_map(|(path, _)| id_named_by(path))
+        .collect();
+    if ids.is_empty() {
+        return Ok(found);
+    }
+    let mut free = std::collections::BTreeSet::new();
+    if client.can("free-ids")? {
+        for part in ids.chunks(FREE_IDS_PART) {
+            match client.call(&Request::FreeIds { ids: part.to_vec() })? {
+                Response::FreeIds { ids } => free.extend(ids),
+                Response::Error { message, .. } => bail!("{message}"),
+                _ => bail!("the coordinator did not say which ids are free"),
+            }
+        }
+    } else {
+        eprintln!(
+            "qex left {} with no record in place: this coordinator is older and cannot say \
+             whether a submission holds {}. Run qex gc again after that coordinator stops; \
+             it stops when no job operates.",
+            plural_directories(ids.len()),
+            if ids.len() == 1 { "it" } else { "them" }
+        );
+    }
+    Ok(found
+        .into_iter()
+        .filter(|(path, _)| id_named_by(path).is_none_or(|id| free.contains(&id)))
+        .collect())
+}
+
+/// Gives the job id that the name of a directory reads as: one rule for the scan and the question.
+fn id_named_by(path: &std::path::Path) -> Option<uuid::Uuid> {
+    path.file_name()?.to_str()?.parse().ok()
 }
 
 /// Gives the bytes one directory holds, subfolders included; a link counts as itself.

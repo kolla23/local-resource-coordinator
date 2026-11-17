@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-17: the FreeIds request and its answer (issue #200).
 //! This module defines the messages between the CLI and the coordinator.
 //!
 //! Each message is one JSON object on one line. This format is simple to read
@@ -111,6 +112,9 @@ pub enum Request {
     Cancel { id: uuid::Uuid },
     /// Deletes the record of a job that stopped.
     Clean { id: uuid::Uuid },
+    /// Gives which of these ids no job and no submission in progress holds. `qex gc` asks it
+    /// before it removes a directory with no record (#200); only under the capability `free-ids`.
+    FreeIds { ids: Vec<uuid::Uuid> },
     /// Gives the state of the coordinator.
     Info,
     /// Gives the list of the things that the coordinator can do.
@@ -581,6 +585,8 @@ pub enum Response {
     },
     /// The things that the coordinator can do.
     Capabilities { names: Vec<String> },
+    /// The answer to a `FreeIds`: the ids of the request that nothing holds, in its order.
+    FreeIds { ids: Vec<uuid::Uuid> },
     /// One line of the event stream.
     ///
     /// The coordinator sends many of these for one `Events` request. Each one
@@ -887,6 +893,7 @@ mod tests {
             },
             Request::Cancel { id },
             Request::Clean { id },
+            Request::FreeIds { ids: vec![id] },
             Request::Info,
             Request::Capabilities,
             Request::Events {
