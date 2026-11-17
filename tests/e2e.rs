@@ -11765,7 +11765,7 @@ fn gc_leaves_the_directory_of_a_submit_in_progress() {
     let request = submit_request(&h, &model, &id);
     let dir = h.job_dir(&id);
     let ask = serde_json::json!({ "op": "free_ids", "ids": [id, stale, model] });
-    let (first, would, out, free, swept) = std::thread::scope(|scope| {
+    let (first, would, out, free, swept, recordless) = std::thread::scope(|scope| {
         let first = scope.spawn(|| (raw_request(&h, &request), Instant::now()));
         let made = || dir.exists();
         Harness::poll_until("the submission makes its directory", PAUSE * 5, made);
@@ -11773,10 +11773,13 @@ fn gc_leaves_the_directory_of_a_submit_in_progress() {
         let free = raw_request(&h, &ask);
         let out = h.qex(&["gc", "--older-than", "1h"]);
         let swept = Instant::now();
-        (first.join().unwrap(), would, out, free, swept)
+        // The record is written once, so its absence now covers both gc runs.
+        let recordless = !dir.join("status.json").exists();
+        (first.join().unwrap(), would, out, free, swept, recordless)
     });
     // The race, or the test proves nothing: both runs ended while the submission still paused.
     assert!(swept < first.1, "gc ended after the answer");
+    assert!(recordless, "a gc ran after the Submit wrote its record");
     assert_eq!(
         (
             code_and_streams(&would),
