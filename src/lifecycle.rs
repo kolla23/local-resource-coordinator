@@ -773,7 +773,9 @@ pub fn abort(
                     other => not_stopped.push(AbortedJob {
                         id,
                         name,
-                        why: format!("fairq gave an answer that this command cannot read: {other:?}"),
+                        why: format!(
+                            "fairq gave an answer that this command cannot read: {other:?}"
+                        ),
                     }),
                 }
             }

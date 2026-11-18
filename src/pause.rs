@@ -1986,7 +1986,10 @@ mod tests {
         let id = back.queue[0].id.clone();
 
         let first = back.expire(20);
-        assert!(first.changed, "the caller must write the id that fairq gave");
+        assert!(
+            first.changed,
+            "the caller must write the id that fairq gave"
+        );
         assert_eq!(back.queue[0].id, id, "the id must not change again");
 
         let second = back.expire(30);

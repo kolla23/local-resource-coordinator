@@ -1961,7 +1961,10 @@ fn version_check_asks_the_service_and_says_what_it_found() {
             said.contains("A newer release exists"),
             "a release below 9.9.9 must be told about it: {said}"
         );
-        assert_eq!(update["newer"], true, "9.9.9 is above every release of fairq");
+        assert_eq!(
+            update["newer"], true,
+            "9.9.9 is above every release of fairq"
+        );
     }
 }
 
@@ -3125,7 +3128,10 @@ fn a_job_that_is_too_large_runs_when_the_queue_is_empty() {
         .as_str()
         .unwrap_or("")
         .to_string();
-    assert!(!reason.is_empty(), "fairq must give the reason for the wait");
+    assert!(
+        !reason.is_empty(),
+        "fairq must give the reason for the wait"
+    );
 
     // The large job must start after the queue becomes empty. Stop the small
     // job, so this happens at a moment that the test chooses.
@@ -3887,8 +3893,10 @@ fn the_time_limits_term_spares_a_new_group_on_the_jobs_freed_pid() {
         return;
     }
     let mut h = Harness::new("timerfreedterm", FREED_PID_CONFIG);
-    h.extra_env
-        .push(("FAIRQ_TEST_PAUSE_BEFORE_TIMER_TERM_MS".into(), "4000".into()));
+    h.extra_env.push((
+        "FAIRQ_TEST_PAUSE_BEFORE_TIMER_TERM_MS".into(),
+        "4000".into(),
+    ));
     let r = run_the_freed_pid_driver(&h, FREED_PID_DRIVER, "5", &["sh", "-c", "sleep 2; exit 3"]);
     check_the_freed_pid(&r, "exit_code", 3);
     let out = &r["output"];
@@ -4104,7 +4112,13 @@ fn a_job_receives_the_environment_and_the_directory_of_the_shell() {
     std::fs::create_dir_all(&dir).unwrap();
 
     let out = h
-        .command(&["submit", "--", "sh", "-c", "pwd; echo MARK=$FAIRQ_TEST_MARK"])
+        .command(&[
+            "submit",
+            "--",
+            "sh",
+            "-c",
+            "pwd; echo MARK=$FAIRQ_TEST_MARK",
+        ])
         .env("FAIRQ_TEST_MARK", "captured")
         .current_dir(&dir)
         .output()
@@ -5008,7 +5022,10 @@ fn clean_deletes_the_record_of_a_job_that_stopped() {
     assert!(h.job_dir(&id).exists());
 
     h.ok(&["clean", &id]);
-    assert!(!h.job_dir(&id).exists(), "fairq did not delete the directory");
+    assert!(
+        !h.job_dir(&id).exists(),
+        "fairq did not delete the directory"
+    );
     assert!(h.list_json().is_empty());
 }
 
@@ -6329,9 +6346,11 @@ impl Harness {
     /// coordinator that the leader stopped and when `got-term` appeared; the leader then ends.
     fn term_handshake(&self, job: &UnheldJob, leftover: i32) -> (i32, Instant) {
         let got_term = self.root.join("got-term");
-        Harness::poll_until("the leader got fairq's TERM", Duration::from_secs(30), || {
-            got_term.exists()
-        });
+        Harness::poll_until(
+            "the leader got fairq's TERM",
+            Duration::from_secs(30),
+            || got_term.exists(),
+        );
         let ts = Instant::now();
 
         let read_pid =
@@ -7163,8 +7182,10 @@ fn a_fault_in_recoverys_signal_step_ends_the_coordinator_and_the_next_recovery_f
     h.kill_coordinator_and_supervisor(&job);
     assert!(Harness::runs(job.leader), "the leader runs");
 
-    h.extra_env
-        .push(("FAIRQ_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP".into(), "1".into()));
+    h.extra_env.push((
+        "FAIRQ_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP".into(),
+        "1".into(),
+    ));
     let log_path = h.root.join("coordinator.log");
     let log = std::fs::File::create(&log_path).unwrap();
     let mut daemon = h
@@ -11564,7 +11585,8 @@ fn gc_names_a_directory_with_no_record_that_it_could_not_remove() {
         code_and_streams(&out),
         (
             Some(1),
-            "fairq deleted 0 records, and 1 directory, with no record, and freed 300B.\n".to_string(),
+            "fairq deleted 0 records, and 1 directory, with no record, and freed 300B.\n"
+                .to_string(),
             format!(
                 "fairq could not remove {}: {error}.\n\
                  1 directory stayed. Fix the cause, then run fairq gc again, \
@@ -11836,7 +11858,8 @@ fn gc_leaves_what_an_earlier_coordinator_cannot_vouch_for() {
         code_and_streams(&out),
         (
             Some(0),
-            "fairq deleted 0 records, and 1 directory, with no record, and freed 300B.\n".to_string(),
+            "fairq deleted 0 records, and 1 directory, with no record, and freed 300B.\n"
+                .to_string(),
             "fairq left 1 directory with no record in place: this coordinator is older and cannot \
              say whether a submission holds it. Run fairq gc again after that coordinator stops; \
              it stops when no job operates.\n"
@@ -12305,7 +12328,11 @@ fn a_job_that_starts_again_never_shows_the_attempt_that_failed() {
     // process for each sample takes far longer than the window, so it would
     // pass whether the fault is there or not. A file read takes microseconds
     // and it samples the same record that the coordinator reads.
-    let record = h.root.join("state/fairq/jobs").join(&id).join("status.json");
+    let record = h
+        .root
+        .join("state/fairq/jobs")
+        .join(&id)
+        .join("status.json");
 
     let deadline = Instant::now() + Duration::from_secs(90);
     let mut saw_a_later_attempt = false;
@@ -13781,7 +13808,8 @@ fn a_line_never_puts_a_control_character_into_a_job_name() {
     // byte. The record on the disk is the data that the job received.
     let id = jobs[0]["id"].as_str().unwrap();
     let spec: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(h.root.join("state/fairq/jobs").join(id).join("spec.json")).unwrap(),
+        &std::fs::read_to_string(h.root.join("state/fairq/jobs").join(id).join("spec.json"))
+            .unwrap(),
     )
     .unwrap();
     assert_eq!(
@@ -15237,7 +15265,9 @@ fn the_completions_hold_the_commands_of_fairq() {
     // TAB. An agent chooses the names of the jobs and a person presses the TAB,
     // so a name is not trusted text.
     let bash = h.ok(&["completions", "bash"]);
-    let jobs_part = &bash[bash.find("_fairq_jobs()").expect("bash needs `_fairq_jobs`")..];
+    let jobs_part = &bash[bash
+        .find("_fairq_jobs()")
+        .expect("bash needs `_fairq_jobs`")..];
     // The comment in that part NAMES `compgen`, and a comment is not code.
     assert!(
         !jobs_part
@@ -15361,7 +15391,9 @@ fn the_completions_hold_the_commands_of_fairq() {
     // The function must exist BEFORE the file gives the completion to the
     // shell, and `#compdef` must stay on the first line.
     let helper = zsh.find("_fairq_jobs()").expect("zsh needs `_fairq_jobs`");
-    let hand_over = zsh.find("compdef _fairq fairq").expect("zsh needs `compdef`");
+    let hand_over = zsh
+        .find("compdef _fairq fairq")
+        .expect("zsh needs `compdef`");
     assert!(
         zsh.starts_with("#compdef fairq"),
         "zsh needs `#compdef` first"
@@ -15654,7 +15686,11 @@ fn every_output_shows_the_safe_name() {
     h.plant_stored_name(&esc_id, esc);
 
     // 1. THE RECORD KEEPS THE STORED NAME. This change rewrites no history.
-    let record = h.root.join("state/fairq/jobs").join(&id).join("status.json");
+    let record = h
+        .root
+        .join("state/fairq/jobs")
+        .join(&id)
+        .join("status.json");
     let text = std::fs::read_to_string(&record).expect("the record must exist");
     let value: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
@@ -16790,7 +16826,10 @@ fn a_politeness_value_with_a_fault_at_the_start_gives_the_default_values() {
     .unwrap();
 
     let out = h.fairq(&["rerun", &first]);
-    assert!(out.status.success(), "`fairq rerun` must still start the job");
+    assert!(
+        out.status.success(),
+        "`fairq rerun` must still start the job"
+    );
     let again = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
     h.ok(&["wait", &again, "--timeout", "45s"]);
@@ -20555,7 +20594,10 @@ fn no_shipped_word_promises_the_limit_that_went() {
         ("lower bound", "a measurement that fairq no longer writes"),
         ("lower-bound", "the same, in the words of the file"),
         ("cgroup of the job", "a cgroup that fairq no longer makes"),
-        ("raises the claim", "a correction that fairq no longer makes"),
+        (
+            "raises the claim",
+            "a correction that fairq no longer makes",
+        ),
         ("raise the claim", "the same"),
         // The section name, with nothing after it. A page named the keys of
         // this section in a table, in the middle of a line.
@@ -22430,7 +22472,8 @@ fn a_socket_with_no_answer_stops_a_new_coordinator() {
     let mut h = Harness::with_default_config("ownstuck");
     // A coordinator that starts here is a failure of this test. Give it a
     // short life, so the test reports that failure and does not wait.
-    h.extra_env.push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
     let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let socket = run.join("s");
@@ -22506,7 +22549,8 @@ fn a_pid_file_that_fairq_cannot_open_names_the_way_out() {
     }
 
     let mut h = Harness::with_default_config("badpid");
-    h.extra_env.push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
     let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let pid = run.join("pid");
@@ -22592,7 +22636,8 @@ fn a_socket_that_answers_stops_a_new_coordinator() {
 #[test]
 fn a_lock_with_no_socket_file_stops_a_new_coordinator() {
     let mut h = Harness::with_default_config("nosocket");
-    h.extra_env.push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
     let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let socket = run.join("s");
@@ -22631,7 +22676,8 @@ fn a_locked_pid_file_stops_a_new_coordinator() {
     let mut h = Harness::with_default_config("ownpid");
     // A coordinator that starts here is a failure of this test. Give it a
     // short life, so the test reports that failure and does not wait.
-    h.extra_env.push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
     let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let socket = run.join("s");
@@ -22725,9 +22771,11 @@ fn a_kill_of_fairq_run_cancels_a_job_that_never_started() {
     });
 
     let (mut child, id) = h.run_bg(&["--cpu", "1", "--mem", "64MB", "--", "sleep", "5"]);
-    h.until("the job of fairq run waits", Duration::from_secs(30), || {
-        h.state_of(&id) == "queued"
-    });
+    h.until(
+        "the job of fairq run waits",
+        Duration::from_secs(30),
+        || h.state_of(&id) == "queued",
+    );
 
     // SIGKILL. The command runs no code after this point.
     unsafe { libc::kill(child.id() as i32, libc::SIGKILL) };
@@ -22885,9 +22933,11 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
     });
 
     let (mut child, id) = h.run_bg(&["--cpu", "1", "--mem", "64MB", "--", "sleep", "5"]);
-    h.until("the job of fairq run waits", Duration::from_secs(30), || {
-        h.state_of(&id) == "queued"
-    });
+    h.until(
+        "the job of fairq run waits",
+        Duration::from_secs(30),
+        || h.state_of(&id) == "queued",
+    );
 
     // Stop the coordinator. The supervisor of the blocker continues, and a
     // later command starts a new coordinator that reads the same records.
@@ -23094,7 +23144,8 @@ fn a_socket_that_gives_no_answer_does_not_stop_a_command() {
     // The ceiling for a coordinator is long on purpose: a loaded machine
     // answers late, and a short ceiling gives a FALSE failure. A test
     // cannot wait that long, so it gives the product a short ceiling.
-    h.extra_env.push((fairq_ceiling_variable(), "3".to_string()));
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
     let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let Some(_open) = a_socket_that_never_answers(&run.join("s")) else {
@@ -23136,7 +23187,8 @@ fn a_spawn_lock_that_nobody_gives_back_does_not_stop_a_command() {
     // The ceiling for a coordinator is long on purpose: a loaded machine
     // answers late, and a short ceiling gives a FALSE failure. A test
     // cannot wait that long, so it gives the product a short ceiling.
-    h.extra_env.push((fairq_ceiling_variable(), "3".to_string()));
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
     let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let path = run.join("spawn.lock");
@@ -23176,7 +23228,8 @@ fn a_socket_that_gives_no_answer_starts_no_second_coordinator() {
     // The ceiling for a coordinator is long on purpose: a loaded machine
     // answers late, and a short ceiling gives a FALSE failure. A test
     // cannot wait that long, so it gives the product a short ceiling.
-    h.extra_env.push((fairq_ceiling_variable(), "3".to_string()));
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
     let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let socket = run.join("s");
@@ -23267,7 +23320,8 @@ fn a_page_that_fairq_could_not_fill_gives_124_for_a_query() {
     // The ceiling for a coordinator is long on purpose: a loaded machine
     // answers late, and a short ceiling gives a FALSE failure. A test
     // cannot wait that long, so it gives the product a short ceiling.
-    h.extra_env.push((fairq_ceiling_variable(), "3".to_string()));
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
     let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let Some(_open) = a_socket_that_never_answers(&run.join("s")) else {
@@ -23556,7 +23610,8 @@ fn a_coordinator_that_answers_nothing_does_not_stop_a_command() {
 #[test]
 fn a_coordinator_that_answers_nothing_is_not_no_such_job() {
     let mut h = Harness::with_default_config("notnosuchjob");
-    h.extra_env.push((fairq_ceiling_variable(), "3".to_string()));
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
     let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let _silent = a_socket_that_accepts_and_says_nothing(&run.join("s"));
@@ -23938,7 +23993,8 @@ fn a_coordinator_that_cuts_its_answer(front: &Path, real: &Path) -> ASlowCoordin
 #[test]
 fn an_answer_that_never_finishes_does_not_stop_a_command() {
     let mut h = Harness::with_default_config("cutanswer");
-    h.extra_env.push((fairq_ceiling_variable(), "4".to_string()));
+    h.extra_env
+        .push((fairq_ceiling_variable(), "4".to_string()));
 
     let first = h.fairq(&["submit", "--", "true"]);
     assert!(first.status.success(), "the test needs a real coordinator");
@@ -24538,7 +24594,8 @@ fn a_coordinator_that_closes_the_connection_does_not_kill_the_command() {
     use std::io::{BufRead, BufReader, Write};
 
     let mut h = Harness::with_default_config("closemid");
-    h.extra_env.push((fairq_ceiling_variable(), "5".to_string()));
+    h.extra_env
+        .push((fairq_ceiling_variable(), "5".to_string()));
     let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
 
@@ -24597,7 +24654,8 @@ fn a_coordinator_that_closes_the_connection_does_not_kill_the_command() {
 #[test]
 fn a_command_that_asks_about_a_coordinator_does_not_report_absence_for_silence() {
     let mut h = Harness::with_default_config("askscoord");
-    h.extra_env.push((fairq_ceiling_variable(), "3".to_string()));
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
     let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     // A SOCKET THAT DOES NOT ACCEPT, so the CONNECT reaches the limit.
@@ -24695,7 +24753,9 @@ impl Harness {
             cmd.arg("-c")
                 .arg("sh -c '\"$0\" \"$@\"; exit $?' \"$0\" \"$@\"; exit $?");
         }
-        cmd.arg(env!("CARGO_BIN_EXE_fairq")).arg("submit").args(args);
+        cmd.arg(env!("CARGO_BIN_EXE_fairq"))
+            .arg("submit")
+            .args(args);
         isolate(&mut cmd, &self.root, &self.peers_dir);
         if let Some(dir) = dir {
             cmd.current_dir(dir);
@@ -26558,7 +26618,8 @@ fn a_daemon_log_link_stops_the_start_and_leaves_its_target() {
 fn a_pid_file_link_stops_the_coordinator_and_leaves_its_target() {
     let mut h = Harness::with_default_config("pidlink");
     // Without the idle exit, a coordinator that took the file would run for ever.
-    h.extra_env.push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
     let target = a_target_file(&h);
     plant_state(&h, "run/pid", &target);
     let pid = h.root.join("state/fairq/run/pid");
@@ -26856,7 +26917,8 @@ fn the_update_lock_is_not_followed() {
     });
 
     let mut h = Harness::with_default_config("updlink");
-    h.extra_env.push(("FAIRQ_IDLE_EXIT_SECS".into(), "5".into()));
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "5".into()));
     config(&h);
     let target = a_missing_target(&h);
     plant_state(&h, "update.lock", &target);

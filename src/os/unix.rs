@@ -1237,7 +1237,12 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("docs/sandbox.md"), "{text}");
-        let text = error(check_owned_dir_as(&sticky.join("fairq"), me(), &NO_NS, &look));
+        let text = error(check_owned_dir_as(
+            &sticky.join("fairq"),
+            me(),
+            &NO_NS,
+            &look,
+        ));
         assert!(text.contains("sticky belongs"), "{text}");
         assert!(!text.contains("docs/sandbox.md"), "{text}");
 

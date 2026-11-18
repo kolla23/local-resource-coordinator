@@ -1008,7 +1008,8 @@ mod tests {
             {"kind":"peak","max_rss":1073741824,"cpu_secs":1.0,"elapsed_secs":10,"at":0},
             {"kind":"lower-bound","max_rss":8589934592,"cpu_secs":1.0,"elapsed_secs":10,"at":1}]}}}"#;
 
-        let store: Store = serde_json::from_str(text).expect("a file of an earlier fairq must load");
+        let store: Store =
+            serde_json::from_str(text).expect("a file of an earlier fairq must load");
         assert_eq!(
             store.commands["x"].samples.len(),
             2,
@@ -1224,7 +1225,8 @@ mod tests {
     fn a_job_that_did_not_complete_teaches_the_learner_nothing() {
         use crate::testutil::{env_lock, EnvVar};
         let _guard = env_lock();
-        let dir = crate::testutil::temp_dir().join(format!("fairq-usage-oom-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("fairq-usage-oom-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let _env = EnvVar::set("XDG_STATE_HOME", dir.to_str().unwrap());

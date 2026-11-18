@@ -5069,7 +5069,12 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
             let until = end_of_pause(duration.as_deref())?;
             let mut client = Client::connect()?;
             require_command(&mut client, "pause", "fairq pause", PAUSE_DANGER)?;
-            require_command(&mut client, "pause-requests", "fairq pause", REQUESTS_DANGER)?;
+            require_command(
+                &mut client,
+                "pause-requests",
+                "fairq pause",
+                REQUESTS_DANGER,
+            )?;
 
             let response = client.call(&Request::Pause {
                 target: PauseTarget::Queue,
@@ -5129,7 +5134,12 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
             let until = end_of_pause(duration.as_deref())?;
             let mut client = Client::connect()?;
             require_command(&mut client, "pause", "fairq pause", PAUSE_DANGER)?;
-            require_command(&mut client, "pause-requests", "fairq pause", REQUESTS_DANGER)?;
+            require_command(
+                &mut client,
+                "pause-requests",
+                "fairq pause",
+                REQUESTS_DANGER,
+            )?;
 
             let response = client.call(&Request::Pause {
                 target: PauseTarget::Lock { name: name.clone() },
@@ -5203,7 +5213,12 @@ pub fn resume(args: cli::ResumeArgs) -> Result<i32> {
 
     let mut client = Client::connect()?;
     require_command(&mut client, "pause", "fairq resume", RESUME_DANGER)?;
-    require_command(&mut client, "pause-requests", "fairq resume", REQUESTS_DANGER)?;
+    require_command(
+        &mut client,
+        "pause-requests",
+        "fairq resume",
+        REQUESTS_DANGER,
+    )?;
 
     let response = client.call(&Request::Resume {
         target: target.clone(),

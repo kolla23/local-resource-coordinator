@@ -1559,7 +1559,8 @@ mod tests {
     }
 
     fn tmpdir(tag: &str) -> PathBuf {
-        let d = crate::testutil::temp_dir().join(format!("fairq-spec-{tag}-{}", std::process::id()));
+        let d =
+            crate::testutil::temp_dir().join(format!("fairq-spec-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }
@@ -2194,7 +2195,10 @@ mod tests {
         let err = JobSpec::resolve(&opts(&[]), &Config::default())
             .unwrap_err()
             .to_string();
-        assert!(err.contains("fairq submit"), "error should show usage: {err}");
+        assert!(
+            err.contains("fairq submit"),
+            "error should show usage: {err}"
+        );
         assert!(
             err.contains("--job"),
             "error should mention job files: {err}"

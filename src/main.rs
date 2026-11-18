@@ -709,7 +709,10 @@ fn print_root_help() {
     let mut cmd = Cli::command();
     cmd.print_help().ok();
     println!();
-    println!("Topics for `fairq help <topic>`: {}", help::TOPICS.join(", "));
+    println!(
+        "Topics for `fairq help <topic>`: {}",
+        help::TOPICS.join(", ")
+    );
 }
 
 #[cfg(unix)]
@@ -874,7 +877,9 @@ fn print_config_summary(cfg: &config::Config) -> Result<()> {
     // does not limit a job in either mode.
     match cfg.enforce.mode {
         crate::config::EnforceMode::Cooperative => {
-            println!("mode:         cooperative; fairq leaves room for work that it does not control")
+            println!(
+                "mode:         cooperative; fairq leaves room for work that it does not control"
+            )
         }
         crate::config::EnforceMode::SingleUser => println!(
             "mode:         single-user; fairq uses more of the machine and looks for no peer"
@@ -903,7 +908,8 @@ fn print_config_summary(cfg: &config::Config) -> Result<()> {
         if !cfg.claims.export_env {
             "no; [claims] export_env = false".to_string()
         } else if cfg.submit.env_capture == config::EnvCapture::None {
-            "no; [submit] env_capture = \"none\" gives a job no variable that fairq chose".to_string()
+            "no; [submit] env_capture = \"none\" gives a job no variable that fairq chose"
+                .to_string()
         } else if cfg.claims.also.is_empty() {
             "yes, with --cpu and --mem together".to_string()
         } else {

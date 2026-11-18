@@ -317,7 +317,8 @@ mod tests {
     /// that no command touched.
     #[test]
     fn the_mark_of_a_kill_by_a_command_can_be_cleared() {
-        let dir = crate::testutil::temp_dir().join(format!("fairq-userkill-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("fairq-userkill-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
 

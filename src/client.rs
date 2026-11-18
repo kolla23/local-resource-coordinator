@@ -1563,7 +1563,10 @@ mod tests {
             text.contains("The job stopped before your time limit of 10s passed"),
             "{text}"
         );
-        assert!(text.contains("fairq gave the record 5.0 seconds,"), "{text}");
+        assert!(
+            text.contains("fairq gave the record 5.0 seconds,"),
+            "{text}"
+        );
         assert!(!text.contains("ended the wait for the job"), "{text}");
         assert!(!text.contains("10s ended"), "{text}");
 

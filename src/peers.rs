@@ -404,7 +404,8 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     fn tmpdir(tag: &str) -> PathBuf {
-        let d = crate::testutil::temp_dir().join(format!("fairq-peers-{tag}-{}", std::process::id()));
+        let d =
+            crate::testutil::temp_dir().join(format!("fairq-peers-{tag}-{}", std::process::id()));
         std::fs::remove_dir_all(&d).ok();
         std::fs::create_dir_all(&d).unwrap();
         d

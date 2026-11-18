@@ -2547,7 +2547,8 @@ mod tests {
 
     #[test]
     fn last_file_lines_reads_a_window_and_survives_bad_utf8() {
-        let dir = crate::testutil::temp_dir().join(format!("fairq-top-tail-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("fairq-top-tail-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("out.log");
         let mut data = vec![0xffu8; 80 * 1024];

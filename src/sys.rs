@@ -402,7 +402,8 @@ mod tests {
             .into_iter()
             .find(|p| std::path::Path::new(p).exists())
             .expect("a sleep program");
-        let dir = crate::testutil::temp_dir().join(format!("fairq-not-utf8-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("fairq-not-utf8-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let link = dir.join(std::ffi::OsStr::from_bytes(b"sl\xffep"));
         std::os::unix::fs::symlink(sleep, &link).unwrap();

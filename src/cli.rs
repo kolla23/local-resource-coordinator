@@ -1099,8 +1099,8 @@ mod tests {
     /// fairq must give each of these options to the job.
     #[test]
     fn options_after_two_dashes_belong_to_the_job() {
-        let cli =
-            Cli::try_parse_from(["fairq", "submit", "--", "prog", "--cpu", "99", "--json"]).unwrap();
+        let cli = Cli::try_parse_from(["fairq", "submit", "--", "prog", "--cpu", "99", "--json"])
+            .unwrap();
         let Some(Command::Submit(a)) = cli.command else {
             panic!("expected a submit command")
         };
@@ -1128,7 +1128,9 @@ mod tests {
 
     #[test]
     fn an_incorrect_env_option_is_refused() {
-        assert!(Cli::try_parse_from(["fairq", "submit", "--env", "novalue", "--", "true"]).is_err());
+        assert!(
+            Cli::try_parse_from(["fairq", "submit", "--env", "novalue", "--", "true"]).is_err()
+        );
     }
 
     #[test]
@@ -1148,7 +1150,8 @@ mod tests {
 
     #[test]
     fn a_negative_priority_parses() {
-        let cli = Cli::try_parse_from(["fairq", "submit", "--priority", "-5", "--", "true"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["fairq", "submit", "--priority", "-5", "--", "true"]).unwrap();
         let Some(Command::Submit(a)) = cli.command else {
             panic!("expected a submit command")
         };

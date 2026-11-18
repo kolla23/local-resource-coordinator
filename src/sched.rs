@@ -1241,7 +1241,10 @@ fn depends(state: &crate::daemon::State, id: uuid::Uuid) -> Depends {
             let advice = if never_ran {
                 String::new()
             } else {
-                format!(" Read `fairq logs {}` for the cause.", &root.to_string()[..8])
+                format!(
+                    " Read `fairq logs {}` for the cause.",
+                    &root.to_string()[..8]
+                )
             };
 
             return Depends::Broken {
