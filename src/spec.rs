@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 /// The contents of a job file, as a person or an agent writes it.
 ///
-/// The command is necessary. Each other field is optional. qex has a default
+/// The command is necessary. Each other field is optional. fairq has a default
 /// value for each other field, or it copies the value from the environment.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -26,7 +26,7 @@ pub struct JobFile {
     pub cwd: Option<String>,
     /// The command as a list of arguments: `["uv", "run", "train.py"]`.
     ///
-    /// This field is not a shell command line. qex does not start a shell, so
+    /// This field is not a shell command line. fairq does not start a shell, so
     /// no quotation marks and no word division are necessary.
     pub command: Vec<String>,
     pub timeout: Option<String>,
@@ -41,7 +41,7 @@ pub struct JobFile {
     pub env_capture: Option<EnvCapture>,
     /// Do not tell the job how large its claim is.
     ///
-    /// qex writes the claim into the environment of the job (`GOMAXPROCS`,
+    /// fairq writes the claim into the environment of the job (`GOMAXPROCS`,
     /// `OMP_NUM_THREADS` and more), so a runtime sizes its thread
     /// pool to the claim and not to the machine. Give `true` here for a job
     /// that must see the machine as it is.
@@ -77,7 +77,7 @@ pub struct JobFile {
     /// the id of the job that the first submission started.
     ///
     /// This field is in the job file, because an agent that comes back to a
-    /// session runs the same command again, and `qex submit --job train.toml`
+    /// session runs the same command again, and `fairq submit --job train.toml`
     /// is one of those commands. A key in the file protects each run of it.
     pub dedupe_key: Option<String>,
     /// The time for which a job that SUCCEEDED keeps its key.
@@ -98,7 +98,7 @@ pub struct Resources {
     pub gpu: Option<u64>,
     /// The quantity on EACH device that this job gets.
     ///
-    /// qex never adds the memory of the devices together. See `qex help
+    /// fairq never adds the memory of the devices together. See `fairq help
     /// resources`.
     pub vram: Option<String>,
     /// The claims on the other pools. The key is the pool name.
@@ -155,7 +155,7 @@ pub struct PoolClaim {
     pub count: u64,
     /// The quantity on EACH device that the job gets, in bytes.
     ///
-    /// The value `None` means the whole of each device. qex NEVER adds the
+    /// The value `None` means the whole of each device. fairq NEVER adds the
     /// capacity of the devices together: four devices of 24GB are not 96GB for
     /// one job.
     #[serde(default)]
@@ -207,7 +207,7 @@ impl JobFile {
     /// Reads a job file. The file extension selects the format.
     ///
     /// TOML is the format in the documentation. An agent frequently writes YAML
-    /// or JSON. qex accepts these two formats also, and the agent does not need
+    /// or JSON. fairq accepts these two formats also, and the agent does not need
     /// a second try. All three formats use the same structure and the same
     /// tests.
     pub fn load(path: &Path) -> Result<Self> {
@@ -244,12 +244,12 @@ fn job_file_error(path: &Path, detail: &str) -> anyhow::Error {
          \x20   [resources]\n\
          \x20   cpu = 2\n\
          \x20   mem = \"4GB\"\n\n\
-         For a list of all the fields, run `qex help job-file`.",
+         For a list of all the fields, run `fairq help job-file`.",
         path.display()
     )
 }
 
-/// The values from the command line, before qex adds the job file and the config.
+/// The values from the command line, before fairq adds the job file and the config.
 #[derive(Debug, Clone, Default)]
 pub struct SubmitOptions {
     pub name: Option<String>,
@@ -280,8 +280,8 @@ pub struct SubmitOptions {
     pub dedupe_key: Option<String>,
     /// The time for which a job that succeeded keeps its key.
     pub dedupe_window: Option<String>,
-    /// The command that qex measures against, when it is not the command
-    /// itself. `qex submit --each-line` gives the template here.
+    /// The command that fairq measures against, when it is not the command
+    /// itself. `fairq submit --each-line` gives the template here.
     ///
     /// See `JobSpec::learn_key` for the reason.
     pub learn_key: Option<Vec<String>>,
@@ -321,26 +321,26 @@ pub struct JobSpec {
     pub timeout: Option<u64>,
     /// The queue limit in seconds. `None` means that the job waits with no end.
     ///
-    /// qex counts this time from `submitted_at`, and not from the last
+    /// fairq counts this time from `submitted_at`, and not from the last
     /// scheduling pass. A coordinator that starts again thus continues the same
     /// count, and a restart does not give the job a new full wait.
     #[serde(default)]
     pub max_queue_time: Option<u64>,
     pub tags: Vec<String>,
     pub priority: i32,
-    /// The environment mode that qex used for this job.
+    /// The environment mode that fairq used for this job.
     ///
-    /// `qex status` shows this value. The reader can then see why the job has
+    /// `fairq status` shows this value. The reader can then see why the job has
     /// this environment, and does not calculate the sequence of the sources.
     pub env_capture: EnvCapture,
     /// Where the claim came from: `explicit`, `learned` or `default`.
     #[serde(default)]
     pub claim_source: String,
     /// Where the number of cores came from, with the same words as
-    /// `claim_source`. `claim_source` says `learned` when qex learned one value
+    /// `claim_source`. `claim_source` says `learned` when fairq learned one value
     /// only, so it cannot say which value the person gave.
     ///
-    /// The value is empty in a record of a qex that did not write it.
+    /// The value is empty in a record of a fairq that did not write it.
     #[serde(default)]
     pub cpu_source: String,
     /// Where the memory claim came from. See `cpu_source`.
@@ -403,7 +403,7 @@ pub struct JobSpec {
     ///
     /// THIS FIELD IS THE ONE THAT RECOVERY READS. A coordinator that starts
     /// again reads `spec.json` and gives each key back to its job. The field
-    /// with the same name in `JobStatus` is for a reader of `qex status`.
+    /// with the same name in `JobStatus` is for a reader of `fairq status`.
     #[serde(default)]
     pub dedupe_key: Option<String>,
     /// The seconds for which a job that SUCCEEDED keeps its key.
@@ -425,12 +425,12 @@ pub struct JobSpec {
     /// succeeded only, so no second copy of work that operates can start.
     #[serde(default)]
     pub dedupe_window: u64,
-    /// The command that qex measures this job against, when it is not the
+    /// The command that fairq measures this job against, when it is not the
     /// command of the job.
     ///
     /// # Why a job can learn against a different command
     ///
-    /// qex keeps the measurement of a job under the directory and the command,
+    /// fairq keeps the measurement of a job under the directory and the command,
     /// so the next job of the same command gets an accurate claim. A fan-out
     /// breaks that rule: `./process a.csv` and `./process b.csv` are two
     /// commands, and each one is used one time only.
@@ -441,7 +441,7 @@ pub struct JobSpec {
     /// can use.
     ///
     /// The template `./process {}` is the value that repeats, and the lines of
-    /// a fan-out are the same kind of work. qex therefore measures every job of
+    /// a fan-out are the same kind of work. fairq therefore measures every job of
     /// a fan-out against the template. One fan-out gives one entry, and the
     /// second run of the same fan-out gets a claim from the first run.
     ///
@@ -493,7 +493,7 @@ impl JobSpec {
 
     /// Makes a specification from a job file that the caller already read.
     ///
-    /// `qex pipeline` uses this form, because it reads one file that holds
+    /// `fairq pipeline` uses this form, because it reads one file that holds
     /// several stages.
     pub fn resolve_from_file(
         opts: &SubmitOptions,
@@ -509,15 +509,15 @@ impl JobSpec {
             bail!(
                 "no command.\n\n\
                  Write the command after `--`:\n\
-                 \x20   qex submit --cpu 2 --mem 4GB -- uv run train.py\n\n\
+                 \x20   fairq submit --cpu 2 --mem 4GB -- uv run train.py\n\n\
                  Or set `command` in a job file:\n\
-                 \x20   qex submit --job train.toml"
+                 \x20   fairq submit --job train.toml"
             );
         }
         if !opts.command.is_empty() && !file.command.is_empty() {
             bail!(
                 "there is a command after `--` and a command in the job file. \
-                 Delete one command. qex must have one command only."
+                 Delete one command. fairq must have one command only."
             );
         }
 
@@ -549,7 +549,7 @@ impl JobSpec {
         };
         let cwd = cwd.canonicalize().with_context(|| {
             format!(
-                "the job directory {} does not exist, or qex cannot read it",
+                "the job directory {} does not exist, or fairq cannot read it",
                 cwd.display()
             )
         })?;
@@ -560,7 +560,7 @@ impl JobSpec {
             );
         }
 
-        // A claim can be a number, or a word such as `half` or `full`. qex
+        // A claim can be a number, or a word such as `half` or `full`. fairq
         // calculates the word against the budget here, so the coordinator
         // receives an exact value and the record shows what the job asked for.
         let asked_cpu = opts.cpu.as_ref().or(file.resources.cpu.as_ref());
@@ -569,7 +569,7 @@ impl JobSpec {
         // With no claim from the user, use the measurements of the earlier jobs
         // of this command.
         //
-        // This step is the reason that qex measures each job. `guess` is safe
+        // This step is the reason that fairq measures each job. `guess` is safe
         // and frequently far too large: a test suite that uses 165MB would hold
         // one half of the budget and stop other work for the length of the run.
         // A job of a fan-out learns against its template, and not against its
@@ -587,14 +587,14 @@ impl JobSpec {
 
         // A learned claim never goes above the budget.
         //
-        // qex makes this number itself, and it must not make a number that it
+        // fairq makes this number itself, and it must not make a number that it
         // then refuses. A job that uses the full budget leaves a peak AT the
         // budget, and the margin above that peak gives a claim of 1.5 budgets.
         // `[queue] oversized = "reject"` then refuses the submission with
         // "Decrease the claim", and the user gave no claim to decrease.
         //
         // The claim stops at the budget instead. The job then starts, and if it
-        // still needs more memory, the record says that qex has no larger claim
+        // still needs more memory, the record says that fairq has no larger claim
         // and that the machine is too small. That answer names a step that the
         // user can take.
         if let (Some(s), Ok(budget)) = (learned.as_mut(), cfg.budget_mem()) {
@@ -603,8 +603,8 @@ impl JobSpec {
         let learned = learned;
 
         // `source` is one word for the whole claim, and it says `learned` when
-        // qex learned ONE value. `cpu_source` and `mem_source` say it for each
-        // value, so `qex status` can put its note beside the value that qex
+        // fairq learned ONE value. `cpu_source` and `mem_source` say it for each
+        // value, so `fairq status` can put its note beside the value that fairq
         // chose and give no note to the value that the person gave.
         let mut source = "default";
         let mut cpu_source = "default";
@@ -646,13 +646,13 @@ impl JobSpec {
         // Tell the job how large its claim is.
         //
         // This happens after the claim is a number, so the variables hold the
-        // RESOLVED claim: `--cpu guess` gives the number that qex chose, and
+        // RESOLVED claim: `--cpu guess` gives the number that fairq chose, and
         // not the word.
         //
         // `--env-capture none` is the exception. That mode says that the job
         // starts with an empty environment and receives the values of `[env]`
         // and `--env` ONLY. A user who asks for that asked for it deliberately,
-        // and sixteen variables that qex chose would break the promise of the
+        // and sixteen variables that fairq chose would break the promise of the
         // option. `none` means none.
         //
         // THIS IS NOT THE USUAL ORDER OF THE SOURCES. Most values here take
@@ -670,26 +670,26 @@ impl JobSpec {
         // WRITE THE CLAIM ONLY WHEN SOMEBODY CHOSE IT.
         //
         // The rule of this function is that a value somebody chose is a
-        // decision. A claim that QEX invented is not such a decision, and the
+        // decision. A claim that FAIRQ invented is not such a decision, and the
         // default claim is ONE CORE.
         //
-        // Without this test, `qex submit -- cargo test` on a machine of sixteen
+        // Without this test, `fairq submit -- cargo test` on a machine of sixteen
         // cores writes GOMAXPROCS=1 and CARGO_BUILD_JOBS=1, and the job becomes
         // sixteen times slower with no error and no warning.
         //
         // A learned claim is not a decision either, and it makes the fault
-        // permanent: qex measures the job that it made single-threaded, learns
+        // permanent: fairq measures the job that it made single-threaded, learns
         // one core, and writes one core again on the next run.
         //
         // BOTH HALVES MUST COME FROM THE USER, and `source` alone does not say
         // that. `source` becomes "explicit" when ONE half is explicit, so
-        // `qex submit --mem 4GB -- sh -c 'echo $GOMAXPROCS'` printed `1` on a
+        // `fairq submit --mem 4GB -- sh -c 'echo $GOMAXPROCS'` printed `1` on a
         // machine of 16 cores: the memory came from the user, the cores came
         // from `[defaults]`, and the job heard the invented half. This test
         // reads the two questions that the user answered, and not the summary
         // of them.
         //
-        // Give `--cpu` and `--mem`, and qex tells the job what you asked for.
+        // Give `--cpu` and `--mem`, and fairq tells the job what you asked for.
         let chosen = asked_cpu.is_some() && asked_mem.is_some();
 
         if hints && chosen && capture != EnvCapture::None {
@@ -698,7 +698,7 @@ impl JobSpec {
 
         // A job that learns against a different command says so.
         //
-        // `qex status` writes where a claim came from, and the word `learned`
+        // `fairq status` writes where a claim came from, and the word `learned`
         // there means "from the earlier jobs of THIS command". A job of a
         // fan-out learns against its template, so its claim comes from the
         // earlier jobs of the fan-out and frequently from a different line. To
@@ -757,7 +757,7 @@ impl JobSpec {
                 }
                 // With no `--vram`, the job takes the whole of each device that
                 // it gets. `[defaults] vram` lets a site change that. An
-                // unstated claim that consumed nothing would let qex put four
+                // unstated claim that consumed nothing would let fairq put four
                 // unlimited jobs on one card.
                 None => cfg.default_vram()?,
             };
@@ -773,11 +773,11 @@ impl JobSpec {
             );
         }
 
-        // Refuse an environment variable that qex itself writes.
+        // Refuse an environment variable that fairq itself writes.
         //
-        // qex gives the devices to the job and writes the variable of the pool.
+        // fairq gives the devices to the job and writes the variable of the pool.
         // A value that the author wrote would disagree with the devices that
-        // qex gave, and the job would then use a card that qex gave to another
+        // fairq gave, and the job would then use a card that fairq gave to another
         // job.
         //
         // This test reads the job file and `--env` only, and NOT the captured
@@ -792,7 +792,7 @@ impl JobSpec {
             if file.env.contains_key(var) || opts.env.iter().any(|(k, _)| k == var) {
                 bail!(
                     "this job claims {} {name}, and it also sets {var} in its environment. \
-                     qex gives the devices to the job and writes that variable, so the two \
+                     fairq gives the devices to the job and writes that variable, so the two \
                      values would disagree. Delete the variable, or delete the claim.",
                     claim.count
                 );
@@ -825,21 +825,21 @@ impl JobSpec {
             }
             // The command gives the default: the program and the words that
             // name the work, so the jobs of one launcher have different names
-            // in `qex list`. The user did not select this name, so a character
+            // in `fairq list`. The user did not select this name, so a character
             // outside the set becomes the safe form and the job still starts.
             None => derived_name(&command),
         };
 
         // A name must not have the form of an id.
         //
-        // qex uses the form of a dependency value to choose a rule: an id must
+        // fairq uses the form of a dependency value to choose a rule: an id must
         // exist, and a name must give a job that has not stopped. A name with
         // the form of an id would take the rule for an id, and the test that
         // protects against a job of an earlier run would not happen.
         if name.parse::<uuid::Uuid>().is_ok() {
             bail!(
-                "the name `{name}` has the form of a job id, and qex does not accept it.\n\n\
-                 qex reads a dependency value as an id when it has this form, and an id \
+                "the name `{name}` has the form of a job id, and fairq does not accept it.\n\n\
+                 fairq reads a dependency value as an id when it has this form, and an id \
                  follows a different rule from a name. A name with this form would avoid \
                  that rule.\n\n\
                  Use a name that a person can read, such as `build` or `test`."
@@ -849,13 +849,13 @@ impl JobSpec {
         // The priority of the job for the processor, from the command line or
         // from the job file.
         //
-        // A nice value goes from -20 to 19. qex makes that call between the
+        // A nice value goes from -20 to 19. fairq makes that call between the
         // fork and the exec of the job, where it has no way to report a fault,
-        // and `setpriority` gives qex nothing to report either. Measured on
+        // and `setpriority` gives fairq nothing to report either. Measured on
         // Linux from nice 0, with no privilege: `--nice 100` takes 19 and
         // reports success, and `--nice -21` gives EACCES and leaves the job
         // where it was. Each one gives a priority that the user did not ask
-        // for. The test belongs here, where qex can still name the value and
+        // for. The test belongs here, where fairq can still name the value and
         // the remedy.
         let nice = opts.nice.or(file.nice);
         if let Some(n) = nice {
@@ -896,13 +896,13 @@ impl JobSpec {
         };
 
         // A window with no key does nothing. Refuse it, and do not accept it in
-        // silence: the user asked for a rule, and qex must apply the rule or
+        // silence: the user asked for a rule, and fairq must apply the rule or
         // say that it cannot.
         if dedupe_window > 0 && dedupe_key.is_none() {
             bail!(
                 "--dedupe-window needs --dedupe-key.\n\n\
                  The window says how long a job that succeeded keeps its key. \
-                 With no key, qex has nothing to keep, and the option does nothing.\n\n\
+                 With no key, fairq has nothing to keep, and the option does nothing.\n\n\
                  Add a key: `--dedupe-key build:$(pwd)`."
             );
         }
@@ -978,7 +978,7 @@ impl JobSpec {
 /// # Why the first and the last argument
 ///
 /// An agent submits the jobs of one session through one launcher, so the
-/// program alone gives every row of `qex list` one name. The argument that
+/// program alone gives every row of `fairq list` one name. The argument that
 /// names the work is the script, the module, the test or the input file. That
 /// argument is the first one after the launcher word, or the last one when a
 /// launcher option carries a value in between, as `--project P` does. The two
@@ -1055,11 +1055,11 @@ fn check_chosen_name(name: &str) -> Result<()> {
     }
     let shown = crate::job::visible(name);
     bail!(
-        "the name `{shown}` is not a name that qex accepts.\n\n\
+        "the name `{shown}` is not a name that fairq accepts.\n\n\
          A job name holds the letters A to Z and a to z, the numbers 0 to 9, and \
          the characters `-`, `_` and `.` only. It does not start with `-`. It is \
          128 characters or fewer.\n\n\
-         qex shows this name in `qex list` and `qex top`, and other agents read \
+         fairq shows this name in `fairq list` and `fairq top`, and other agents read \
          it. A character outside the set can move the cursor of a terminal, or \
          look like an option.\n\n\
          Use a name such as `build` or `test`."
@@ -1093,7 +1093,7 @@ pub fn parse_env_pair(s: &str) -> Result<(String, String), String> {
 /// The smallest heap that a runtime hint carries, in megabytes.
 ///
 /// This value reaches a job only through `[claims] also = ["java"]`, which a
-/// reader asks for. No default hint of qex carries a heap.
+/// reader asks for. No default hint of fairq carries a heap.
 ///
 /// # Why there is a floor and not a test against zero
 ///
@@ -1115,7 +1115,7 @@ pub fn parse_env_pair(s: &str) -> Result<(String, String), String> {
 /// The heap is three quarters of the claim, and each step rounds down, so a
 /// claim below 6MB gets no heap. Such a claim needs `--mem` with a very small
 /// value, and the job then receives the default heap of its runtime, which is
-/// the behaviour that it has with no qex at all.
+/// the behaviour that it has with no fairq at all.
 const HEAP_FLOOR_MB: u64 = 4;
 
 /// Writes the size of the claim into the environment of a job.
@@ -1125,24 +1125,24 @@ const HEAP_FLOOR_MB: u64 = 4;
 /// A claim controls the queue, and it does not control the job. A job that asks
 /// the machine how many cores it has receives the number of the MACHINE, so a
 /// job with a claim of two cores on a machine of sixteen starts sixteen
-/// threads. It then takes the capacity that qex gave to the other jobs, and the
+/// threads. It then takes the capacity that fairq gave to the other jobs, and the
 /// promise of the queue is broken by the job that made it.
 ///
-/// Most runtimes read a variable in place of the machine. qex writes those
+/// Most runtimes read a variable in place of the machine. fairq writes those
 /// variables from the resolved claim. This is the nearest thing to a limit that
 /// operates on macOS as well as on Linux, and it needs no cgroup and no
 /// privilege.
 ///
 /// # The rule about a value that exists
 ///
-/// qex NEVER REPLACES A VALUE THAT IS ALREADY THERE. A value can come from the
+/// fairq NEVER REPLACES A VALUE THAT IS ALREADY THERE. A value can come from the
 /// shell of the user, from the job file or from `--env`, and each of those is a
 /// decision that somebody made. This function fills the values that nobody
 /// chose.
 ///
 /// # What was measured
 ///
-/// One machine of 16 cores and 28GB. A claim of 2 cores and 2GB, for which qex
+/// One machine of 16 cores and 28GB. A claim of 2 cores and 2GB, for which fairq
 /// writes `GOMAXPROCS=2`. Each runtime was asked for its own value:
 ///
 ///     go 1.22.2   GOMAXPROCS=2                gives runtime.GOMAXPROCS(0) == 2
@@ -1157,7 +1157,7 @@ const HEAP_FLOOR_MB: u64 = 4;
 /// option at all gave a maximum heap of 7224MB on this 28GB machine, and
 /// `-XX:MaxRAMPercentage=25` gave the same 7224MB. A limit needs `-Xmx`.
 ///
-/// qex writes no core count for node, and no memory value for any runtime.
+/// fairq writes no core count for node, and no memory value for any runtime.
 /// Measured on node 12: `os.cpus().length` is 16, the number of the MACHINE,
 /// and node reads no variable that changes it. (`os.availableParallelism`
 /// arrived in node 19 and was not measured here.)
@@ -1175,10 +1175,10 @@ fn export_claim(
     };
 
     // The claim itself. A script reads these and needs no other tool:
-    // `make -j"$QEX_CPU"`.
-    set("QEX_CPU", &cores);
-    set("QEX_MEM", &mem.to_string());
-    set("QEX_MEM_MB", &(mem / (1 << 20)).to_string());
+    // `make -j"$FAIRQ_CPU"`.
+    set("FAIRQ_CPU", &cores);
+    set("FAIRQ_MEM", &mem.to_string());
+    set("FAIRQ_MEM_MB", &(mem / (1 << 20)).to_string());
 
     // The runtimes that take a number of threads from the environment.
     for key in [
@@ -1199,7 +1199,7 @@ fn export_claim(
 
     // NO HINT CARRIES MEMORY.
     //
-    // qex does not limit the memory of a job. A hint that names a memory value
+    // fairq does not limit the memory of a job. A hint that names a memory value
     // makes the claim behave like a limit for the few runtimes that read it,
     // and like a promise for every other program: a Go job and a node job would
     // be held to the number and a C job would not, and no page could state one
@@ -1216,7 +1216,7 @@ fn export_claim(
     // the other work on the machine. It changes how the work is divided, and
     // not whether the work fits.
     //
-    // `QEX_MEM` and `QEX_MEM_MB` above NAME the claim for a script that reads
+    // `FAIRQ_MEM` and `FAIRQ_MEM_MB` above NAME the claim for a script that reads
     // them. No runtime acts on them by itself.
     //
     // `[claims] also = ["java"]` is the ONE place where a memory value still
@@ -1224,7 +1224,7 @@ fn export_claim(
     // for the rest of the process, so it takes three quarters of the claim.
     let heap_mb = (mem / (1 << 20)) * 3 / 4;
 
-    // The two that qex writes only when the configuration asks for them.
+    // The two that fairq writes only when the configuration asks for them.
     //
     // `ClaimHint` holds the names, so an unknown name in `[claims] also` is an
     // error from the config file and never a silent no-op here.
@@ -1283,15 +1283,15 @@ mod tests {
         let mut env = BTreeMap::new();
         export_claim(&mut env, 2, 2 << 30, &[]);
 
-        // A script reads the claim with no other tool: `make -j"$QEX_CPU"`.
-        assert_eq!(env["QEX_CPU"], "2");
-        assert_eq!(env["QEX_MEM"], (2u64 << 30).to_string());
-        assert_eq!(env["QEX_MEM_MB"], "2048");
+        // A script reads the claim with no other tool: `make -j"$FAIRQ_CPU"`.
+        assert_eq!(env["FAIRQ_CPU"], "2");
+        assert_eq!(env["FAIRQ_MEM"], (2u64 << 30).to_string());
+        assert_eq!(env["FAIRQ_MEM_MB"], "2048");
 
         // A job of two cores on a machine of sixteen must not start sixteen
         // threads. This was measured with go: GOMAXPROCS=2 gives 2.
         //
-        // NAME EVERY VARIABLE HERE. The documentation and `qex help config`
+        // NAME EVERY VARIABLE HERE. The documentation and `fairq help config`
         // give this list to the reader, so a name that goes away must fail a
         // test and not a user.
         for key in [
@@ -1309,7 +1309,7 @@ mod tests {
         ] {
             assert_eq!(env.get(key).map(String::as_str), Some("2"), "{key}");
         }
-        // NO HINT CARRIES MEMORY. qex does not limit the memory of a job, so
+        // NO HINT CARRIES MEMORY. fairq does not limit the memory of a job, so
         // a hint that named a memory value would hold a Go job and a node job
         // to the claim and leave every other program free.
         assert!(!env.contains_key("GOMEMLIMIT"), "{env:?}");
@@ -1366,7 +1366,7 @@ mod tests {
 
         let mut env = BTreeMap::new();
         export_claim(&mut env, 2, 100 * 1024, &[ClaimHint::Java]);
-        assert_eq!(env["QEX_MEM_MB"], "0");
+        assert_eq!(env["FAIRQ_MEM_MB"], "0");
         assert!(!env.contains_key("GOMEMLIMIT"), "{env:?}");
 
         let mut env = BTreeMap::new();
@@ -1376,14 +1376,14 @@ mod tests {
         assert_eq!(env["JAVA_TOOL_OPTIONS"], "-XX:ActiveProcessorCount=2");
         // The claim itself still arrives, because zero IS what the user asked
         // for. A script reads it and decides for itself.
-        assert_eq!(env["QEX_MEM"], "0");
+        assert_eq!(env["FAIRQ_MEM"], "0");
         assert_eq!(env["GOMAXPROCS"], "2");
     }
 
     /// `--env-capture none` means none, including the claim.
     ///
     /// That option says that the job starts with an empty environment and
-    /// receives `[env]` and `--env` only. Sixteen variables that qex chose
+    /// receives `[env]` and `--env` only. Sixteen variables that fairq chose
     /// would break the promise of the option, and a user who asks for `none`
     /// asked for it deliberately.
     #[test]
@@ -1396,7 +1396,7 @@ mod tests {
         o.env_capture = Some(EnvCapture::None);
         o.env = vec![("MINE".into(), "1".into())];
         // The claim must be a whole claim, or the test passes for the wrong
-        // reason: qex writes nothing for half a claim, whatever the capture is.
+        // reason: fairq writes nothing for half a claim, whatever the capture is.
         o.cpu = Some(crate::claim::Claim::Exact(2));
         o.mem = Some(crate::claim::Claim::Exact(2 << 30));
         let spec = JobSpec::resolve(&o, &cfg).unwrap();
@@ -1409,7 +1409,7 @@ mod tests {
     ///
     /// `--mem 4GB` with no `--cpu` takes the cores from `[defaults]`, and that
     /// number is one. A job that heard it would run single-threaded on a
-    /// machine of sixteen cores, with no error and no warning. qex writes the
+    /// machine of sixteen cores, with no error and no warning. fairq writes the
     /// claim only when the user answered BOTH questions.
     #[test]
     fn half_a_claim_tells_the_job_nothing() {
@@ -1431,7 +1431,7 @@ mod tests {
             o.mem = mem.clone();
             let spec = JobSpec::resolve(&o, &cfg).unwrap();
             assert!(
-                !spec.env.contains_key("QEX_CPU") && !spec.env.contains_key("GOMAXPROCS"),
+                !spec.env.contains_key("FAIRQ_CPU") && !spec.env.contains_key("GOMAXPROCS"),
                 "half a claim ({cpu:?}, {mem:?}) must write nothing: {:?}",
                 spec.env
             );
@@ -1443,7 +1443,7 @@ mod tests {
         o.cpu = Some(crate::claim::Claim::Exact(2));
         o.mem = Some(crate::claim::Claim::Exact(4 << 30));
         let spec = JobSpec::resolve(&o, &cfg).unwrap();
-        assert_eq!(spec.env.get("QEX_CPU").map(String::as_str), Some("2"));
+        assert_eq!(spec.env.get("FAIRQ_CPU").map(String::as_str), Some("2"));
         assert_eq!(spec.env.get("GOMAXPROCS").map(String::as_str), Some("2"));
     }
 
@@ -1475,27 +1475,27 @@ mod tests {
     /// A value that somebody chose must stay.
     ///
     /// The value can come from the shell, from the job file or from `--env`.
-    /// Each of those is a decision, and qex fills the values that nobody chose.
+    /// Each of those is a decision, and fairq fills the values that nobody chose.
     #[test]
     fn the_claim_never_replaces_a_value_that_exists() {
         use std::collections::BTreeMap;
 
         let mut env = BTreeMap::new();
         env.insert("GOMAXPROCS".to_string(), "9".to_string());
-        env.insert("QEX_CPU".to_string(), "mine".to_string());
+        env.insert("FAIRQ_CPU".to_string(), "mine".to_string());
         export_claim(&mut env, 2, 1 << 30, &[]);
 
         assert_eq!(env["GOMAXPROCS"], "9", "an explicit value must stay");
-        assert_eq!(env["QEX_CPU"], "mine");
+        assert_eq!(env["FAIRQ_CPU"], "mine");
         // The values that nobody set still arrive.
         assert_eq!(env["OMP_NUM_THREADS"], "2");
     }
 
-    /// A value that somebody chose must survive, and qex must add no memory.
+    /// A value that somebody chose must survive, and fairq must add no memory.
     ///
     /// `export_claim` FILLS and never replaces, so a value from the shell of
     /// the user, from a job file or from `--env` stays. And no default hint
-    /// carries memory: qex limits no job, so it tells no runtime to limit
+    /// carries memory: fairq limits no job, so it tells no runtime to limit
     /// itself.
     #[test]
     fn the_claim_fills_the_environment_and_carries_no_memory() {
@@ -1503,24 +1503,24 @@ mod tests {
 
         let claim = 128u64 << 20;
         let mut env = BTreeMap::new();
-        // The user chose these, before qex wrote anything.
+        // The user chose these, before fairq wrote anything.
         env.insert("GOMEMLIMIT".to_string(), "77".to_string());
         env.insert("GOMAXPROCS".to_string(), "9".to_string());
         export_claim(&mut env, 2, claim, &[]);
 
-        assert_eq!(env["QEX_MEM"], claim.to_string());
-        assert_eq!(env["QEX_MEM_MB"], "128");
-        assert_eq!(env["QEX_CPU"], "2");
+        assert_eq!(env["FAIRQ_MEM"], claim.to_string());
+        assert_eq!(env["FAIRQ_MEM_MB"], "128");
+        assert_eq!(env["FAIRQ_CPU"], "2");
         assert_eq!(
             env["GOMEMLIMIT"], "77",
-            "a value that somebody chose must stay, whatever qex does"
+            "a value that somebody chose must stay, whatever fairq does"
         );
         assert_eq!(
             env["GOMAXPROCS"], "9",
             "a core value that somebody chose must stay as well"
         );
 
-        // qex ADDS no memory value of its own.
+        // fairq ADDS no memory value of its own.
         let mut bare = BTreeMap::new();
         export_claim(&mut bare, 2, claim, &[]);
         assert!(!bare.contains_key("GOMEMLIMIT"), "{bare:?}");
@@ -1559,7 +1559,7 @@ mod tests {
     }
 
     fn tmpdir(tag: &str) -> PathBuf {
-        let d = crate::testutil::temp_dir().join(format!("qex-spec-{tag}-{}", std::process::id()));
+        let d = crate::testutil::temp_dir().join(format!("fairq-spec-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }
@@ -1570,7 +1570,7 @@ mod tests {
     ///
     /// A job that the kernel stops for memory at the budget leaves a lower
     /// bound AT the budget, and the margin of 1.5 above that bound gives a
-    /// claim of one and one half budgets. qex made that number itself, and it
+    /// claim of one and one half budgets. fairq made that number itself, and it
     /// must not make a number that it then refuses: with
     /// `[queue] oversized = "reject"` the next submission of the command was
     /// refused with "Decrease the claim", and the user had given no claim to
@@ -1604,9 +1604,9 @@ mod tests {
                 }],
             },
         );
-        std::fs::create_dir_all(home.join("qex")).unwrap();
+        std::fs::create_dir_all(home.join("fairq")).unwrap();
         std::fs::write(
-            home.join("qex/usage.json"),
+            home.join("fairq/usage.json"),
             serde_json::to_string(&store).unwrap(),
         )
         .unwrap();
@@ -1631,12 +1631,12 @@ mod tests {
         assert_eq!(
             (spec.cpu_source.as_str(), spec.mem_source.as_str()),
             ("learned", "learned"),
-            "qex learned the two values"
+            "fairq learned the two values"
         );
 
         // A PERSON WHO GIVES ONE VALUE GAVE THAT VALUE. `claim_source` says
         // `learned` for this job, because one word cannot hold two answers, and
-        // `qex status` then told a person who gave `--cpu 2` that qex learned
+        // `fairq status` then told a person who gave `--cpu 2` that fairq learned
         // the 2 cores.
         let mut one_value = opts(&["train-at-the-budget"]);
         one_value.cpu = Some(crate::claim::Claim::parse("2", false).unwrap());
@@ -1645,13 +1645,13 @@ mod tests {
         assert_eq!(
             (spec.cpu_source.as_str(), spec.mem_source.as_str()),
             ("explicit", "learned"),
-            "the person gave the cores, and qex learned the memory only"
+            "the person gave the cores, and fairq learned the memory only"
         );
 
         std::fs::remove_dir_all(&home).ok();
     }
 
-    /// The specification must carry the command that qex measures the job
+    /// The specification must carry the command that fairq measures the job
     /// against, so the supervisor records every line of a fan-out in one place.
     #[test]
     fn a_job_carries_the_command_that_it_learns_against() {
@@ -1673,10 +1673,10 @@ mod tests {
     #[test]
     fn env_is_captured_by_default() {
         let _guard = env_lock();
-        let _m = EnvVar::set("QEX_TEST_MARKER", "present");
+        let _m = EnvVar::set("FAIRQ_TEST_MARKER", "present");
         let spec = JobSpec::resolve(&opts(&["true"]), &Config::default()).unwrap();
         assert_eq!(
-            spec.env.get("QEX_TEST_MARKER").map(String::as_str),
+            spec.env.get("FAIRQ_TEST_MARKER").map(String::as_str),
             Some("present"),
             "default capture should inherit the invoking environment"
         );
@@ -1685,7 +1685,7 @@ mod tests {
     #[test]
     fn capture_none_drops_everything_but_explicit_values() {
         let _guard = env_lock();
-        let _m = EnvVar::set("QEX_TEST_MARKER", "present");
+        let _m = EnvVar::set("FAIRQ_TEST_MARKER", "present");
         let mut o = opts(&["true"]);
         o.env_capture = Some(EnvCapture::None);
         o.env = vec![("ONLY".into(), "this".into())];
@@ -1697,7 +1697,7 @@ mod tests {
     #[test]
     fn capture_minimal_keeps_only_the_allowlist() {
         let _guard = env_lock();
-        let _m = EnvVar::set("QEX_TEST_MARKER", "present");
+        let _m = EnvVar::set("FAIRQ_TEST_MARKER", "present");
         let _h = EnvVar::set("HOME", "/home/example");
         let mut o = opts(&["true"]);
         o.env_capture = Some(EnvCapture::Minimal);
@@ -1707,7 +1707,7 @@ mod tests {
             Some("/home/example")
         );
         assert!(
-            !spec.env.contains_key("QEX_TEST_MARKER"),
+            !spec.env.contains_key("FAIRQ_TEST_MARKER"),
             "minimal capture leaked a non-allowlisted variable"
         );
     }
@@ -1733,11 +1733,11 @@ mod tests {
     #[test]
     fn cli_env_overrides_captured_env() {
         let _guard = env_lock();
-        let _m = EnvVar::set("QEX_TEST_OVERRIDE", "from-shell");
+        let _m = EnvVar::set("FAIRQ_TEST_OVERRIDE", "from-shell");
         let mut o = opts(&["true"]);
-        o.env = vec![("QEX_TEST_OVERRIDE".into(), "from-cli".into())];
+        o.env = vec![("FAIRQ_TEST_OVERRIDE".into(), "from-cli".into())];
         let spec = JobSpec::resolve(&o, &Config::default()).unwrap();
-        assert_eq!(spec.env.get("QEX_TEST_OVERRIDE").unwrap(), "from-cli");
+        assert_eq!(spec.env.get("FAIRQ_TEST_OVERRIDE").unwrap(), "from-cli");
     }
 
     /// Tests the full sequence of sources in one test.
@@ -1747,13 +1747,13 @@ mod tests {
     #[test]
     fn precedence_runs_captured_then_job_file_then_cli() {
         let _guard = env_lock();
-        let _m = EnvVar::set("QEX_LAYER", "captured");
+        let _m = EnvVar::set("FAIRQ_LAYER", "captured");
         let dir = tmpdir("precedence");
 
         // The shell is the only source.
         let mut o = opts(&["true"]);
         assert_eq!(
-            JobSpec::resolve(&o, &Config::default()).unwrap().env["QEX_LAYER"],
+            JobSpec::resolve(&o, &Config::default()).unwrap().env["FAIRQ_LAYER"],
             "captured"
         );
 
@@ -1761,21 +1761,21 @@ mod tests {
         let jf = job_file(
             &dir,
             "j.toml",
-            "command = [\"true\"]\n[env]\nQEX_LAYER = \"job-file\"\n",
+            "command = [\"true\"]\n[env]\nFAIRQ_LAYER = \"job-file\"\n",
         );
         o = SubmitOptions {
             job_file: Some(jf.clone()),
             ..Default::default()
         };
         assert_eq!(
-            JobSpec::resolve(&o, &Config::default()).unwrap().env["QEX_LAYER"],
+            JobSpec::resolve(&o, &Config::default()).unwrap().env["FAIRQ_LAYER"],
             "job-file"
         );
 
         // The command line replaces the job file.
-        o.env = vec![("QEX_LAYER".into(), "cli".into())];
+        o.env = vec![("FAIRQ_LAYER".into(), "cli".into())];
         assert_eq!(
-            JobSpec::resolve(&o, &Config::default()).unwrap().env["QEX_LAYER"],
+            JobSpec::resolve(&o, &Config::default()).unwrap().env["FAIRQ_LAYER"],
             "cli"
         );
 
@@ -1820,7 +1820,7 @@ mod tests {
 
     /// A nice value outside -20 to 19 must be refused at the submission.
     ///
-    /// qex makes that call between the fork and the exec, where it cannot
+    /// fairq makes that call between the fork and the exec, where it cannot
     /// report a fault, and `setpriority` gives it nothing to report. Measured
     /// on Linux from nice 0, with no privilege:
     /// `setpriority(PRIO_PROCESS, 0, 100)` gives 0 and leaves the process at
@@ -2000,7 +2000,7 @@ mod tests {
         let dir = tmpdir("badfile");
         let p = job_file(&dir, "bad.toml", "command = \"not an array\"\n");
         let err = JobFile::load(&p).unwrap_err().to_string();
-        assert!(err.contains("qex help job-file"), "got: {err}");
+        assert!(err.contains("fairq help job-file"), "got: {err}");
         assert!(err.contains("command = ["), "error lacks an example: {err}");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -2008,7 +2008,7 @@ mod tests {
     #[test]
     fn unknown_job_file_fields_are_rejected_rather_than_ignored() {
         let dir = tmpdir("unknown");
-        // A field name with a spelling error must give an error. If qex ignores
+        // A field name with a spelling error must give an error. If fairq ignores
         // the field, the job operates without the limit that the author set.
         let p = job_file(
             &dir,
@@ -2089,7 +2089,7 @@ mod tests {
     }
 
     /// The queue limit must come from each of the three sources, in the same
-    /// order as every other value. A job file that qex ignored would let a job
+    /// order as every other value. A job file that fairq ignored would let a job
     /// wait with no end, which is the fault that the option removes.
     #[test]
     fn the_queue_limit_comes_from_the_config_the_file_or_the_command_line() {
@@ -2182,7 +2182,7 @@ mod tests {
     #[test]
     fn missing_cwd_is_rejected_at_submit_time_not_at_run_time() {
         let mut o = opts(&["true"]);
-        o.cwd = Some(PathBuf::from("/nonexistent/qex/dir"));
+        o.cwd = Some(PathBuf::from("/nonexistent/fairq/dir"));
         let err = JobSpec::resolve(&o, &Config::default())
             .unwrap_err()
             .to_string();
@@ -2194,7 +2194,7 @@ mod tests {
         let err = JobSpec::resolve(&opts(&[]), &Config::default())
             .unwrap_err()
             .to_string();
-        assert!(err.contains("qex submit"), "error should show usage: {err}");
+        assert!(err.contains("fairq submit"), "error should show usage: {err}");
         assert!(
             err.contains("--job"),
             "error should mention job files: {err}"
@@ -2203,7 +2203,7 @@ mod tests {
 
     /// A name must not have the form of an id.
     ///
-    /// qex chooses the rule for a dependency from the form of the value. A name
+    /// fairq chooses the rule for a dependency from the form of the value. A name
     /// with the form of an id would take the rule for an id, and it would avoid
     /// the test that protects against a job of an earlier run.
     #[test]
@@ -2221,7 +2221,7 @@ mod tests {
         assert!(JobSpec::resolve(&o, &Config::default()).is_ok());
     }
 
-    /// A name that a person chose must be in the set. A name that qex derived
+    /// A name that a person chose must be in the set. A name that fairq derived
     /// from the program must become the safe form, and the job must start.
     #[test]
     fn a_chosen_name_outside_the_set_is_refused_and_a_derived_name_is_not() {
@@ -2231,14 +2231,14 @@ mod tests {
         let err = JobSpec::resolve(&o, &Config::default())
             .unwrap_err()
             .to_string();
-        assert!(err.contains("not a name that qex accepts"), "got: {err}");
+        assert!(err.contains("not a name that fairq accepts"), "got: {err}");
         assert!(err.contains("deploy prod"), "got: {err}");
 
         o.name = Some("-version".into());
         let err = JobSpec::resolve(&o, &Config::default())
             .unwrap_err()
             .to_string();
-        assert!(err.contains("not a name that qex accepts"), "got: {err}");
+        assert!(err.contains("not a name that fairq accepts"), "got: {err}");
 
         o.name = Some("y".repeat(129));
         let err = JobSpec::resolve(&o, &Config::default())
@@ -2298,8 +2298,8 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// An option that does nothing must give an error, and qex must not accept
-    /// it in silence. The user asked for a rule, and a rule that qex cannot
+    /// An option that does nothing must give an error, and fairq must not accept
+    /// it in silence. The user asked for a rule, and a rule that fairq cannot
     /// apply is a rule that the user must hear about.
     #[test]
     fn a_dedupe_option_that_holds_no_job_is_refused() {
@@ -2356,7 +2356,7 @@ mod tests {
         );
         assert_eq!(name(&["bash", "-c", "cargo test"]), "bash-cargo_test");
         assert_eq!(name(&["make"]), "make");
-        // A script gives its whole text, and qex does not cut it at a `/`.
+        // A script gives its whole text, and fairq does not cut it at a `/`.
         assert_eq!(
             name(&["bash", "-c", "cd /p && cargo test"]),
             "bash-cd_p_cargo_test"
@@ -2385,7 +2385,7 @@ mod tests {
 
     /// Two commands of one launcher that differ in the argument that names
     /// the work get different default names. This is the reason the rule
-    /// exists: `qex list` with sixty rows named `uv` is not readable.
+    /// exists: `fairq list` with sixty rows named `uv` is not readable.
     #[test]
     fn two_commands_of_one_launcher_get_different_default_names() {
         let name = |c: &[&str]| derived_name(&c.iter().map(|s| s.to_string()).collect::<Vec<_>>());
@@ -2490,7 +2490,7 @@ mod tests {
     }
 
     /// `--gpu` with no `--vram` takes the WHOLE of each device that the job
-    /// gets. A claim that consumed nothing would let qex put four unlimited
+    /// gets. A claim that consumed nothing would let fairq put four unlimited
     /// jobs on one card.
     #[test]
     fn a_gpu_claim_with_no_vram_takes_the_whole_device() {
@@ -2536,9 +2536,9 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// qex owns the assignment. A value that the author wrote would disagree
-    /// with the device that qex gave, and the job would then use a card that
-    /// qex gave to a different job.
+    /// fairq owns the assignment. A value that the author wrote would disagree
+    /// with the device that fairq gave, and the job would then use a card that
+    /// fairq gave to a different job.
     #[test]
     fn a_job_that_sets_the_device_variable_itself_is_refused() {
         let _guard = env_lock();
@@ -2551,7 +2551,7 @@ mod tests {
         assert!(err.contains("would disagree"), "got: {err}");
         assert!(err.contains("CUDA_VISIBLE_DEVICES"), "got: {err}");
 
-        // A job that claims no device may set the variable itself. qex is then
+        // A job that claims no device may set the variable itself. fairq is then
         // not accounting for the card, and it says nothing.
         let mut o = opts(&["true"]);
         o.env = vec![("CUDA_VISIBLE_DEVICES".into(), "0".into())];
@@ -2595,7 +2595,7 @@ mod tests {
                 }
             )
         );
-        // A claim of zero holds nothing, and qex must not accept it in silence.
+        // A claim of zero holds nothing, and fairq must not accept it in silence.
         assert!(parse_claim_pair("net=0").unwrap_err().contains("zero"));
         assert!(parse_claim_pair("net").is_err());
         assert!(parse_claim_pair("=2").is_err());

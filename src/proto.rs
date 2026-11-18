@@ -46,7 +46,7 @@ pub enum Request {
     Submit {
         spec: Box<JobSpec>,
         /// The processes above the command that submits, from its parent up
-        /// to the first process of the machine. `qex abort` reads this list;
+        /// to the first process of the machine. `fairq abort` reads this list;
         /// see the `context` module. An earlier CLI sends no list, and such a
         /// job is outside every context.
         #[serde(default)]
@@ -54,7 +54,7 @@ pub enum Request {
     },
     /// Says that this connection owns a job until the job starts.
     ///
-    /// `qex run` sends this for the job that it started. Such a job has one
+    /// `fairq run` sends this for the job that it started. Such a job has one
     /// reader, and that reader is the command itself. When the command stops,
     /// the coordinator cancels the job while the job still waits, so that no
     /// job keeps a place in the queue for a reader that went away.
@@ -73,7 +73,7 @@ pub enum Request {
     /// Gives the jobs that a filter keeps, as short rows or as full records.
     ///
     /// The coordinator filters, so the answer holds what the reader asked for
-    /// and not every record that qex keeps. A CLI sends this request only to a
+    /// and not every record that fairq keeps. A CLI sends this request only to a
     /// coordinator that gives the capability `query`.
     Query { filter: Box<JobFilter> },
     /// Reads each text that a person wrote (an id, the start of an id, a name,
@@ -112,7 +112,7 @@ pub enum Request {
     Cancel { id: uuid::Uuid },
     /// Deletes the record of a job that stopped.
     Clean { id: uuid::Uuid },
-    /// Gives which of these ids no job and no submission in progress holds. `qex gc` asks it
+    /// Gives which of these ids no job and no submission in progress holds. `fairq gc` asks it
     /// before it removes a directory with no record (#200); only under the capability `free-ids`.
     FreeIds { ids: Vec<uuid::Uuid> },
     /// Gives the state of the coordinator.
@@ -187,7 +187,7 @@ pub enum Request {
         scope: AbortScope,
         /// True to leave the jobs that operate alone.
         keep_running: bool,
-        /// The time before qex sends KILL to a job that TERM did not stop.
+        /// The time before fairq sends KILL to a job that TERM did not stop.
         grace_secs: u64,
         /// The process id that the CLI reports for itself. See `Pause`.
         by_pid: i32,
@@ -232,7 +232,7 @@ pub struct JobFilter {
     pub full: bool,
 }
 
-/// One job, as a line of `qex list` needs it.
+/// One job, as a line of `fairq list` needs it.
 ///
 /// A full record holds the command, the directory, the chain of the submitter
 /// and the claims. A table of ten thousand jobs prints none of those, so a row
@@ -375,7 +375,7 @@ pub struct AbortedJob {
     pub id: uuid::Uuid,
     /// The SAFE name of the job. See `job::safe_name`.
     pub name: String,
-    /// Why qex could not do what the request asked for this job.
+    /// Why fairq could not do what the request asked for this job.
     pub why: String,
 }
 
@@ -456,13 +456,13 @@ pub enum Response {
         /// A message for the user, if the job needs one.
         ///
         /// The CLI writes this text to stderr. The job id stays alone on
-        /// stdout, so `ID=$(qex submit ...)` continues to operate.
+        /// stdout, so `ID=$(fairq submit ...)` continues to operate.
         warning: Option<String>,
         /// True when a dedupe key gave a job that already existed.
         ///
         /// The id above is then the id of that job, and this submission
         /// started nothing. A caller that must know if IT started the work
-        /// reads this field with `qex submit --json`.
+        /// reads this field with `fairq submit --json`.
         ///
         /// An earlier coordinator does not write this field. `default` gives
         /// `false` there, which is the truth for a coordinator that has no
@@ -536,7 +536,7 @@ pub enum Response {
         ///
         /// A string, because a later version adds more states to this field. A
         /// CLI that met an unknown name of a Rust enum would refuse the whole
-        /// answer, and `qex info` would then give nothing at all.
+        /// answer, and `fairq info` would then give nothing at all.
         #[serde(default)]
         queue_state: Option<String>,
         /// The moment when a person paused the queue.
@@ -577,7 +577,7 @@ pub enum Response {
         /// The pools of countable resources, and what holds them.
         ///
         /// THIS FIELD IS AN OPTION, AND NOT A DEFAULTED LIST. `None` means
-        /// "this coordinator cannot say", and `qex info` writes `unknown` for
+        /// "this coordinator cannot say", and `fairq info` writes `unknown` for
         /// it. A defaulted empty list would read as "this machine has no
         /// pool", which is a different statement and can be a lie.
         #[serde(default)]
@@ -620,10 +620,10 @@ pub enum Response {
     /// the queue is empty while a record still waits in it.
     Aborted {
         /// The jobs that waited in the queue and that this request cancelled.
-        /// Their records stay, as after `qex cancel`. The count is the count
+        /// Their records stay, as after `fairq cancel`. The count is the count
         /// of records on the disk that say `cancelled`.
         cancelled: usize,
-        /// The queued jobs whose record qex could not write. Each one stays
+        /// The queued jobs whose record fairq could not write. Each one stays
         /// in the queue, with the reason.
         #[serde(default)]
         not_cancelled: Vec<AbortedJob>,
@@ -649,7 +649,7 @@ pub enum Response {
     Error { message: String, kind: ErrorKind },
 }
 
-/// One pool of a countable resource, as `qex info` reports it.
+/// One pool of a countable resource, as `fairq info` reports it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolReport {
     pub name: String,

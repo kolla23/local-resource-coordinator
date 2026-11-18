@@ -29,11 +29,11 @@ const SPAWN_TIMEOUT: Duration = Duration::from_secs(10);
 ///   a request that costs no work. A wait with no end is never correct here.
 ///   The coordinator answers at once, or something is wrong and the reader
 ///   must be told.
-/// * **A job finishes.** `qex wait`, `qex status --wait`, `qex logs --follow`.
+/// * **A job finishes.** `fairq wait`, `fairq status --wait`, `fairq logs --follow`.
 ///   A wait of four hours is the POINT there, because the reader asked for it.
 ///
 /// This limit belongs to the FIRST kind only. **Do not give the second kind a
-/// limit of its own.** A ceiling on a job wait breaks the thing that qex is
+/// limit of its own.** A ceiling on a job wait breaks the thing that fairq is
 /// for.
 ///
 /// The code keeps the two apart: `call` sends one request and reads one
@@ -59,7 +59,7 @@ const SPAWN_TIMEOUT: Duration = Duration::from_secs(10);
 /// so the ceiling is the ceiling of the command and not of each phase.
 const COORDINATOR_CEILING: Duration = Duration::from_secs(300);
 
-/// The time after which qex says that it still waits.
+/// The time after which fairq says that it still waits.
 ///
 /// A reader must not sit in front of a silent command. This line converts a
 /// silent wait into a visible one, and it does NOT end the wait: the work can
@@ -68,13 +68,13 @@ const SAY_STILL_WAITING_AFTER: Duration = Duration::from_secs(10);
 
 /// Names the variable that shortens one STEP of a wait, in seconds.
 ///
-/// **This variable exists for the tests of qex**, beside [`CEILING_VARIABLE`].
-/// The step decides how often qex looks at the socket while it waits, so a test
+/// **This variable exists for the tests of fairq**, beside [`CEILING_VARIABLE`].
+/// The step decides how often fairq looks at the socket while it waits, so a test
 /// that must prove the wait CONTINUES past one step needs a short one.
 ///
 /// A value that is not a number, or zero, or larger than the step itself gives
 /// the step itself.
-pub const STEP_VARIABLE: &str = "QEX_SAY_WAITING_AFTER_SECS";
+pub const STEP_VARIABLE: &str = "FAIRQ_SAY_WAITING_AFTER_SECS";
 
 fn step_of_a_wait() -> Duration {
     match std::env::var(STEP_VARIABLE)
@@ -104,7 +104,7 @@ struct ReaderLimit {
     /// The time that the reader wrote. A message that names the limit gives
     /// this value, so the reader knows their own number again.
     gave: Duration,
-    /// The time that qex gave to the read of the record, when `ends` is the
+    /// The time that fairq gave to the read of the record, when `ends` is the
     /// end of that time and no longer the end of `gave`. A message must then
     /// name this time, because this time ended the wait and the number of the
     /// reader did not. There are two cases, and the value says which one
@@ -114,7 +114,7 @@ struct ReaderLimit {
     record_allowance: Option<RecordAllowance>,
 }
 
-/// The time that qex gave to the read of the record of a job.
+/// The time that fairq gave to the read of the record of a job.
 #[derive(Clone, Copy)]
 struct RecordAllowance {
     /// The time that the record got.
@@ -131,13 +131,13 @@ struct RecordAllowance {
 ///
 /// A caller can drop that error, because the answer was a courtesy to it. The
 /// silent coordinator used the limit of the reader all the same, and the next
-/// operation then finds the limit spent. That operation must not say that qex
-/// waited no time: qex waited the whole limit, and this text holds the fact and
+/// operation then finds the limit spent. That operation must not say that fairq
+/// waited no time: fairq waited the whole limit, and this text holds the fact and
 /// the remedy that the reader needs.
 static A_COORDINATOR_THAT_DID_NOT_ANSWER: std::sync::Mutex<Option<String>> =
     std::sync::Mutex::new(None);
 
-/// Says whether qex said already that it still waits.
+/// Says whether fairq said already that it still waits.
 ///
 /// One command says the line one time. A command makes several calls, and a
 /// line for each of them teaches the reader to read none of them.
@@ -149,14 +149,14 @@ fn reader_deadline() -> &'static std::sync::Mutex<Option<ReaderLimit>> {
 
 /// Names the variable that gives the ceiling a different value, in seconds.
 ///
-/// **This variable exists for the tests of qex.** A test cannot wait five
+/// **This variable exists for the tests of fairq.** A test cannot wait five
 /// minutes to prove that a wait ends. It is in no document and in no help text,
 /// and a reader who wants a short answer gives `--timeout` instead.
 ///
 /// A value that is not a number, or zero, or larger than a day gives the
 /// ceiling itself. A large number must not reach the clock: an instant that
 /// overflows stops the process, and a variable must never do that.
-pub const CEILING_VARIABLE: &str = "QEX_COORDINATOR_CEILING_SECS";
+pub const CEILING_VARIABLE: &str = "FAIRQ_COORDINATOR_CEILING_SECS";
 
 /// The largest ceiling that the variable can ask for.
 const LARGEST_CEILING: Duration = Duration::from_secs(24 * 60 * 60);
@@ -178,10 +178,10 @@ fn ceiling() -> Duration {
 /// # A budget measures ONE wait, and never the age of a command
 ///
 /// The ceiling starts again for each operation, because it answers one
-/// question: has qex waited too long for THIS answer? Nothing that a command
+/// question: has fairq waited too long for THIS answer? Nothing that a command
 /// did earlier may shorten what it asks for now.
 ///
-/// qex exists for jobs that run longer than the ceiling. A budget that measured
+/// fairq exists for jobs that run longer than the ceiling. A budget that measured
 /// the age of the command would give a command that watched a job for an hour
 /// no time at all for its next question, and it would then report a failure for
 /// a job that SUCCEEDED.
@@ -218,7 +218,7 @@ fn spent_limit_of_the_reader() -> Option<ReaderLimit> {
 ///
 /// A floor of one second made a wait of no time read as "1 seconds". A reader
 /// uses this number to decide which limit ended the command, so it must be the
-/// number that qex measured.
+/// number that fairq measured.
 fn seconds(time: Duration) -> String {
     if time >= Duration::from_secs(10) {
         format!("{} seconds", time.as_secs())
@@ -239,7 +239,7 @@ fn as_the_reader_gave(limit: Duration) -> String {
 /// Names the limit that ended a wait for the coordinator.
 ///
 /// A message that names a limit is the evidence of the reader about which
-/// limit ended their command: their own number, or the ceiling of qex.
+/// limit ended their command: their own number, or the ceiling of fairq.
 fn the_limit_that_ended_it() -> String {
     name_the_limit(spent_limit_of_the_reader())
 }
@@ -248,7 +248,7 @@ fn the_limit_that_ended_it() -> String {
 fn name_the_limit(spent: Option<ReaderLimit>) -> String {
     match spent {
         // The number of the reader passed before this wait began. This wait
-        // ran in a time that qex gave, so that time is the limit that ended
+        // ran in a time that fairq gave, so that time is the limit that ended
         // it. To name the number of the reader here says that a wait of five
         // seconds ended at a limit of three.
         //
@@ -263,7 +263,7 @@ fn name_the_limit(spent: Option<ReaderLimit>) -> String {
                 }),
             ..
         }) => format!(
-            "Your time limit of {} passed before this wait began. qex gave the record {} \
+            "Your time limit of {} passed before this wait began. fairq gave the record {} \
              more, and that time ended this wait.",
             as_the_reader_gave(gave),
             seconds(time)
@@ -282,7 +282,7 @@ fn name_the_limit(spent: Option<ReaderLimit>) -> String {
             ..
         }) => format!(
             "The job stopped before your time limit of {} passed, and less than {} of that \
-             limit remained. qex gave the record {}, and that time ended this wait.",
+             limit remained. fairq gave the record {}, and that time ended this wait.",
             as_the_reader_gave(gave),
             seconds(time),
             seconds(time)
@@ -291,13 +291,13 @@ fn name_the_limit(spent: Option<ReaderLimit>) -> String {
             "Your time limit of {} ended this wait.",
             as_the_reader_gave(limit.gave)
         ),
-        None => "qex waits no longer than that for one answer of the coordinator.".to_string(),
+        None => "fairq waits no longer than that for one answer of the coordinator.".to_string(),
     }
 }
 
 /// The error of an operation that began after the limit of the reader passed.
 ///
-/// `what` names the thing that qex did NOT do, as a verb phrase: "ask the
+/// `what` names the thing that fairq did NOT do, as a verb phrase: "ask the
 /// coordinator".
 fn the_reader_limit_passed(spent: ReaderLimit, what: &str) -> anyhow::Error {
     let earlier = A_COORDINATOR_THAT_DID_NOT_ANSWER
@@ -314,10 +314,10 @@ fn the_reader_limit_passed(spent: ReaderLimit, what: &str) -> anyhow::Error {
 /// `earlier` is the message of a wait of this command that a coordinator did
 /// not answer. With it, the limit did not pass while the command did its
 /// work: the silent coordinator used it. The reader then needs that fact and
-/// its remedy, and "qex waited no time" would hide both.
+/// its remedy, and "fairq waited no time" would hide both.
 fn a_passed_limit(gave: Duration, what: &str, earlier: Option<&str>) -> String {
     let first = format!(
-        "your time limit of {} ended this command before qex could {what}.",
+        "your time limit of {} ended this command before fairq could {what}.",
         as_the_reader_gave(gave)
     );
     match earlier {
@@ -327,7 +327,7 @@ fn a_passed_limit(gave: Duration, what: &str, earlier: Option<&str>) -> String {
         ),
         None => format!(
             "{first}\n\
-             qex waited no time for the coordinator here, so this says nothing about \
+             fairq waited no time for the coordinator here, so this says nothing about \
              the state of the coordinator.\n\
              Run the command again with a longer time limit if you need the answer."
         ),
@@ -413,13 +413,13 @@ pub fn take_the_limit_of_the_reader(limit: Duration) {
     }
 }
 
-/// Says one time that qex still waits, and keeps waiting.
+/// Says one time that fairq still waits, and keeps waiting.
 ///
 /// A wait that says nothing looks the same as a wait that will never end. This
 /// line is the difference, and it does not end the wait: a coordinator on a
 /// loaded machine answers a slow question correctly, and a command that gives
 /// up on it turns a healthy machine into a failure.
-fn say_that_qex_still_waits(since: Instant, deadline: Instant, what: &str) {
+fn say_that_fairq_still_waits(since: Instant, deadline: Instant, what: &str) {
     use std::sync::atomic::Ordering;
     if since.elapsed() < step_of_a_wait() || SAID_IT_WAITS.swap(true, Ordering::SeqCst) {
         return;
@@ -434,14 +434,14 @@ fn say_that_qex_still_waits(since: Instant, deadline: Instant, what: &str) {
         .is_some();
     if reader_gave {
         eprintln!(
-            "qex: still waiting for the coordinator: {what}. \
+            "fairq: still waiting for the coordinator: {what}. \
              Your `--timeout` gives it {} more.",
             seconds(left)
         );
     } else {
         eprintln!(
-            "qex: still waiting for the coordinator: {what}. \
-             qex gives this answer {} more, and `--timeout` gives the \
+            "fairq: still waiting for the coordinator: {what}. \
+             fairq gives this answer {} more, and `--timeout` gives the \
              command a shorter limit.",
             seconds(left)
         );
@@ -460,7 +460,7 @@ pub struct Client {
     /// requests with one kind of answer swap in silence.
     ///
     /// The worst form of that: a `Submit` reads the answer of an earlier
-    /// question, so qex reports a failure for a job that the coordinator
+    /// question, so fairq reports a failure for a job that the coordinator
     /// ACCEPTED AND QUEUED, and the id of that job never reaches the reader.
     /// The reader submits again, and the machine then holds two jobs and a
     /// watcher for neither.
@@ -480,7 +480,7 @@ impl Client {
     /// The question goes out one time for each connection.
     ///
     /// A coordinator that gives no list has no capability: every version that
-    /// qex supports answers this request. A coordinator that did not ANSWER is
+    /// fairq supports answers this request. A coordinator that did not ANSWER is
     /// a different fact, and that error goes to the caller.
     pub fn can(&mut self, capability: &str) -> Result<bool> {
         if self.capabilities.is_none() {
@@ -525,7 +525,7 @@ impl Client {
 
     /// Connects to the coordinator, but does not start one.
     ///
-    /// `qex wait` uses this function. If no coordinator operates, that command
+    /// `fairq wait` uses this function. If no coordinator operates, that command
     /// reads the status file of the job instead.
     pub fn connect_existing() -> Option<Self> {
         // A socket that gives NO ANSWER is not the same as NO COORDINATOR, and
@@ -554,10 +554,10 @@ impl Client {
     /// Connects to a coordinator that operates, and keeps the timeout as an
     /// error.
     ///
-    /// `qex info --no-start` answers the question "is a coordinator there".
+    /// `fairq info --no-start` answers the question "is a coordinator there".
     /// A socket that gives no answer is not a `no`, so that command must not
     /// print `no coordinator operates`: it reports the limit instead, and the
-    /// exit code says that qex stopped waiting.
+    /// exit code says that fairq stopped waiting.
     pub fn connect_existing_result() -> Result<Option<Self>> {
         // A refused state directory is a fault to report, not an absent coordinator.
         let socket = paths::socket_path()?;
@@ -569,7 +569,7 @@ impl Client {
 
     /// Stops a write to THIS socket from killing the process.
     ///
-    /// `main` restores the default action of SIGPIPE, so that `qex list | head`
+    /// `main` restores the default action of SIGPIPE, so that `fairq list | head`
     /// ends in silence like every other tool. That is right for the pipe of the
     /// reader, and it is WRONG for the socket of the coordinator: a coordinator
     /// that closes a connection in the middle of a conversation would then kill
@@ -634,17 +634,17 @@ impl Client {
         // THE LIMIT OF THE READER PASSED BEFORE THIS QUESTION. Ask nothing, and
         // say which limit ended the command. See `spent_limit_of_the_reader`.
         // This test comes first: the state of the connection is a detail of
-        // qex, and the limit is the cause that the reader can act on. Nothing
+        // fairq, and the limit is the cause that the reader can act on. Nothing
         // went to the coordinator, so the connection keeps its place.
         if let Some(spent) = spent_limit_of_the_reader() {
             return Err(the_reader_limit_passed(spent, "ask the coordinator"));
         }
         if self.lost_its_place {
             return Err(timed_out(
-                "qex asked the coordinator nothing more on this connection.\n\
+                "fairq asked the coordinator nothing more on this connection.\n\
                  An earlier request reached its time limit, and the answer to it \
                  can still arrive. A later question on the same connection would \
-                 read that answer as its own, and qex would give you the answer \
+                 read that answer as its own, and fairq would give you the answer \
                  to a question that you did not ask.\n\
                  Run the command again."
                     .to_string(),
@@ -652,14 +652,14 @@ impl Client {
         }
         self.send(request)?;
 
-        // A caller that set its own limit keeps it. `qex logs --follow` and the
+        // A caller that set its own limit keeps it. `fairq logs --follow` and the
         // reporter of a wait each hold a limit that belongs to their own work.
         let ours = self.stream.read_timeout().ok().flatten().is_none();
         if !ours {
             return self.recv();
         }
 
-        // THIS WAIT STARTS NOW. The ceiling answers one question — has qex
+        // THIS WAIT STARTS NOW. The ceiling answers one question — has fairq
         // waited too long for THIS answer — so nothing that the command did
         // earlier shortens it.
         let started = Instant::now();
@@ -708,7 +708,7 @@ impl Client {
                     // The answer did not arrive YET. The coordinator can be
                     // busy, and a command that gives up here turns a healthy
                     // machine into a failure.
-                    say_that_qex_still_waits(started, deadline, "an answer to a request");
+                    say_that_fairq_still_waits(started, deadline, "an answer to a request");
                 }
                 Err(e) => {
                     break Err(anyhow::Error::new(e).context("watching the socket for an answer"))
@@ -847,10 +847,10 @@ impl Client {
 
 /// Marks an error that the limit for a COORDINATOR ended.
 ///
-/// Every command answers 124 for this condition, and 124 says one thing: qex
+/// Every command answers 124 for this condition, and 124 says one thing: fairq
 /// stopped waiting because it reached a limit. That is a fact about the
-/// COMMAND and not about a job, so it holds for `qex list` and `qex top` as
-/// well as for `qex wait`.
+/// COMMAND and not about a job, so it holds for `fairq list` and `fairq top` as
+/// well as for `fairq wait`.
 #[derive(Debug)]
 pub struct CoordinatorTimeout;
 
@@ -868,12 +868,12 @@ impl std::error::Error for CoordinatorTimeout {}
 /// The mark of an operation that began after the limit of the reader passed.
 ///
 /// It is apart from [`CoordinatorTimeout`] because the two facts differ: here
-/// qex asked nothing and waited no time, so nothing is known about the
+/// fairq asked nothing and waited no time, so nothing is known about the
 /// coordinator. A caller that falls back when a coordinator is silent must be
 /// able to tell the two apart. Both give 124, because in both a limit ended
 /// the command.
 ///
-/// The mark holds the whole message. qex writes an error with all of its
+/// The mark holds the whole message. fairq writes an error with all of its
 /// causes on one line, so a message above a mark with words of its own gets
 /// those words after its last full stop.
 #[derive(Debug)]
@@ -901,7 +901,7 @@ fn timed_out(message: String) -> anyhow::Error {
     // `A_COORDINATOR_THAT_DID_NOT_ANSWER`.
     //
     // Keep it only when the limit of the READER ended that wait. A wait that
-    // the ceiling of qex ended did not use the limit of the reader, and a later
+    // the ceiling of fairq ended did not use the limit of the reader, and a later
     // message must not say that it did.
     if spent_limit_of_the_reader().is_some() {
         A_COORDINATOR_THAT_DID_NOT_ANSWER
@@ -942,8 +942,8 @@ fn a_read_that_reached_its_limit(error: &anyhow::Error) -> bool {
 fn a_cut_answer(waited: Duration) -> String {
     format!(
         "the coordinator began an answer and did not finish it in {}. {}\n\
-         The part that arrived is not a whole answer, so qex read none of it.\n\
-         Run `qex info --no-start` to see whether it answers now, and read {} \
+         The part that arrived is not a whole answer, so fairq read none of it.\n\
+         Run `fairq info --no-start` to see whether it answers now, and read {} \
          for what it did.",
         seconds(waited),
         the_limit_that_ended_it(),
@@ -955,17 +955,17 @@ fn a_cut_answer(waited: Duration) -> String {
 
 /// Names the cause when a coordinator took a request and gave no answer.
 ///
-/// The message says what qex TRIED and how long it waited. It names the time
+/// The message says what fairq TRIED and how long it waited. It names the time
 /// that this wait actually took, and not the ceiling: a reader who gave
 /// `--timeout 14s` must not be told about 300 seconds.
 ///
-/// It does not say that the coordinator is wedged, because qex cannot know
+/// It does not say that the coordinator is wedged, because fairq cannot know
 /// that: a coordinator that is busy and one that will never answer look the
 /// same from here.
 fn a_silent_coordinator(waited: Duration) -> String {
     format!(
         "the coordinator took the request and gave no answer in {}. {}\n\
-         Run `qex info --no-start` to see whether it answers now, and read {} \
+         Run `fairq info --no-start` to see whether it answers now, and read {} \
          for what it did.",
         seconds(waited),
         the_limit_that_ended_it(),
@@ -981,11 +981,11 @@ fn a_silent_coordinator(waited: Duration) -> String {
 /// An `Err` says that a socket is there and gave no answer, and a caller must
 /// NOT start a second coordinator: two coordinators on one state directory
 /// each hold the whole budget, and the machine then gets the kill for memory
-/// that qex exists to prevent.
+/// that fairq exists to prevent.
 fn try_connect(socket: &Path) -> Result<Option<UnixStream>> {
     // THIS WAIT STARTS NOW, as every wait for an answer does.
     let started = Instant::now();
-    // The limit of the reader passed before this connect, so qex probes
+    // The limit of the reader passed before this connect, so fairq probes
     // nothing. See `spent_limit_of_the_reader`.
     if let Some(spent) = spent_limit_of_the_reader() {
         return Err(the_reader_limit_passed(spent, "connect to the coordinator"));
@@ -995,10 +995,10 @@ fn try_connect(socket: &Path) -> Result<Option<UnixStream>> {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
             // The socket did not answer inside the limit. Say only that, and do
-            // NOT say that a process holds the socket: qex cannot know it.
+            // NOT say that a process holds the socket: fairq cannot know it.
             return Err(timed_out(format!(
                 "the socket {} gave no answer in {}. {}\n\
-                 Run `qex info --no-start` to see whether a coordinator answers, \
+                 Run `fairq info --no-start` to see whether a coordinator answers, \
                  and read {} for what it did.",
                 socket.display(),
                 seconds(started.elapsed()),
@@ -1014,7 +1014,7 @@ fn try_connect(socket: &Path) -> Result<Option<UnixStream>> {
             // The socket is there and it did not answer YET. A busy coordinator
             // answers late, so keep asking until this wait reaches its limit.
             paths::Connected::NoAnswer => {
-                say_that_qex_still_waits(started, deadline, "a connection to the socket");
+                say_that_fairq_still_waits(started, deadline, "a connection to the socket");
             }
         }
     }
@@ -1079,9 +1079,9 @@ fn wait_for_socket(socket: &Path, timeout: Duration) -> Result<UnixStream> {
 
 /// Tests whether this process may make a Unix socket at all.
 ///
-/// Gives the message for a reader when it may not. qex needs one socket for the
+/// Gives the message for a reader when it may not. fairq needs one socket for the
 /// coordinator, and a sandbox that refuses `bind` or `connect` on a Unix socket
-/// stops qex completely. bubblewrap, which Codex and other agent harnesses use,
+/// stops fairq completely. bubblewrap, which Codex and other agent harnesses use,
 /// can be configured in that way.
 fn socket_is_refused() -> Option<String> {
     // Probe the directory that holds the SOCKET. That is the runtime directory
@@ -1097,12 +1097,12 @@ fn socket_refused_in(dir: &Path) -> Option<String> {
     classify_refusal(dir, probe_a_socket).map(|refusal| refusal.message(dir))
 }
 
-/// What stopped qex from making its socket.
+/// What stopped fairq from making its socket.
 enum Refusal {
     /// An ordinary file works, and a socket does not. That is the signature of
     /// a sandbox that filters the system calls of a socket.
     Socket(std::io::Error),
-    /// qex cannot write in the directory at all.
+    /// fairq cannot write in the directory at all.
     Directory(std::io::Error),
 }
 
@@ -1110,22 +1110,22 @@ impl Refusal {
     fn message(&self, dir: &Path) -> String {
         // Both messages end in the same way, because the remedy for both
         // belongs to the same person.
-        let page = "IF YOU ARE AN AGENT: tell the person that you work with. They must let qex \
+        let page = "IF YOU ARE AN AGENT: tell the person that you work with. They must let fairq \
                     run outside the sandbox, or give the sandbox permission for that \
                     directory. The page for them is:\n\
                     \x20   https://github.com/kolla23/local-resource-coordinator/blob/main/docs/sandbox.md";
         match self {
             Refusal::Socket(e) => format!(
-                "qex cannot make a Unix socket in {}: {e}. An ordinary file in that directory \
+                "fairq cannot make a Unix socket in {}: {e}. An ordinary file in that directory \
                  works, so this is the socket and not the directory.\n\n\
-                 qex keeps one coordinator process, and every qex command talks to it through \
-                 a Unix socket. A sandbox that refuses that socket stops qex completely, and \
+                 fairq keeps one coordinator process, and every fairq command talks to it through \
+                 a Unix socket. A sandbox that refuses that socket stops fairq completely, and \
                  that is the usual cause of this message.\n\n{page}",
                 dir.display()
             ),
             Refusal::Directory(e) => format!(
-                "qex cannot write in {}: {e}.\n\n\
-                 qex keeps its records, its log files and the socket of its coordinator in \
+                "fairq cannot write in {}: {e}.\n\n\
+                 fairq keeps its records, its log files and the socket of its coordinator in \
                  that directory. A sandbox that gives it a read-only mount, or no mount at \
                  all, gives this fault.\n\n{page}",
                 dir.display()
@@ -1139,7 +1139,7 @@ impl Refusal {
 /// The FILE comes first. A sandbox that filters system calls can answer a
 /// `bind` with "operation not permitted" before the kernel looks at the path,
 /// so the error of the socket alone cannot say whether the directory exists. A
-/// file that qex can write proves that the directory is there and writable, and
+/// file that fairq can write proves that the directory is there and writable, and
 /// a socket that fails after that names the socket exactly.
 ///
 /// `bind` is a parameter, so a test gives each answer with no sandbox: the
@@ -1158,7 +1158,7 @@ fn classify_refusal(dir: &Path, bind: impl Fn(&Path) -> std::io::Result<()>) -> 
             // A link planted at this name fails the open: nothing is made or changed through it.
             .custom_flags(libc::O_NOFOLLOW)
             .open(&file)
-            .and_then(|mut f| f.write_all(b"qex"))
+            .and_then(|mut f| f.write_all(b"fairq"))
     };
     if let Err(e) = written {
         return a_refusal(e).map(Refusal::Directory);
@@ -1174,7 +1174,7 @@ fn classify_refusal(dir: &Path, bind: impl Fn(&Path) -> std::io::Result<()>) -> 
 
 /// Keeps the errors that mean "you may not", and no others.
 ///
-/// The messages of this module tell a reader that a SANDBOX stopped qex, and
+/// The messages of this module tell a reader that a SANDBOX stopped fairq, and
 /// that a different person must correct it. A disk that filled, or a process
 /// that holds too many files, makes the same SHAPE — a write that fails, or a
 /// socket that fails after a file that worked — and the words would then assert
@@ -1206,7 +1206,7 @@ fn a_refusal(error: std::io::Error) -> Option<std::io::Error> {
 
 /// Binds a socket and connects to it.
 ///
-/// qex needs BOTH halves: the coordinator binds, and every command connects. A
+/// fairq needs BOTH halves: the coordinator binds, and every command connects. A
 /// sandbox can allow the first and refuse the second.
 fn probe_a_socket(path: &Path) -> std::io::Result<()> {
     let listener = std::os::unix::net::UnixListener::bind(path)?;
@@ -1217,7 +1217,7 @@ fn probe_a_socket(path: &Path) -> std::io::Result<()> {
 
 /// Adds the page for a person when a fault has the shape of a sandbox.
 ///
-/// A sandbox gives an ordinary error: a directory that qex cannot make, a file
+/// A sandbox gives an ordinary error: a directory that fairq cannot make, a file
 /// system that refuses a write, a system call that it does not permit. Each of
 /// those messages names a file and nothing else, and the reader then does not
 /// learn that the remedy belongs to a different person.
@@ -1234,7 +1234,7 @@ fn name_the_sandbox(error: anyhow::Error) -> anyhow::Error {
     // and then the fault that it corrects.
     anyhow::anyhow!(
         "{error:#}\n\n\
-         qex could not make the files that it needs. A sandbox that gives qex a read-only \
+         fairq could not make the files that it needs. A sandbox that gives fairq a read-only \
          mount, or no permission for that directory, gives this fault.\n\
          IF YOU ARE AN AGENT: tell the person that you work with. The page for them is \
          https://github.com/kolla23/local-resource-coordinator/blob/main/docs/sandbox.md"
@@ -1247,7 +1247,7 @@ fn looks_like_a_sandbox(error: &anyhow::Error) -> bool {
         let Some(io) = cause.downcast_ref::<std::io::Error>() else {
             continue;
         };
-        // EROFS has no name in the stable library of every version that qex
+        // EROFS has no name in the stable library of every version that fairq
         // builds with, so take the number.
         if io.raw_os_error() == Some(libc::EROFS) {
             return true;
@@ -1279,7 +1279,7 @@ fn last_lines_of(path: &Path, count: usize) -> String {
 ///
 /// The new process calls `setsid`. It thus has a new session and no controlling
 /// terminal. The system does not send it `SIGHUP` when the terminal closes.
-/// This is the behaviour of `nohup`, but qex does not need a shell.
+/// This is the behaviour of `nohup`, but fairq does not need a shell.
 fn spawn_daemon() -> Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::process::CommandExt;
@@ -1379,22 +1379,22 @@ impl SpawnLock {
                 }
             }
             // No wait begins after the limit of the reader, so this test comes
-            // before the line that says that qex waits.
+            // before the line that says that fairq waits.
             if let Some(gave) = passed_before {
                 return Err(the_reader_limit_passed(
                     gave,
                     "wait for the lock that guards a start",
                 ));
             }
-            say_that_qex_still_waits(started, deadline, "the lock that guards a start");
+            say_that_fairq_still_waits(started, deadline, "the lock that guards a start");
             if Instant::now() >= deadline {
                 return Err(timed_out(format!(
-                    "a different qex command held the lock {} for {}. {}\n\
+                    "a different fairq command held the lock {} for {}. {}\n\
                      That lock covers the start of a coordinator, so this \
                      command waited for a start that did not finish.\n\
                      The kernel gives the lock back when the process that holds \
                      it stops, so the holder still operates.\n\
-                     Run `qex info --no-start` to see whether a coordinator answers.",
+                     Run `fairq info --no-start` to see whether a coordinator answers.",
                     path.display(),
                     seconds(started.elapsed()),
                     the_limit_that_ended_it()
@@ -1461,7 +1461,7 @@ mod tests {
         let said = format!("{e:#}");
         assert!(
             said.contains("asked the coordinator nothing more"),
-            "the fault must say what qex did: {said}"
+            "the fault must say what fairq did: {said}"
         );
         assert!(
             said.contains("question that you did not ask"),
@@ -1469,7 +1469,7 @@ mod tests {
         );
     }
 
-    /// A time in a message is the time that qex measured. A floor of one
+    /// A time in a message is the time that fairq measured. A floor of one
     /// second made a wait of no time read as "1 seconds", and the reader then
     /// took its own limit for a fault of the coordinator.
     #[test]
@@ -1509,20 +1509,20 @@ mod tests {
     #[test]
     fn a_passed_limit_keeps_the_fact_of_a_silent_coordinator() {
         let silent = "the coordinator took the request and gave no answer in 3.0 seconds.\n\
-                      Run `qex info --no-start` to see whether it answers now.";
+                      Run `fairq info --no-start` to see whether it answers now.";
         let text = a_passed_limit(Duration::from_secs(3), "ask the coordinator", Some(silent));
         assert!(text.contains("gave no answer in 3.0 seconds"), "{text}");
-        assert!(text.contains("qex info --no-start"), "{text}");
+        assert!(text.contains("fairq info --no-start"), "{text}");
         assert!(!text.contains("waited no time"), "{text}");
 
         let text = a_passed_limit(Duration::from_secs(3), "ask the coordinator", None);
         assert!(text.contains("waited no time"), "{text}");
     }
 
-    /// The time that qex gave to the record is the limit that ends a read of
+    /// The time that fairq gave to the record is the limit that ends a read of
     /// the record. In this case the number of the reader passed before it.
     #[test]
-    fn a_read_of_the_record_names_the_time_that_qex_gave() {
+    fn a_read_of_the_record_names_the_time_that_fairq_gave() {
         let limit = ReaderLimit {
             ends: Instant::now(),
             gave: Duration::from_secs(3),
@@ -1563,7 +1563,7 @@ mod tests {
             text.contains("The job stopped before your time limit of 10s passed"),
             "{text}"
         );
-        assert!(text.contains("qex gave the record 5.0 seconds,"), "{text}");
+        assert!(text.contains("fairq gave the record 5.0 seconds,"), "{text}");
         assert!(!text.contains("ended the wait for the job"), "{text}");
         assert!(!text.contains("10s ended"), "{text}");
 
@@ -1632,13 +1632,13 @@ mod tests {
     /// environment refuses even that.
     ///
     /// A sandbox that refuses a socket can refuse a file as well. A test that
-    /// needs a writable directory then measures the sandbox and not qex, so it
+    /// needs a writable directory then measures the sandbox and not fairq, so it
     /// gives no verdict there. The two tests that need no directory still hold
     /// the rule.
     fn writable_dir(name: &str) -> Option<std::path::PathBuf> {
         let dir = crate::testutil::temp_dir().join(format!("qx-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).ok()?;
-        match std::fs::write(dir.join("control"), b"qex") {
+        match std::fs::write(dir.join("control"), b"fairq") {
             Ok(()) => {
                 std::fs::remove_file(dir.join("control")).ok();
                 Some(dir)
@@ -1686,7 +1686,7 @@ mod tests {
         assert!(message.contains("docs/sandbox.md"), "got: {message}");
     }
 
-    /// A socket that qex can make gives no message at all.
+    /// A socket that fairq can make gives no message at all.
     #[test]
     fn a_socket_that_works_is_not_a_fault() {
         let Some(dir) = writable_dir("ok") else {
@@ -1723,7 +1723,7 @@ mod tests {
     /// A fault that is not a refusal gives no message at all.
     ///
     /// A disk that filled makes the same shape as a sandbox: a write that
-    /// fails. The words of this module say that a sandbox stopped qex and that
+    /// fails. The words of this module say that a sandbox stopped fairq and that
     /// a person must change its permissions, and an agent acts on the words.
     #[test]
     fn a_disk_that_filled_is_not_a_sandbox() {
@@ -1742,13 +1742,13 @@ mod tests {
         }
     }
 
-    /// A directory that qex cannot write gives the message of a DIRECTORY.
+    /// A directory that fairq cannot write gives the message of a DIRECTORY.
     ///
     /// A sandbox that filters system calls answers `bind` with "operation not
     /// permitted" before the kernel looks at the path, so the error of the
     /// socket alone cannot separate the two faults. The FILE separates them.
     #[test]
-    fn a_directory_that_qex_cannot_write_is_not_the_socket() {
+    fn a_directory_that_fairq_cannot_write_is_not_the_socket() {
         // A path that does not exist, which no permission can make writable.
         // A directory inside a file, which the system refuses with ENOTDIR...
         // and that is not a refusal. Take a real one: a directory with no
@@ -1771,7 +1771,7 @@ mod tests {
             return;
         }
         let message = answer
-            .expect("a directory that qex cannot write must give a message")
+            .expect("a directory that fairq cannot write must give a message")
             .message(&dir);
         assert!(message.contains("cannot write"), "got: {message}");
         assert!(!message.contains("Unix socket in"), "got: {message}");

@@ -1,5 +1,5 @@
 ---
-title: qex — a local job queue for long tasks
+title: fairq — a local job queue for long tasks
 description: A resource-aware local job queue and CLI job scheduler for long-running builds, tests and jobs. It replaces polling shell scripts with a wait that always answers.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials link is gone (issue #100). -->
@@ -10,7 +10,7 @@ description: A resource-aware local job queue and CLI job scheduler for long-run
 
 # qex — Queued EXecutor
 
-**A local job queue for the long tasks that you start from a terminal.** qex is a
+**A local job queue for the long tasks that you start from a terminal.** fairq is a
 resource-aware job scheduler for one machine: it holds your builds, tests and
 jobs in a queue, starts each one when the machine has the cores and the memory,
 and gives you one command that waits for the result.
@@ -26,42 +26,42 @@ cargo build --release --locked   # in a clone of the source; see Install
 
 ## Twenty seconds
 
-Put `qex run` in front of a command. It goes in the queue, this command waits
+Put `fairq run` in front of a command. It goes in the queue, this command waits
 for it, and the exit code is the exit code of the job. When something stops the
-job, `qex run` gives 125 in place of it:
+job, `fairq run` gives 125 in place of it:
 
 ```console
-$ qex run -- sh -c 'echo building; sleep 2; echo done'
+$ fairq run -- sh -c 'echo building; sleep 2; echo done'
 building
 done
 ```
 
-Use `qex run` for work that you wait for now. Ctrl-C stops the job with it. See
+Use `fairq run` for work that you wait for now. Ctrl-C stops the job with it. See
 [the page for agents](agents.md) for the stops that do not reach the job.
 
 Or submit it, walk away, and ask later:
 
 ```console
-$ qex submit --name build --cpu 2 --mem 2GB -- cargo build --release
+$ fairq submit --name build --cpu 2 --mem 2GB -- cargo build --release
 f8872c97-7b4b-44f6-bacb-975342b5db2a
 ```
 
-`qex submit` writes the id and nothing else, so `ID=$(qex submit ...)` operates
+`fairq submit` writes the id and nothing else, so `ID=$(fairq submit ...)` operates
 correctly.
 
 ```console
-$ qex list
+$ fairq list
 ID        STATE       NAME                CPU       MEM      TIME  NOTE
 ba1cb9f6  completed   sh                    1     1.8GB        2s  the job succeeded
 f8872c97  running     build                 2       2GB        1s
 95d4e1dc  queued      test                  1     1.8GB         -  waits for the job f8872c97 (build), which is running
-7f72886b  queued      big                  64      64GB         -  the job claims 64 cores and the budget is 12 cores; the job claims 64GB of memory and the budget is 21.2GB; qex starts this job when no other job operates
+7f72886b  queued      big                  64      64GB         -  the job claims 64 cores and the budget is 12 cores; the job claims 64GB of memory and the budget is 21.2GB; fairq starts this job when no other job operates
 ```
 
 Each job says why it waits. A queue that does not say why is a queue that you
 must debug.
 
-## Why qex exists
+## Why fairq exists
 
 Three shell loops that engineers write every day. Each one is broken, and the
 second and the third hold no pattern fault at all:
@@ -89,19 +89,19 @@ while kill -0 "$PID" 2>/dev/null; do sleep 5; done
 hour ago, and you now wait for the work of somebody else.
 
 ```sh
-qex wait "$ID"
+fairq wait "$ID"
 ```
 
-**✓ It waits for the process itself.** qex is the parent of your task, and it
+**✓ It waits for the process itself.** fairq is the parent of your task, and it
 uses `waitpid` on that exact process. A process ends or it does not, and there
 is no third result.
 
 Four monitors of this kind were measured on one machine in one day. Together
 they had slept for **95 hours**, and not one of the conditions could ever become
-true. `qex watchers` finds them:
+true. `fairq watchers` finds them:
 
 ```console
-$ qex watchers
+$ fairq watchers
 1 monitor script waits for a proxy. It has waited 63h 12m.
 
 MONITOR  pid 3565469  waiting 63h 12m
@@ -118,7 +118,7 @@ reports anything, so it never finds itself.
 ## One command gives the result and the cause
 
 ```console
-$ qex status 073a71f8
+$ fairq status 073a71f8
 id:        073a71f8-d655-4b2f-9d4e-87af8922ab01
 name:      check
 state:     failed
@@ -141,14 +141,14 @@ its failure to the other, so the error alone reads as a complete failure.
 
 Every command that waits gives that result as an exit code, and your script can
 then make a decision. A code from `0` to `96` is the code of the JOB, unchanged.
-A code from `97` to `127` is the answer of qex about the queue or about the
+A code from `97` to `127` is the answer of fairq about the queue or about the
 wait: `99` the kernel stopped the job for memory, `122` your wait stopped and
 the job continues, `123` the job never started
 and it reached its `--max-queue-time`, `124` your wait reached its time limit,
 `125` something stopped the job, `126` a job that it needed failed, `127` there
 is no job with that id. See [the table](agents.md#the-exit-codes).
 
-## How qex compares
+## How fairq compares
 
 | | Waits for the process | Cores and memory | The result survives a stop | Says why a job waits |
 | --- | --- | --- | --- | --- |
@@ -156,14 +156,14 @@ is no job with that id. See [the table](agents.md#the-exit-codes).
 | a `while` and `sleep` script | ✗ it waits for a proxy | ✗ | ✗ the answer is in the script | ✗ |
 | GNU parallel | ✓ | cores only | partly, with `--joblog` | ✗ |
 | `make -j` | ✓ | cores only | ✗ | ✗ |
-| **qex** | **✓** | **✓ both** | **✓ on the disk** | **✓** |
+| **fairq** | **✓** | **✓ both** | **✓ on the disk** | **✓** |
 
 To be fair to the other three: `make -j` and GNU parallel control the work of ONE
 command, and they do it well. GNU parallel with `--joblog` and `--resume` keeps
 the result of each job and continues a queue that stopped, which is close to what
-qex does — for the length of that one run.
+fairq does — for the length of that one run.
 
-qex is for a different shape of work: many commands, from several terminals and
+fairq is for a different shape of work: many commands, from several terminals and
 several agents, over hours, on a machine that they all share. Nothing above
 knows what the others already started.
 
@@ -172,7 +172,7 @@ knows what the others already started.
 Your job is not a child of your shell, and it is not a child of your agent:
 
 ```
-  qex submit
+  fairq submit
       │
       ▼
   Coordinator ── starts ──▶ Supervisor ── starts ──▶ your job
@@ -182,7 +182,7 @@ Your job is not a child of your shell, and it is not a child of your agent:
 
 The job stays in the session of the supervisor.
 
-Stop the coordinator, close the terminal, or replace the qex program:
+Stop the coordinator, close the terminal, or replace the fairq program:
 
 ```
   The coordinator stops
@@ -191,15 +191,15 @@ Stop the coordinator, close the terminal, or replace the qex program:
   The supervisor continues ── writes ──▶ status.json   (the record, on the disk)
                                               │
                                               ▼
-                                   qex status <id> --wait   (a later session)
+                                   fairq status <id> --wait   (a later session)
 ```
 
-**This is the reason that an agent which uses qex is safe to interrupt.** A
+**This is the reason that an agent which uses fairq is safe to interrupt.** A
 person can stop it at any moment: the build continues, and the next session
 attaches to the same job with the id. A watch script holds the answer in its own
 memory, and a stop loses that answer.
 
-That is a property of `qex submit`. A job of `qex run` also stops when Ctrl-C or
+That is a property of `fairq submit`. A job of `fairq run` also stops when Ctrl-C or
 a SIGTERM stops the command that waits for it.
 
 ## Install
@@ -213,34 +213,34 @@ cd local-resource-coordinator
 cargo build --release --locked
 ```
 
-The binary is `target/release/qex`. Run it by that path, or copy it to a
+The binary is `target/release/fairq`. Run it by that path, or copy it to a
 directory on your path:
 
 ```sh
 mkdir -p ~/.local/bin &&
-install -m 755 target/release/qex ~/.local/bin/qex
-command -v qex
+install -m 755 target/release/fairq ~/.local/bin/fairq
+command -v fairq
 ```
 
 `mkdir` makes `~/.local/bin` when that directory is not there. `install` puts
-`qex` in that directory, and it REPLACES a `qex` that is already there.
+`fairq` in that directory, and it REPLACES a `fairq` that is already there.
 
-**`install` does not put `~/.local/bin` on your path.** `command -v qex` must
+**`install` does not put `~/.local/bin` on your path.** `command -v fairq` must
 show a file in `~/.local/bin`. If it shows nothing, add `~/.local/bin` to the
 path of this shell. If it shows a different file, that file is the one the
 shell will run.
 
-qex builds for Linux and macOS, with Rust 1.85 or later. The first qex command
+fairq builds for Linux and macOS, with Rust 1.85 or later. The first fairq command
 starts the coordinator for you, and there is no service to configure. On
 Windows, use WSL2.
 
 ## For coding agents
 
 Several agents on one machine each start work, no agent sees the load of the
-others, and the out-of-memory killer selects who loses. qex gives those agents
+others, and the out-of-memory killer selects who loses. fairq gives those agents
 one queue and one budget.
 
-`qex help agents` is a complete page inside the binary, so an agent needs no
+`fairq help agents` is a complete page inside the binary, so an agent needs no
 network for it. It covers the submit, wait and logs loop, the exit codes, and
 the property above: **your session can stop, and the work continues.**
 
@@ -248,14 +248,14 @@ An agent that drives many jobs reads one stream in place of a loop that asks
 about each job:
 
 ```sh
-qex events --json      # one JSON object on one line for each change of state
+fairq events --json      # one JSON object on one line for each change of state
 ```
 
 [Read the agent page](agents.md).
 
 **Something did not work? Say so.** A
 [new issue](https://github.com/kolla23/local-resource-coordinator/issues) takes
-the small faults — a word that sent you the wrong way counts. qex exists because
+the small faults — a word that sent you the wrong way counts. fairq exists because
 somebody measured their own monitor scripts and gave the numbers.
 
 ## The pages
@@ -263,10 +263,10 @@ somebody measured their own monitor scripts and gave the numbers.
 | Page | What it holds |
 | ---- | ------------- |
 | [Agents](agents.md) | The page for a coding agent. Start here if you are one. |
-| [Sandbox](sandbox.md) | What qex needs when an agent harness runs each command in a sandbox. |
+| [Sandbox](sandbox.md) | What fairq needs when an agent harness runs each command in a sandbox. |
 | [Reference](reference.md) | Each command, option and configuration field. |
 | [Design](design.md) | The coordinator, the supervisor, the files, and the limits. |
-| [Security](security.md) | What qex writes, and who can read it. |
+| [Security](security.md) | What fairq writes, and who can read it. |
 
 The source is at
 [github.com/kolla23/local-resource-coordinator](https://github.com/kolla23/local-resource-coordinator),

@@ -17,7 +17,7 @@
 //! Only the first of those is a release.
 
 /// The version of this build.
-pub const VERSION: &str = env!("QEX_BUILD_VERSION");
+pub const VERSION: &str = env!("FAIRQ_BUILD_VERSION");
 
 /// Says whether a version names a development build.
 ///
@@ -34,15 +34,15 @@ pub const VERSION: &str = env!("QEX_BUILD_VERSION");
 /// The answer decides which of two things happens to a coordinator below the
 /// capability floor: a development build gets a WARNING, and everything else gets
 /// a REFUSAL. A test that accepts a family of shapes therefore hands the gentle
-/// answer to a program that qex knows nothing about — `0.0.0-devil` is below
-/// the floor, and it is not a build of qex.
+/// answer to a program that fairq knows nothing about — `0.0.0-devil` is below
+/// the floor, and it is not a build of fairq.
 ///
 /// Nothing forces the test to be loose. `build.rs` writes one form, so the test
 /// is that form. A change to the form that `build.rs` writes must change this
 /// line as well, and the tests below hold the two together.
 ///
 /// Text that this function cannot read is NOT a development build. A version
-/// that qex cannot read comes from a program that qex knows nothing about, and
+/// that fairq cannot read comes from a program that fairq knows nothing about, and
 /// the safe answer for such a program is the strict one.
 pub fn is_development(version: &str) -> bool {
     let version = version.trim();
@@ -72,12 +72,12 @@ mod tests {
         assert!(is_development("0.0.0-dev+g98513e2"));
         assert!(is_development("0.0.0-dev+g98513e2.dirty"));
         // A build that could not learn its commit is still a development build,
-        // so qex warns about it and never refuses it.
+        // so fairq warns about it and never refuses it.
         assert!(is_development("0.0.0-dev+unknown"));
     }
 
-    /// Text that qex cannot read must never pass as a development build. Such a
-    /// coordinator comes from a program that qex knows nothing about.
+    /// Text that fairq cannot read must never pass as a development build. Such a
+    /// coordinator comes from a program that fairq knows nothing about.
     #[test]
     fn text_that_is_not_a_version_is_not_a_development_build() {
         assert!(!is_development(""));
@@ -90,7 +90,7 @@ mod tests {
         );
         assert!(!is_development("0.0.x-dev"));
         assert!(!is_development("0.7.3-rc1"), "a candidate is not a build");
-        assert!(!is_development("0.7.3-alpha-5"), "qex writes no alpha");
+        assert!(!is_development("0.7.3-alpha-5"), "fairq writes no alpha");
     }
 
     /// A word that STARTS with `dev` is not `dev`.
@@ -98,16 +98,16 @@ mod tests {
     /// A version below the capability floor that reads as a development build gets
     /// a warning, and every other version below the floor gets a refusal. A
     /// test that accepts any word beginning with `dev` therefore gives the
-    /// gentle answer to a program that qex knows nothing about, and each of the
+    /// gentle answer to a program that fairq knows nothing about, and each of the
     /// versions below is such a program.
     #[test]
     fn a_word_that_starts_with_dev_is_not_a_development_build() {
         assert!(!is_development("0.0.0-devil"));
         assert!(!is_development("0.0.0-development"));
         assert!(!is_development("0.0.0-devel"));
-        assert!(!is_development("0.0.0-dev.1"), "qex writes no such form");
-        assert!(!is_development("0.0.0-dev-1"), "qex writes no such form");
-        // A different number with the same word is not the form that qex
+        assert!(!is_development("0.0.0-dev.1"), "fairq writes no such form");
+        assert!(!is_development("0.0.0-dev-1"), "fairq writes no such form");
+        // A different number with the same word is not the form that fairq
         // writes. `build.rs` writes `0.0.0-dev` and nothing else.
         assert!(!is_development("0.1.0-dev"));
         assert!(!is_development("1.0.0-dev"));
@@ -159,7 +159,7 @@ mod tests {
         // dependency as well, so a search finds the first one in the FILE and
         // not the one that names this package; a comment or a space after the
         // value defeats it; and the answer then changes when somebody moves a
-        // table. `toml` is already a dependency of qex, so the file costs
+        // table. `toml` is already a dependency of fairq, so the file costs
         // nothing to read correctly.
         let cargo: toml::Value =
             toml::from_str(include_str!("../Cargo.toml")).expect("Cargo.toml must be TOML");
@@ -178,7 +178,7 @@ mod tests {
             found == DEVELOPMENT || release,
             "Cargo.toml holds `{found}`. It must hold `{DEVELOPMENT}`, which is what \
              `main` holds, or three numbers, which is what the commit that a tag names \
-             holds. Any other text gives a build that qex refuses in place of warning \
+             holds. Any other text gives a build that fairq refuses in place of warning \
              about it."
         );
     }

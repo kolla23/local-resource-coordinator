@@ -1,6 +1,6 @@
 //! The rule that decides which records a deletion must keep.
 //!
-//! `qex clean` and `qex gc` select the records to delete, and the coordinator
+//! `fairq clean` and `fairq gc` select the records to delete, and the coordinator
 //! decides each deletion. Both must give ONE answer. Two places that hold the
 //! same rule go apart, and a reader then meets a command that says it kept a
 //! record and a coordinator that deletes it.
@@ -13,7 +13,7 @@
 //! The walk is linear in the records that one request tests, and the
 //! coordinator runs it under the lock that the scheduler needs. That is
 //! acceptable because a queue holds TENS of records: `[gc] keep` deletes a
-//! record one day after the job stops, and `qex clean --auto` works on one
+//! record one day after the job stops, and `fairq clean --auto` works on one
 //! hour. A queue of ten thousand records does not happen while `gc` operates.
 //!
 //! The lists in a [`Node`] therefore borrow, and each index is built once. A
@@ -111,7 +111,7 @@ pub fn held_by_unfinished(nodes: &[Node]) -> BTreeSet<Uuid> {
 ///
 /// The two rules are different relations, so they need different words. A
 /// message that gives the wrong one states a relation that does not exist, and
-/// a reader acts on the output of qex as fact.
+/// a reader acts on the output of fairq as fact.
 pub enum Hold {
     /// A job that has not stopped waits for this record, through the chain.
     Needed(Vec<Uuid>),

@@ -57,11 +57,11 @@ impl Candidate {
 /// Tells whether the text names a job with this id and this name.
 ///
 /// The user can write the full id, or the start of the id, or the name. A short
-/// id is easier to copy from the output of `qex list`.
+/// id is easier to copy from the output of `fairq list`.
 ///
 /// The name has two accepted forms: the name that the user gave, AND the safe
-/// name that qex shows. `qex list` and `qex status --json` give the safe form,
-/// so a script that reads a name from qex and gives it back must find the job.
+/// name that fairq shows. `fairq list` and `fairq status --json` give the safe form,
+/// so a script that reads a name from fairq and gives it back must find the job.
 /// See `job::safe_name`.
 pub fn names_job(id: Uuid, name: &str, raw: &str) -> bool {
     id.to_string().starts_with(raw) || name == raw || safe_name(name) == raw
@@ -70,12 +70,12 @@ pub fn names_job(id: Uuid, name: &str, raw: &str) -> bool {
 /// Tells whether the text names a group with this id and this name.
 ///
 /// A group takes its id, the start of its id, or its name, in the same way as a
-/// job. `qex list --group` already accepts these three forms.
+/// job. `fairq list --group` already accepts these three forms.
 pub fn names_group(group: Option<Uuid>, group_name: Option<&str>, raw: &str) -> bool {
     group
         .map(|g| g.to_string().starts_with(raw))
         .unwrap_or(false)
-        // The name that the user gave, AND the name that qex shows. `qex list
+        // The name that the user gave, AND the name that fairq shows. `fairq list
         // --json` gives the safe form, so a script that reads that value and
         // gives it back here must find the jobs. See `job::safe_name`.
         || group_name == Some(raw)
@@ -86,7 +86,7 @@ pub fn names_group(group: Option<Uuid>, group_name: Option<&str>, raw: &str) -> 
 ///
 /// The caller needs more than the ids. A command that stops a job treats a stage
 /// that already stopped as a fault when the user named that one job, and as
-/// normal when the user named the whole pipeline. `qex status --json` also
+/// normal when the user named the whole pipeline. `fairq status --json` also
 /// chooses its shape from this, and not from the number of jobs: a pipeline of
 /// one stage must still give an array.
 #[derive(Debug)]
@@ -124,9 +124,9 @@ impl Targets {
 /// Makes the result for a text that named a pipeline.
 ///
 /// The jobs must belong to ONE pipeline. A pipeline takes its name from its
-/// file, so a second run of the same file carries the same name, and `qex
+/// file, so a second run of the same file carries the same name, and `fairq
 /// pipeline ci.toml` twice gives two pipelines that the word `ci` both names.
-/// Without this test `qex kill ci` stopped the work of two runs, and the user
+/// Without this test `fairq kill ci` stopped the work of two runs, and the user
 /// named one. A short group id has the same fault, because two ids can start
 /// with the same characters.
 fn group_targets(by_group: &[&Candidate], raw: &str) -> Result<Targets> {
@@ -159,8 +159,8 @@ fn group_targets(by_group: &[&Candidate], raw: &str) -> Result<Targets> {
 /// A value that names a job gives that job. A value that names a pipeline gives
 /// EVERY job of that pipeline, in the order of submission.
 ///
-/// `qex pipeline` writes the group id to stdout, so that value is the handle
-/// that a user keeps. Before this function, every command except `qex list
+/// `fairq pipeline` writes the group id to stdout, so that value is the handle
+/// that a user keeps. Before this function, every command except `fairq list
 /// --group` refused it and gave "there is no job with the id ...", and the user
 /// had to find the last stage by hand.
 ///
@@ -186,7 +186,7 @@ pub fn targets(jobs: &[Candidate], raw: &str) -> Result<Targets> {
     // An earlier version gave back each value with the form of a UUID without
     // a test. A `--needs` value with one incorrect character was then accepted,
     // the dependency did not exist, and the job started immediately with no
-    // warning. `qex logs` with such a value also wrote nothing and gave the
+    // warning. `fairq logs` with such a value also wrote nothing and gave the
     // code 0, so a reader could not separate "this job wrote nothing" from
     // "this job does not exist".
     if let Ok(id) = raw.parse::<Uuid>() {
@@ -196,7 +196,7 @@ pub fn targets(jobs: &[Candidate], raw: &str) -> Result<Targets> {
         if !by_group.is_empty() {
             return group_targets(&by_group, raw);
         }
-        // Say whether qex ever saw this id. An agent must be able to tell "the
+        // Say whether fairq ever saw this id. An agent must be able to tell "the
         // record was deleted, and the work happened" from "this job never
         // existed, so submit it".
         bail!("{}", crate::history::describe_missing(id));
@@ -238,10 +238,10 @@ pub fn targets(jobs: &[Candidate], raw: &str) -> Result<Targets> {
         0 => bail!("there is no job or pipeline with the id or the name `{raw}`"),
         n => bail!(
             "`{raw}` names {n} jobs. Give the id of the job that you want, or delete \
-             the old jobs with `qex clean done` and start again.\n{}",
+             the old jobs with `fairq clean done` and start again.\n{}",
             by_job
                 .iter()
-                // qex SHOWS the safe name only. See `job::safe_name`.
+                // fairq SHOWS the safe name only. See `job::safe_name`.
                 .map(|j| format!("  {} {}", j.id, safe_name(&j.name)))
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -421,7 +421,7 @@ pub struct Keys {
 /// request and never its answer.
 ///
 /// The name of a job and the group of a job never change after the submission,
-/// so an entry changes only when a job arrives and when `qex clean` deletes a
+/// so an entry changes only when a job arrives and when `fairq clean` deletes a
 /// record.
 #[derive(Debug, Default)]
 pub struct Index {
@@ -589,7 +589,7 @@ mod tests {
         );
         // The parser of an id also reads the braced form and the urn form, and
         // the rules take such a text as a full id. The index gave nothing for
-        // them, and `qex status "{id}"` then said that the record of a job in
+        // them, and `fairq status "{id}"` then said that the record of a job in
         // the queue was gone.
         for text in [
             a.braced().to_string(),
@@ -613,7 +613,7 @@ mod tests {
         assert!(index.lookup("").is_empty());
     }
 
-    /// A record that `qex clean` deleted must leave no entry. An entry that
+    /// A record that `fairq clean` deleted must leave no entry. An entry that
     /// stays names a job that no command can read.
     #[test]
     fn a_removed_job_leaves_nothing_in_the_index() {

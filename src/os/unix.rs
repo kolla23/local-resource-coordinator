@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 ///
 /// A file that was written BEFORE this moment was written in an earlier start
 /// of the machine. Recovery uses this to date a record that has no `boot_id`:
-/// an old version of qex wrote no identifier, and the process tests alone
+/// an old version of fairq wrote no identifier, and the process tests alone
 /// cannot see a restart.
 pub fn boot_time_secs() -> Option<u64> {
     #[cfg(target_os = "linux")]
@@ -128,7 +128,7 @@ pub fn clock_text(epoch_secs: u64) -> String {
 
 /// Gives an identifier for the current start of the machine.
 ///
-/// qex deletes a peer record that has a different identifier. The system uses
+/// fairq deletes a peer record that has a different identifier. The system uses
 /// each pid again after a restart. Without this test, an old record can look
 /// like a live process.
 pub fn boot_id() -> String {
@@ -144,7 +144,7 @@ pub fn boot_id() -> String {
             return boot;
         }
     }
-    // Without this identifier, qex loses the restart test only. It continues to
+    // Without this identifier, fairq loses the restart test only. It continues to
     // test each peer process for life.
     "unknown".to_string()
 }
@@ -156,7 +156,7 @@ fn sysctl_boottime() -> Option<String> {
 
 /// Tests if a process is alive.
 ///
-/// qex uses this function to delete the records of dead peers. It also uses the
+/// fairq uses this function to delete the records of dead peers. It also uses the
 /// function to find a coordinator that stopped and left its files.
 ///
 /// For a live process of a different user, `kill(pid, 0)` gives `EPERM`. That
@@ -181,7 +181,7 @@ pub fn pid_alive(pid: i32) -> bool {
 ///
 /// Unlike `pid_alive`, a refusal of permission does not count as alive here.
 /// Each caller of this function sends a signal to the group of the pid when
-/// the answer is yes, and qex must not signal a process that it cannot prove
+/// the answer is yes, and fairq must not signal a process that it cannot prove
 /// is the job.
 pub fn job_pid_alive(pid: i32) -> bool {
     if pid <= 0 {
@@ -247,11 +247,11 @@ pub fn process_is_zombie(pid: i32) -> bool {
 /// named, by its start time.
 ///
 /// `recorded` is the value that `process_start_token` gave when the record was
-/// written. `None` comes from a record of an earlier version of qex, which
-/// wrote no value; for such a record qex loses this test only and the answer
+/// written. `None` comes from a record of an earlier version of fairq, which
+/// wrote no value; for such a record fairq loses this test only and the answer
 /// is yes. A recorded value that the current process does not show — because
 /// the value differs, or because the current process will not show a start
-/// time although the record has one — is a no: qex must not act on a process
+/// time although the record has one — is a no: fairq must not act on a process
 /// that it cannot prove is the recorded one.
 pub fn same_process_start(pid: i32, recorded: Option<u64>) -> bool {
     match recorded {
@@ -297,7 +297,7 @@ pub fn process_start_token(pid: i32) -> Option<u64> {
             return Some(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec);
         }
     }
-    // Without this value, qex loses the reuse test only. It continues to test
+    // Without this value, fairq loses the reuse test only. It continues to test
     // the process for life.
     None
 }
@@ -473,7 +473,7 @@ fn status_after_name(status: &[u8]) -> Option<&str> {
 /// Gives the chain of processes above this process, from its parent up to
 /// the first process of the machine.
 ///
-/// `qex submit` records this chain on the job, and `qex abort` reads it. The
+/// `fairq submit` records this chain on the job, and `fairq abort` reads it. The
 /// walk records EVERY process, and the `context` module decides where the
 /// session ends when it compares two chains, so a change to that rule reads
 /// the records that exist.
@@ -691,7 +691,7 @@ fn lstat_entry(path: &Path) -> std::io::Result<Entry> {
     })
 }
 
-/// The user namespace qex runs in: `overflow` is the uid that every unmapped
+/// The user namespace fairq runs in: `overflow` is the uid that every unmapped
 /// user shows as, and None in the initial namespace.
 #[derive(Clone, Copy, Debug)]
 struct Namespace {
@@ -746,7 +746,7 @@ impl<'a> Walk<'a> {
     fn new(path: &Path, euid: u32, ns: &'a Namespace, look: Look<'a>) -> Result<Self> {
         if ns.overflow == Some(euid) {
             anyhow::bail!(
-                "qex runs as the user {euid}, which this user namespace does not map, so it \
+                "fairq runs as the user {euid}, which this user namespace does not map, so it \
                  cannot own a state directory. Start the sandbox with a mapped user \
                  (`unshare -Ur`, or the default mapping of bubblewrap): see {SANDBOX_PAGE}"
             );
@@ -815,7 +815,7 @@ impl<'a> Walk<'a> {
                     self.links += 1;
                     if self.links > LINK_LIMIT {
                         anyhow::bail!(
-                            "qex will not use {}: the path passes through more than \
+                            "fairq will not use {}: the path passes through more than \
                              {LINK_LIMIT} links, at {}",
                             self.target.display(),
                             next.display()
@@ -833,7 +833,7 @@ impl<'a> Walk<'a> {
                     at = next;
                 }
                 Kind::Other => anyhow::bail!(
-                    "qex will not use {}: {} is not a directory",
+                    "fairq will not use {}: {} is not a directory",
                     self.target.display(),
                     next.display()
                 ),
@@ -852,7 +852,7 @@ impl<'a> Walk<'a> {
         self.check_owner(path, entry.uid, last)?;
         if !last && mode_rule && entry.mode & 0o002 != 0 && entry.mode & 0o1000 == 0 {
             anyhow::bail!(
-                "qex will not use {}: every user can write to {}, and it has no sticky bit. \
+                "fairq will not use {}: every user can write to {}, and it has no sticky bit. \
                  Set XDG_STATE_HOME to a directory that only you can change",
                 self.target.display(),
                 path.display()
@@ -884,12 +884,12 @@ fn make_one_level(path: &Path, mode: u32) -> Result<()> {
     }
 }
 
-/// Pauses qex once after a mkdir in one parent: `<ms> <parent>`. **This variable
-/// exists for the tests of qex**, and a release build does not read it.
+/// Pauses fairq once after a mkdir in one parent: `<ms> <parent>`. **This variable
+/// exists for the tests of fairq**, and a release build does not read it.
 #[cfg(debug_assertions)]
-const PAUSE_AFTER_MKDIR_IN: &str = "QEX_TEST_PAUSE_AFTER_MKDIR_IN";
+const PAUSE_AFTER_MKDIR_IN: &str = "FAIRQ_TEST_PAUSE_AFTER_MKDIR_IN";
 
-/// A test of qex pauses here, between a new directory and its read-back, so a
+/// A test of fairq pauses here, between a new directory and its read-back, so a
 /// sweep can delete the directory (issue #132).
 #[cfg(debug_assertions)]
 fn pause_after_mkdir(made: &Path) {
@@ -912,7 +912,7 @@ fn pause_after_mkdir(made: &Path) {
         return;
     }
     eprintln!(
-        "qex pauses {ms} ms after it made {} because {PAUSE_AFTER_MKDIR_IN} is set",
+        "fairq pauses {ms} ms after it made {} because {PAUSE_AFTER_MKDIR_IN} is set",
         made.display()
     );
     std::thread::sleep(std::time::Duration::from_millis(ms));
@@ -929,15 +929,15 @@ fn refusal(target: &Path, path: &Path, uid: u32, euid: u32, ns: &Namespace) -> a
         String::new()
     };
     anyhow::anyhow!(
-        "qex will not use {}: {} belongs to the user {uid}, and qex runs as the user {euid}. \
-         Set XDG_STATE_HOME to a directory that you own, or run qex as that user.{sandbox}",
+        "fairq will not use {}: {} belongs to the user {uid}, and fairq runs as the user {euid}. \
+         Set XDG_STATE_HOME to a directory that you own, or run fairq as that user.{sandbox}",
         target.display(),
         path.display()
     )
 }
 
 /// Sets 0600 on an open file, also one that existed with a wider mode. Best effort:
-/// each such file lies in a 0700 directory, and a refused change must not stop qex.
+/// each such file lies in a 0700 directory, and a refused change must not stop fairq.
 pub fn make_private(file: &std::fs::File) {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     // Only a regular file with one link that this user owns: a link planted in
@@ -983,10 +983,10 @@ mod tests {
     use std::os::unix::fs::{symlink, PermissionsExt};
 
     // A unit test: making a pid namespace that sees its parent's /proc needs a user namespace,
-    // which a test machine may refuse, and no qex command shows the recorded value's source.
+    // which a test machine may refuse, and no fairq command shows the recorded value's source.
     #[test]
     fn only_a_single_nspid_entry_is_this_namespaces_own_proc() {
-        let status = |nspid: &str| format!("Name:\tqex\nPid:\t42\nNSpid:{nspid}\nPPid:\t1\n");
+        let status = |nspid: &str| format!("Name:\tfairq\nPid:\t42\nNSpid:{nspid}\nPPid:\t1\n");
         assert!(nspid_is_own(&status("\t42")));
         assert!(
             !nspid_is_own(&status("\t4242\t42")),
@@ -994,7 +994,7 @@ mod tests {
         );
         assert!(!nspid_is_own(&status("")), "no entry");
         assert!(
-            !nspid_is_own("Name:\tqex\nPid:\t42\n"),
+            !nspid_is_own("Name:\tfairq\nPid:\t42\n"),
             "no NSpid line (an old kernel)"
         );
 
@@ -1011,7 +1011,7 @@ mod tests {
             "the parent's /proc"
         );
         assert_eq!(
-            identity_from(b"Name:\tqex\n", &initial, read),
+            identity_from(b"Name:\tfairq\n", &initial, read),
             None,
             "no NSpid line"
         );
@@ -1032,10 +1032,10 @@ mod tests {
     }
 
     // A unit test: a time namespace with an offset needs a user namespace, which a test machine
-    // may refuse, and no qex command shows the recorded value's source.
+    // may refuse, and no fairq command shows the recorded value's source.
     #[test]
     fn only_a_boot_clock_with_no_offset_gives_a_namespace_identity() {
-        let own: &[u8] = b"Name:\tqex\nNSpid:\t42\n";
+        let own: &[u8] = b"Name:\tfairq\nNSpid:\t42\n";
         let read = || Some(("pid:[4026532263]".to_string(), 161));
         let err = |code| Err(std::io::Error::from_raw_os_error(code));
         let initial = Ok("time:[4026531834]".to_string());
@@ -1078,7 +1078,7 @@ mod tests {
         std::fs::canonicalize(crate::testutil::temp_dir())
             .unwrap()
             .join(format!(
-                "qex-own-{name}-{}-{}",
+                "fairq-own-{name}-{}-{}",
                 std::process::id(),
                 uuid::Uuid::new_v4()
             ))
@@ -1123,7 +1123,7 @@ mod tests {
     #[test]
     fn a_state_directory_is_checked_against_its_owner() {
         let t = fresh("owner");
-        let state = t.join("qex");
+        let state = t.join("fairq");
         // Missing: it passes for its parent's owner, and ensure_dir checks it.
         check(&state, me()).unwrap();
         make_foreign(&t);
@@ -1132,7 +1132,7 @@ mod tests {
         std::fs::remove_dir_all(&t).ok();
 
         let t = fresh("owner2");
-        let state = t.join("qex");
+        let state = t.join("fairq");
         std::fs::create_dir(&state).unwrap();
         check(&state, me()).unwrap();
         let text = error(check(&state, other()));
@@ -1150,7 +1150,7 @@ mod tests {
         symlink(&state, t.join("link")).unwrap();
         check(&t.join("link"), me()).unwrap();
         symlink(&t, t.join("up")).unwrap();
-        check(&t.join("up/qex"), me()).unwrap();
+        check(&t.join("up/fairq"), me()).unwrap();
         std::fs::remove_dir_all(&t).ok();
     }
 
@@ -1158,17 +1158,17 @@ mod tests {
     fn a_directory_above_the_state_directory_must_not_be_open_to_every_user() {
         let t = fresh("open");
         let open = t.join("open");
-        std::fs::create_dir_all(open.join("qex")).unwrap();
+        std::fs::create_dir_all(open.join("fairq")).unwrap();
         mode(&open, 0o777);
-        assert!(error(check(&open.join("qex"), me())).contains("no sticky bit"));
+        assert!(error(check(&open.join("fairq"), me())).contains("no sticky bit"));
         mode(&open, 0o1777);
-        check(&open.join("qex"), me()).unwrap();
+        check(&open.join("fairq"), me()).unwrap();
         mode(&open, 0o775);
-        check(&open.join("qex"), me()).unwrap();
+        check(&open.join("fairq"), me()).unwrap();
         // The state directory's own mode is narrowed by its caller, not refused here.
         mode(&open, 0o755);
-        mode(&open.join("qex"), 0o777);
-        check(&open.join("qex"), me()).unwrap();
+        mode(&open.join("fairq"), 0o777);
+        check(&open.join("fairq"), me()).unwrap();
         std::fs::remove_dir_all(&t).ok();
     }
 
@@ -1178,9 +1178,9 @@ mod tests {
         std::fs::create_dir_all(t.join("final")).unwrap();
         std::fs::create_dir(t.join("open")).unwrap();
         symlink(t.join("final"), t.join("open/hop")).unwrap();
-        symlink(t.join("open/hop"), t.join("qex")).unwrap();
+        symlink(t.join("open/hop"), t.join("fairq")).unwrap();
         mode(&t.join("open"), 0o777);
-        let text = error(check(&t.join("qex"), me()));
+        let text = error(check(&t.join("fairq"), me()));
         assert!(
             text.contains(&format!("to {},", t.join("open").display())),
             "{text}"
@@ -1188,7 +1188,7 @@ mod tests {
         if me() == 0 {
             mode(&t.join("open"), 0o755);
             make_foreign(&t.join("open"));
-            let text = error(check(&t.join("qex"), me()));
+            let text = error(check(&t.join("fairq"), me()));
             assert!(text.contains("open belongs to the user 4242"), "{text}");
         }
         std::fs::remove_dir_all(&t).ok();
@@ -1201,7 +1201,7 @@ mod tests {
             seen.borrow_mut().push(path.to_path_buf());
             lstat_entry(path)
         };
-        let _ = check_owned_dir_as(Path::new("no-such-dir/qex"), me(), &NO_NS, &look);
+        let _ = check_owned_dir_as(Path::new("no-such-dir/fairq"), me(), &NO_NS, &look);
         let cwd = std::env::current_dir().unwrap();
         let first = cwd.components().nth(1).unwrap();
         let seen = seen.into_inner();
@@ -1226,31 +1226,31 @@ mod tests {
     fn the_overflow_uid_is_trusted_only_at_fixed_paths_in_a_user_namespace() {
         let t = fresh("overflow");
         let sticky = t.join("sticky");
-        std::fs::create_dir_all(sticky.join("qex")).unwrap();
+        std::fs::create_dir_all(sticky.join("fairq")).unwrap();
         mode(&sticky, 0o1777);
         let x = other();
         let ns = Namespace { overflow: Some(x) };
         let look = owned_by(vec![sticky.clone()], x);
-        let text = error(check_owned_dir_as(&sticky.join("qex"), me(), &ns, &look));
+        let text = error(check_owned_dir_as(&sticky.join("fairq"), me(), &ns, &look));
         assert!(
             text.contains(&format!("sticky belongs to the user {x}")),
             "{text}"
         );
         assert!(text.contains("docs/sandbox.md"), "{text}");
-        let text = error(check_owned_dir_as(&sticky.join("qex"), me(), &NO_NS, &look));
+        let text = error(check_owned_dir_as(&sticky.join("fairq"), me(), &NO_NS, &look));
         assert!(text.contains("sticky belongs"), "{text}");
         assert!(!text.contains("docs/sandbox.md"), "{text}");
 
-        // Run as the overflow uid, qex can own nothing: refused before any path.
+        // Run as the overflow uid, fairq can own nothing: refused before any path.
         let text = error(check_owned_dir_as(
-            &sticky.join("qex"),
+            &sticky.join("fairq"),
             x,
             &ns,
             &lstat_entry,
         ));
         assert!(text.contains("does not map"), "{text}");
         let text = error(check_owned_dir_as(
-            &sticky.join("qex"),
+            &sticky.join("fairq"),
             x,
             &NO_NS,
             &lstat_entry,
@@ -1278,10 +1278,10 @@ mod tests {
         let root_dirs = ["/", "/tmp", "/var", "/var/tmp"];
         let look = owned_by(root_dirs.iter().map(PathBuf::from).collect(), x);
         let ns = Namespace { overflow: Some(x) };
-        check_owned_dir_as(&t.join("qex"), me(), &ns, &look).unwrap();
-        let var_tmp = Path::new("/var/tmp/no-such-qex-dir/qex");
+        check_owned_dir_as(&t.join("fairq"), me(), &ns, &look).unwrap();
+        let var_tmp = Path::new("/var/tmp/no-such-fairq-dir/fairq");
         check_owned_dir_as(var_tmp, me(), &ns, &look).unwrap();
-        let text = error(check_owned_dir_as(&t.join("qex"), me(), &NO_NS, &look));
+        let text = error(check_owned_dir_as(&t.join("fairq"), me(), &NO_NS, &look));
         assert!(
             text.contains(&format!(": / belongs to the user {x}")),
             "{text}"
@@ -1308,7 +1308,7 @@ mod tests {
             Ok(entry)
         };
         let ns = Namespace { overflow: Some(x) };
-        let path = Path::new("/var/tmp/no-such-qex-dir/qex");
+        let path = Path::new("/var/tmp/no-such-fairq-dir/fairq");
         let text = error(check_owned_dir_as(path, me(), &ns, &look));
         assert!(
             text.contains(&format!("/var/tmp belongs to the user {x}")),
@@ -1321,15 +1321,15 @@ mod tests {
         let t = fresh("appears");
         std::fs::create_dir(t.join("target")).unwrap();
         mode(&t.join("target"), 0o777);
-        symlink(t.join("target"), t.join("qex")).unwrap();
-        // The walk saw no `qex`: it appeared after the look, made by anyone.
+        symlink(t.join("target"), t.join("fairq")).unwrap();
+        // The walk saw no `fairq`: it appeared after the look, made by anyone.
         let look = |path: &Path| {
-            if path == t.join("qex") {
+            if path == t.join("fairq") {
                 return Err(std::io::ErrorKind::NotFound.into());
             }
             lstat_entry(path)
         };
-        let found = check_state_dir_as(&t.join("qex"), me(), &NO_NS, &look).unwrap();
+        let found = check_state_dir_as(&t.join("fairq"), me(), &NO_NS, &look).unwrap();
         assert!(!found, "a directory the walk did not see is not used");
         let left = std::fs::metadata(t.join("target"))
             .unwrap()

@@ -4,7 +4,7 @@
 //!
 //! A coordinator does not operate for ever. It stops when no job operates and
 //! no command arrives, and it stops when a new build replaces the program file.
-//! qex itself also tells a user to run `kill <pid>` on it: the capability
+//! fairq itself also tells a user to run `kill <pid>` on it: the capability
 //! messages and the version warning each give that instruction.
 //!
 //! A pause that lived in the memory of the coordinator would thus disappear
@@ -40,9 +40,9 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PauseRecord {
     /// The name of this request. The coordinator makes it, and the answer of
-    /// `qex pause` gives it to the caller as a receipt.
+    /// `fairq pause` gives it to the caller as a receipt.
     ///
-    /// A record of an earlier version of qex has none. `Paused::normalize`
+    /// A record of an earlier version of fairq has none. `Paused::normalize`
     /// gives it one.
     #[serde(default)]
     pub id: String,
@@ -51,11 +51,11 @@ pub struct PauseRecord {
     /// The process id that the CLI reported for itself.
     ///
     /// NOBODY VERIFIED THIS NUMBER, and no default output shows it. It is a
-    /// number in the pid namespace of the caller: a `qex abort` that was the
+    /// number in the pid namespace of the caller: a `fairq abort` that was the
     /// first process of a container reported 1, a reader ran `ps -p 1`, found
     /// the first process of the machine alive, and believed for six hours that
     /// the pauser still operated. The forensic output gives it as
-    /// `caller_reported_pid`. `issuer_chain` is what qex reads.
+    /// `caller_reported_pid`. `issuer_chain` is what fairq reads.
     #[serde(default)]
     pub by_pid: i32,
     /// The text that the person gave with `--reason`.
@@ -67,7 +67,7 @@ pub struct PauseRecord {
     /// report, because a user who forgets it comes back to an empty queue.
     #[serde(default)]
     pub until: Option<u64>,
-    /// True when qex made this request because it could not read the file.
+    /// True when fairq made this request because it could not read the file.
     ///
     /// No person asked for such a pause, so each message about it must say
     /// what happened and must not say that a person paused the queue.
@@ -77,7 +77,7 @@ pub struct PauseRecord {
     /// them from the credential of the socket, from the parent of the command
     /// upward. The numbers are thus numbers of the machine of the coordinator.
     ///
-    /// `None` says that qex could not learn who asked. qex never stores a
+    /// `None` says that fairq could not learn who asked. fairq never stores a
     /// guess here. See `daemon::issuer_chain`.
     #[serde(default)]
     pub issuer_chain: Option<Vec<Ancestor>>,
@@ -88,7 +88,7 @@ pub struct PauseRecord {
     pub issuer_ns: Option<String>,
 }
 
-/// The id of the request that qex makes when it cannot read the file.
+/// The id of the request that fairq makes when it cannot read the file.
 ///
 /// It is a fixed word, because that request is made again at each read, and
 /// the id that one command printed must name the request that the next
@@ -136,7 +136,7 @@ pub struct QueueEnd {
 
 /// Reads one record, a list of records, or nothing.
 ///
-/// An earlier version of qex wrote ONE record for the queue and one for each
+/// An earlier version of fairq wrote ONE record for the queue and one for each
 /// lock. A coordinator that replaces that version must keep the pause that the
 /// file holds, so it reads both forms.
 #[derive(Deserialize)]
@@ -262,9 +262,9 @@ impl Paused {
     /// Adds a request for the queue. Gives `true` when this request moved the
     /// queue from running to paused.
     ///
-    /// A request that qex made because it could not read the file is not a
+    /// A request that fairq made because it could not read the file is not a
     /// request of a person. A real request replaces it: the new file that
-    /// this change writes is a file that qex can read.
+    /// this change writes is a file that fairq can read.
     ///
     /// The fault request HELD the queue, so the request that replaces it did
     /// not stop the queue: the answer is `false`, and `queue_since` stays at
@@ -366,21 +366,21 @@ impl Paused {
 
     /// Reads the file.
     ///
-    /// # Why a file that qex cannot read PAUSES the queue
+    /// # Why a file that fairq cannot read PAUSES the queue
     ///
     /// A file that is absent is the usual state, and it means that nothing is
-    /// paused. A file that EXISTS and that qex cannot read is different: it can
-    /// hold a pause, and qex does not know.
+    /// paused. A file that EXISTS and that fairq cannot read is different: it can
+    /// hold a pause, and fairq does not know.
     ///
-    /// The two directions are not equal in cost. A queue that qex holds by
+    /// The two directions are not equal in cost. A queue that fairq holds by
     /// mistake costs latency, and one command corrects it: a resume of that
     /// request writes a new file. A queue that operates by mistake gives the
     /// person the opposite of the one thing that person asked for, and no
-    /// command corrects that after the work started. So qex holds the queue,
+    /// command corrects that after the work started. So fairq holds the queue,
     /// and it says why.
     ///
-    /// A file that a later version of qex writes is safe: an unknown FIELD is
-    /// ignored, in the same way as every other record of qex. This rule covers
+    /// A file that a later version of fairq writes is safe: an unknown FIELD is
+    /// ignored, in the same way as every other record of fairq. This rule covers
     /// a file that is truncated, empty, or of a shape that this version cannot
     /// read.
     pub fn read() -> Self {
@@ -402,7 +402,7 @@ impl Paused {
         }
     }
 
-    /// Gives the pause that qex holds when it cannot read the file.
+    /// Gives the pause that fairq holds when it cannot read the file.
     fn held_by_fault(path: &std::path::Path, fault: &str) -> Self {
         let now = crate::sys::now_secs();
         Self {
@@ -445,7 +445,7 @@ pub struct Expired {
 /// Ends a pause of the QUEUE, whatever ended it.
 ///
 /// A pause of the queue ends in THREE places, and all three are the same event:
-/// `qex resume queue`, a `--for` that reached its time while the coordinator
+/// `fairq resume queue`, a `--for` that reached its time while the coordinator
 /// operates, and a `--for` that reached its time while NO coordinator operates
 /// — `daemon::recover` finds that one at the next start. They were separate
 /// blocks of code, and separate blocks drift: the deletion of the credit in the
@@ -488,7 +488,7 @@ pub fn end_queue_pause(state: &mut crate::daemon::State, end: QueueEnd) {
 ///
 /// The clock of the limit therefore stops while the queue is paused. This
 /// function is the whole of that rule, and the two places that end a pause of
-/// the queue — `qex resume queue`, and a `--for` that reached its end — each
+/// the queue — `fairq resume queue`, and a `--for` that reached its end — each
 /// call it while they hold the lock, before any job can expire.
 ///
 /// `paused_at` is the moment when the pause began, and `now` is the moment when
@@ -533,7 +533,7 @@ pub fn path() -> Result<std::path::PathBuf> {
     Ok(paths::runtime_dir()?.join("paused.json"))
 }
 
-/// What qex knows about the session that made a request.
+/// What fairq knows about the session that made a request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IssuerState {
@@ -542,7 +542,7 @@ pub enum IssuerState {
     Running,
     /// No recorded process of the session exists.
     Gone,
-    /// qex could not learn who asked, or cannot test the processes. Every
+    /// fairq could not learn who asked, or cannot test the processes. Every
     /// reader treats this state as `Running`, and never as less.
     #[serde(other)]
     Unknown,
@@ -629,7 +629,7 @@ const SHELLS: &[&str] = &[
 ///
 /// The boundary process counts here, although `context::shared` leaves it
 /// out. An agent that a service started is itself the boundary of its chain,
-/// and without it the only process below is the `qex` command, which stops in
+/// and without it the only process below is the `fairq` command, which stops in
 /// milliseconds: every such pause would read `gone`.
 pub fn session_processes(chain: &[Ancestor]) -> Vec<&Ancestor> {
     let Some(index) = crate::context::boundary_index(chain) else {
@@ -684,7 +684,7 @@ pub fn issuer_state(
     if !alive.is_empty() {
         return (IssuerState::Running, program_of(&alive));
     }
-    // A process with no start time can never be shown to exist, so qex
+    // A process with no start time can never be shown to exist, so fairq
     // cannot say that a session with such a process is gone.
     if session.iter().any(|p| p.start.is_none()) {
         return unknown;
@@ -696,7 +696,7 @@ pub fn issuer_state(
 ///
 /// `Yes` needs a shared process BELOW the boundary, which is the rule of
 /// `context::shared`. Two agents in two panes of one multiplexer share the
-/// multiplexer only; that is not one session, and qex cannot say that it is
+/// multiplexer only; that is not one session, and fairq cannot say that it is
 /// two, because an agent that IS its boundary shares nothing else with its
 /// own commands. The answer is then `Unknown`.
 pub fn relation(issuer: Option<&[Ancestor]>, reader: Option<&[Ancestor]>) -> Relation {
@@ -723,7 +723,7 @@ pub fn relation(issuer: Option<&[Ancestor]>, reader: Option<&[Ancestor]>) -> Rel
 /// Makes the view of one request for one reader.
 ///
 /// `reader` is the chain above the command that reads, as the coordinator
-/// walked it, or `None` when qex could not learn it.
+/// walked it, or `None` when fairq could not learn it.
 pub fn view(
     record: &PauseRecord,
     reader: Option<&[Ancestor]>,
@@ -806,8 +806,8 @@ pub enum Target<'a> {
 /// Gives the guarded command that ends ONE request.
 pub fn guarded_command(target: Target, id: &str) -> String {
     match target {
-        Target::Queue => format!("qex resume queue --pause {id}"),
-        Target::Lock(name) => format!("qex resume lock {} --pause {id}", shown_lock(name)),
+        Target::Queue => format!("fairq resume queue --pause {id}"),
+        Target::Lock(name) => format!("fairq resume lock {} --pause {id}", shown_lock(name)),
     }
 }
 
@@ -815,7 +815,7 @@ pub fn guarded_command(target: Target, id: &str) -> String {
 /// `home` is the lock that the request stands for, or `None` for the queue.
 ///
 /// The command is there for every reader: the person who typed the id holds
-/// it, and the guarded command is the only one that qex ever prints.
+/// it, and the guarded command is the only one that fairq ever prints.
 pub fn stands_elsewhere(id: &str, home: Option<&str>) -> String {
     let id = crate::job::safe_name(id);
     let (place, target) = match home {
@@ -826,7 +826,7 @@ pub fn stands_elsewhere(id: &str, home: Option<&str>) -> String {
         ),
     };
     format!(
-        "pause {id} stands for {place}, and not for the target of this command. qex resumed \
+        "pause {id} stands for {place}, and not for the target of this command. fairq resumed \
          nothing, and the request still stands. To end it: `{}`",
         guarded_command(target, &id)
     )
@@ -835,15 +835,15 @@ pub fn stands_elsewhere(id: &str, home: Option<&str>) -> String {
 /// Gives the command that resumes ONE request, or `None` when the rules for
 /// the advice allow no command.
 ///
-/// THE RULES. qex prints a command that is ready to run ONLY for a request of
+/// THE RULES. fairq prints a command that is ready to run ONLY for a request of
 /// the session of the reader, and for a request of a session that is gone. It
 /// never prints one for a different session that still runs, and never for
 /// `Unknown`, which must not read more permissively than `Running`. The
 /// command is always the guarded one. The text and the JSON both take their
 /// answer from this function, so they cannot disagree.
 ///
-/// A request that qex made because it could not read the file is the request
-/// of nobody. The command is the remedy, so qex prints it.
+/// A request that fairq made because it could not read the file is the request
+/// of nobody. The command is the remedy, so fairq prints it.
 pub fn resume_command(view: &PauseView, target: Target) -> Option<String> {
     // A coordinator of an earlier version gives no id, so no guarded command
     // exists.
@@ -946,8 +946,8 @@ pub fn request_line(view: &PauseView, target: Target, now: u64) -> String {
             None => String::from("Correct that file."),
         };
         return format!(
-            "pause {}: PAUSED BY A FAULT. qex could not read its pause record, and a record \
-             that qex cannot read can hold a pause, so qex holds the queue. The fault: {fault}. \
+            "pause {}: PAUSED BY A FAULT. fairq could not read its pause record, and a record \
+             that fairq cannot read can hold a pause, so fairq holds the queue. The fault: {fault}. \
              {remedy}",
             view.pause_id
         );
@@ -958,11 +958,11 @@ pub fn request_line(view: &PauseView, target: Target, now: u64) -> String {
     let command = resume_command(view, target);
     let advice = match (view.issuer_session_state, &command) {
         (IssuerState::Unknown, _) if view.pause_id.is_empty() => String::from(
-            "qex cannot tell which session set it or whether that session is still there, so \
+            "fairq cannot tell which session set it or whether that session is still there, so \
              treat it as still there. Do not resume it unless your user tells you to.",
         ),
         (IssuerState::Unknown, _) => format!(
-            "qex cannot tell which session set it or whether that session is still there, so \
+            "fairq cannot tell which session set it or whether that session is still there, so \
              treat it as still there. {DO_NOT_RESUME}"
         ),
         (IssuerState::Running, Some(command)) => format!(
@@ -1016,7 +1016,7 @@ fn standing_text(views: &[PauseView], again: &str, now: u64) -> String {
 /// Gives the form of a `--reason` that a terminal may print.
 ///
 /// The reason is text that a person or an agent typed, and every function below
-/// puts it in a SENTENCE that `qex info`, `qex top`, `qex list` and the log of
+/// puts it in a SENTENCE that `fairq info`, `fairq top`, `fairq list` and the log of
 /// the coordinator write to a terminal. A reason that held an ESC byte would
 /// thus clear the screen of the next reader, or move the cursor over the lines
 /// above. `job::printable` is the rule for a sentence: it changes a control
@@ -1031,7 +1031,7 @@ fn shown_reason(reason: &str) -> String {
 /// Gives the form of a lock name that a terminal may print.
 ///
 /// A lock name is a NAME, and not a sentence, so it takes `job::safe_name`.
-/// `qex pause lock` accepts any text, and the name goes into `blocked_reason`,
+/// `fairq pause lock` accepts any text, and the name goes into `blocked_reason`,
 /// which every job of the queue carries and every reader prints.
 fn shown_lock(name: &str) -> String {
     crate::job::safe_name(name)
@@ -1039,7 +1039,7 @@ fn shown_lock(name: &str) -> String {
 
 /// True when a word names this stored lock.
 ///
-/// qex shows the safe form, so a word that a reader copies from `qex status`
+/// fairq shows the safe form, so a word that a reader copies from `fairq status`
 /// must find the lock that the job holds.
 pub fn lock_matches(stored: &str, word: &str) -> bool {
     stored == word || crate::job::safe_name(stored) == word
@@ -1056,7 +1056,7 @@ pub fn lock_same(a: &str, b: &str) -> bool {
 /// Gives the stored lock name that a word names.
 ///
 /// When no known lock matches, the word is a new lock that the person is
-/// taking. When two stored names give one safe form, qex cannot choose.
+/// taking. When two stored names give one safe form, fairq cannot choose.
 pub fn resolve_lock_name<'a>(
     word: &str,
     known: impl IntoIterator<Item = &'a str>,
@@ -1080,7 +1080,7 @@ pub fn resolve_lock_name<'a>(
                 .join("\n");
             Err(format!(
                 "`{shown}` names {n} locks.\n\n\
-                 Two lock names give one safe form. qex cannot choose.\n\n\
+                 Two lock names give one safe form. fairq cannot choose.\n\n\
                  Use one of these names:\n{list}"
             ))
         }
@@ -1097,15 +1097,15 @@ pub fn resolve_lock_name<'a>(
 /// session, would thus change and write the record of every job in the queue,
 /// for the whole length of the pause.
 ///
-/// This text changes only when the set of requests changes. `qex pause`
+/// This text changes only when the set of requests changes. `fairq pause`
 /// calculates the rest when a person reads it, and it is the command that
 /// this text names: it gives each request with its id, and a bare
-/// `qex resume queue` removes nothing.
+/// `fairq resume queue` removes nothing.
 pub fn queue_reason(paused: &Paused) -> String {
     if let Some(record) = paused.queue.iter().find(|r| r.fault) {
         return format!(
-            "the queue is paused, so qex starts no job. qex could not read its pause record, and \
-             a record that qex cannot read can hold a pause, so qex holds the queue. The fault: \
+            "the queue is paused, so fairq starts no job. fairq could not read its pause record, and \
+             a record that fairq cannot read can hold a pause, so fairq holds the queue. The fault: \
              {}. Correct that file, or run `{}` to write a new one.",
             record
                 .reason
@@ -1116,7 +1116,7 @@ pub fn queue_reason(paused: &Paused) -> String {
         );
     }
 
-    let mut text = String::from("the queue is paused, so qex starts no job.");
+    let mut text = String::from("the queue is paused, so fairq starts no job.");
     match paused.queue.as_slice() {
         [one] => {
             text.push_str(" 1 pause request stands.");
@@ -1132,7 +1132,7 @@ pub fn queue_reason(paused: &Paused) -> String {
             crate::sys::stamp_text(since)
         ));
     }
-    text.push_str(" Run `qex pause` to read each request, who made it and how it ends.");
+    text.push_str(" Run `fairq pause` to read each request, who made it and how it ends.");
     text
 }
 
@@ -1147,8 +1147,8 @@ pub fn lock_reason(name: &str) -> String {
 /// Gives the lines that say how the queue is paused: one summary line, and
 /// then one line for each standing request.
 ///
-/// Every command that shows the pause uses this function, so `qex info`,
-/// `qex top`, `qex list` and `qex pause` never disagree.
+/// Every command that shows the pause uses this function, so `fairq info`,
+/// `fairq top`, `fairq list` and `fairq pause` never disagree.
 ///
 /// `since` is the moment when the queue stopped running. It is NOT the time
 /// of the newest request: a reader who sees "4m ago" on a queue that has been
@@ -1181,7 +1181,7 @@ pub fn lock_lines(name: &str, views: &[PauseView], held_by: Option<&str>, now: u
     );
     match held_by {
         Some(job) => text.push_str(&format!(
-            " · the job {job} still holds it · qex gives it to the person when that job stops"
+            " · the job {job} still holds it · fairq gives it to the person when that job stops"
         )),
         None => text.push_str(" · no job holds it"),
     }
@@ -1266,7 +1266,7 @@ mod tests {
         }
     }
 
-    /// The chain above a `qex` command of an agent in one pane of a
+    /// The chain above a `fairq` command of an agent in one pane of a
     /// multiplexer, from the shell of the agent upward.
     fn agent(shell: i32, agent: i32, pane: i32) -> Vec<Ancestor> {
         vec![
@@ -1329,7 +1329,7 @@ mod tests {
     ///
     /// # The fault that this test prevents
     ///
-    /// With ONE record for each queue, a second `qex pause queue` had to
+    /// With ONE record for each queue, a second `fairq pause queue` had to
     /// change the first. Each rule for that change had a sequence in which
     /// one session shortened or ended what a different session asked for.
     #[test]
@@ -1540,11 +1540,11 @@ mod tests {
         assert_eq!(reason, queue_reason(&p));
         assert!(reason.contains("the queue is paused"));
         assert!(
-            reason.contains("`qex pause`"),
+            reason.contains("`fairq pause`"),
             "the reason must give the command that shows each request: {reason}"
         );
         assert!(
-            !reason.contains("qex resume"),
+            !reason.contains("fairq resume"),
             "a resume with no id removes nothing, so the reason must not name it: {reason}"
         );
         assert!(
@@ -1589,7 +1589,7 @@ mod tests {
     ///
     /// # The fault that this test prevents
     ///
-    /// A `qex abort` that was the first process of a container reported its
+    /// A `fairq abort` that was the first process of a container reported its
     /// own pid, which was 1. The line said "by pid 1", a reader ran `ps -p 1`
     /// on the machine, found the first process alive, and believed for six
     /// hours that the pauser still operated. A reader takes a pid in a line
@@ -1628,7 +1628,7 @@ mod tests {
     fn the_advice_obeys_its_rules() {
         let now = 1_240;
         let q = Target::Queue;
-        let guarded = "qex resume queue --pause 7f3c9a1e";
+        let guarded = "fairq resume queue --pause 7f3c9a1e";
         let exception = "unless you hold this id from your own `pause` answer or your user";
 
         // A request of this session: the guarded command, for the holder.
@@ -1652,7 +1652,7 @@ mod tests {
             line.contains("from another session that is still running (claude)"),
             "{line}"
         );
-        assert!(!line.contains("qex resume"), "{line}");
+        assert!(!line.contains("fairq resume"), "{line}");
         assert!(line.contains(exception), "{line}");
         assert_eq!(resume_command(&v, q), None);
 
@@ -1687,7 +1687,7 @@ mod tests {
         assert_eq!(v.issuer_program, None, "null exactly when unknown");
         let line = request_line(&v, q, now);
         assert!(line.contains("treat it as still there"), "{line}");
-        assert!(!line.contains("qex resume"), "{line}");
+        assert!(!line.contains("fairq resume"), "{line}");
         assert!(line.contains(exception), "{line}");
         assert!(
             !line.contains("THIS") && !line.contains("another"),
@@ -1699,7 +1699,7 @@ mod tests {
         let v = view(&from(agent(100, 50, 40)), None, true, &all);
         assert_eq!(v.issuer_is_this_session, Relation::Unknown);
         let line = request_line(&v, q, now);
-        assert!(!line.contains("qex resume"), "{line}");
+        assert!(!line.contains("fairq resume"), "{line}");
         assert!(
             !line.contains("THIS") && !line.contains("another"),
             "{line}"
@@ -1739,7 +1739,7 @@ mod tests {
                         assert!(line.ends_with(command), "{line} / {command}");
                         assert!(command.contains("--pause 7f3c9a1e"), "{command}");
                     }
-                    None => assert!(!line.contains("qex resume"), "{line}"),
+                    None => assert!(!line.contains("fairq resume"), "{line}"),
                 }
                 assert_eq!(
                     json["issuer_program"].is_null(),
@@ -1765,7 +1765,7 @@ mod tests {
         }
         assert_eq!(
             resume_command(&this_session(), Target::Lock("gpu0")).as_deref(),
-            Some("qex resume lock gpu0 --pause 7f3c9a1e")
+            Some("fairq resume lock gpu0 --pause 7f3c9a1e")
         );
     }
 
@@ -1814,7 +1814,7 @@ mod tests {
             .collect();
         assert_eq!(names, ["bash", "claude"]);
 
-        // Only the first process and a runtime: qex cannot say, and it never
+        // Only the first process and a runtime: fairq cannot say, and it never
         // says `running` for such a chain.
         let bare = vec![process(1, 0, "systemd", false)];
         assert!(session_processes(&bare).is_empty());
@@ -1835,7 +1835,7 @@ mod tests {
     }
 
     /// Two agents in two panes of one multiplexer share the multiplexer only.
-    /// qex must not say `this session`, which prints a command that ends the
+    /// fairq must not say `this session`, which prints a command that ends the
     /// request of the other agent, and it cannot say `another`.
     #[test]
     fn a_shared_boundary_is_not_a_shared_session() {
@@ -1864,7 +1864,7 @@ mod tests {
         assert_eq!(v.issuer_program, None);
     }
 
-    /// A process with no start time can never be shown to exist, so qex must
+    /// A process with no start time can never be shown to exist, so fairq must
     /// not say that its session is gone.
     #[test]
     fn a_session_with_no_start_time_is_never_gone() {
@@ -1876,18 +1876,18 @@ mod tests {
         assert_eq!(v.issuer_session_state, IssuerState::Unknown);
     }
 
-    /// A file that qex cannot read must PAUSE the queue, and say why.
+    /// A file that fairq cannot read must PAUSE the queue, and say why.
     ///
     /// # The fault that this test prevents
     ///
     /// A parse fault that gave "nothing is paused" would start the work while
     /// the person believes that the machine is quiet, with no line in any log
     /// and no word in any command. The two directions are not equal: a queue
-    /// that qex holds by mistake costs latency and one command corrects it,
+    /// that fairq holds by mistake costs latency and one command corrects it,
     /// and a queue that operates by mistake cannot be corrected after the
     /// work started.
     #[test]
-    fn a_record_that_qex_cannot_read_holds_the_queue() {
+    fn a_record_that_fairq_cannot_read_holds_the_queue() {
         let paused =
             Paused::held_by_fault(std::path::Path::new("/x/paused.json"), "expected value");
 
@@ -1903,7 +1903,7 @@ mod tests {
         assert!(reason.contains("could not read"), "got: {reason}");
         assert!(reason.contains("/x/paused.json"), "got: {reason}");
         assert!(
-            reason.contains("qex resume queue --pause fault"),
+            reason.contains("fairq resume queue --pause fault"),
             "got: {reason}"
         );
 
@@ -1911,13 +1911,13 @@ mod tests {
         let lines = queue_lines(&[v], paused.since(), record.paused_at);
         assert!(lines[1].contains("PAUSED BY A FAULT"), "got: {}", lines[1]);
         assert!(
-            lines[1].ends_with("qex resume queue --pause fault"),
+            lines[1].ends_with("fairq resume queue --pause fault"),
             "got: {}",
             lines[1]
         );
 
         // A real request replaces it: the file that this change writes is a
-        // file that qex can read.
+        // file that fairq can read.
         //
         // The fault held the queue already, so the new request did not stop
         // it, and the queue stopped at the moment of the fault. A later
@@ -1939,11 +1939,11 @@ mod tests {
         assert_eq!(end.map(|e| e.since), fault_since);
     }
 
-    /// An id is unique across the queue and all the locks, so qex can say
+    /// An id is unique across the queue and all the locks, so fairq can say
     /// where a request stands. A resume that names the wrong target must get
     /// that place and the command, and never "does not stand".
     #[test]
-    fn qex_knows_the_target_that_an_id_stands_for() {
+    fn fairq_knows_the_target_that_an_id_stands_for() {
         let mut paused = Paused::default();
         paused.add_queue(super::PauseRecord::new(7, None, None));
         paused.add_lock("gpu0", super::PauseRecord::new(7, None, None));
@@ -1957,13 +1957,13 @@ mod tests {
         let words = stands_elsewhere(&lock_id, Some("gpu0"));
         assert!(words.contains("stands for the lock `gpu0`"), "{words}");
         assert!(
-            words.contains(&format!("`qex resume lock gpu0 --pause {lock_id}`")),
+            words.contains(&format!("`fairq resume lock gpu0 --pause {lock_id}`")),
             "{words}"
         );
         assert!(!words.contains("does not stand"), "{words}");
         let words = stands_elsewhere(&queue_id, None);
         assert!(
-            words.contains(&format!("`qex resume queue --pause {queue_id}`")),
+            words.contains(&format!("`fairq resume queue --pause {queue_id}`")),
             "{words}"
         );
     }
@@ -1986,7 +1986,7 @@ mod tests {
         let id = back.queue[0].id.clone();
 
         let first = back.expire(20);
-        assert!(first.changed, "the caller must write the id that qex gave");
+        assert!(first.changed, "the caller must write the id that fairq gave");
         assert_eq!(back.queue[0].id, id, "the id must not change again");
 
         let second = back.expire(30);

@@ -1,5 +1,5 @@
 ---
-title: How qex operates
+title: How fairq operates
 description: The coordinator, the supervisor, the files on the disk, and the limits.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: the limits name the group that qex can stop after a pid is reused (issue #115). -->
@@ -8,9 +8,9 @@ description: The coordinator, the supervisor, the files on the disk, and the lim
 
 # Design
 
-## How qex operates
+## How fairq operates
 
-qex is one program with three roles.
+fairq is one program with three roles.
 
 **The CLI** reads your command. It calculates the full job specification at this
 moment, because the coordinator can start many hours before from a different
@@ -33,8 +33,8 @@ fail or restart, and the job must continue and must still record its result. A
 ### Files
 
 ```
-~/.config/qex.toml                  the config file
-~/.local/state/qex/jobs/<uuid>/
+~/.config/fairq.toml                  the config file
+~/.local/state/fairq/jobs/<uuid>/
     spec.json      the command, the environment and the claims (mode 0600)
     status.json    the state, the exit code, the times and the true use
     stdout.log
@@ -49,7 +49,7 @@ writes `cancelled`, `skipped` and the failure of a job whose supervisor stopped.
 Each of them makes this file with `create_new` before it starts the hook, and
 that operation succeeds for one process only. A person thus receives one
 message, also when the coordinator stops and starts again while the job runs.
-qex makes this file BEFORE it runs the hook, so a process that stops between
+fairq makes this file BEFORE it runs the hook, so a process that stops between
 those two steps loses that message. The other order would give a second message
 in the same condition, and a message that arrives two times is worse.
 
@@ -57,21 +57,21 @@ in the same condition, and a message that arrives two times is worse.
 state, the exit code, the times and the measured use. The supervisor writes it
 in one operation,
 so a reader sees the old contents or the new contents, and never a part of them.
-`qex wait` reads this file directly when no coordinator operates.
+`fairq wait` reads this file directly when no coordinator operates.
 
 ### A command pays for what it asks for
 
 The coordinator holds the full record of each job that waits or operates. A job
 that stopped leaves that map one turn of the scheduler after its record on the
 disk says so, and the coordinator then keeps a short entry for it: the line of
-`qex list`, and what a filter, a dependency and a dedupe key read. A request for
+`fairq list`, and what a filter, a dependency and a dedupe key read. A request for
 the full record of such a job reads `status.json`. The cost of a turn of the
 scheduler thus follows the queue, and not the history.
 
 The coordinator keeps an index of every job by id, by name and by pipeline. A
 command that names a job sends the text that the person wrote, and the
-coordinator reads it through the index with one set of rules. `qex cancel` and
-`qex kill` send every id in one request. `qex list` sends its options, and the
+coordinator reads it through the index with one set of rules. `fairq cancel` and
+`fairq kill` send every id in one request. `fairq list` sends its options, and the
 coordinator gives the short rows of the jobs that they select. The lock of the
 coordinator covers a copy of one pointer for each job of an answer; the text of
 the answer comes after the lock is free.
@@ -82,7 +82,7 @@ whole list in their place. The answer is the same, and only slower.
 
 ### After the machine restarts
 
-The state directory is `~/.local/state/qex`, or `$XDG_STATE_HOME/qex`. It is not
+The state directory is `~/.local/state/fairq`, or `$XDG_STATE_HOME/fairq`. It is not
 a temporary file system, so every record stays through a restart of the machine.
 The next coordinator reads each record and corrects it:
 
@@ -104,65 +104,65 @@ The next coordinator reads each record and corrects it:
 
 **Only a coordinator makes these changes, and no coordinator starts by itself
 after a restart.** Until one starts, `status.json` still says `running` for a job
-that no process runs. `qex wait` and `qex top` start no coordinator and read
-that file, so they show that state, and `qex wait` continues to wait. Run
-`qex list` when you come back after a restart: it starts a coordinator, the
-coordinator corrects every record, and the queue operates again. `qex status
-<id>` and `qex info` do the same.
+that no process runs. `fairq wait` and `fairq top` start no coordinator and read
+that file, so they show that state, and `fairq wait` continues to wait. Run
+`fairq list` when you come back after a restart: it starts a coordinator, the
+coordinator corrects every record, and the queue operates again. `fairq status
+<id>` and `fairq info` do the same.
 
-### qex removes no record by itself
+### fairq removes no record by itself
 
 The coordinator has no timer that deletes a record. The directory of every job
-stays until somebody runs `qex clean` or `qex gc`. `[gc] keep = "1d"` in the
-config file is the age that `qex gc` USES when you run it, and it is not a rule
-that qex applies for you.
+stays until somebody runs `fairq clean` or `fairq gc`. `[gc] keep = "1d"` in the
+config file is the age that `fairq gc` USES when you run it, and it is not a rule
+that fairq applies for you.
 
 What grows is `jobs/<uuid>/` for each job: the two small JSON files, and
 `stdout.log` and `stderr.log`. `[logs] max_bytes` limits each log file, and the
 default is 32MB, so the two logs of one job hold about 64MB at most with the
 default. A queue that
 an agent drives for days, with no person who watches it, is the case where
-nobody runs `qex gc`, and the first sign is then a full disk.
+nobody runs `fairq gc`, and the first sign is then a full disk.
 
 ```sh
-qex du              # how much the state directory holds, and the largest jobs
-qex gc --dry-run    # what `qex gc` would delete
-qex gc              # delete every record that stopped more than `[gc] keep` ago
+fairq du              # how much the state directory holds, and the largest jobs
+fairq gc --dry-run    # what `fairq gc` would delete
+fairq gc              # delete every record that stopped more than `[gc] keep` ago
 ```
 
 ### Several users
 
-Each coordinator writes its claims to `/tmp/qex`, and it reads the records of
+Each coordinator writes its claims to `/tmp/fairq`, and it reads the records of
 the other users before it starts a job. This method needs no administrator
 rights.
 
 The method is cooperative, and a different user can write an incorrect value.
-qex also tests the free memory of the machine, so it finds a load that no
+fairq also tests the free memory of the machine, so it finds a load that no
 coordinator reports.
 
 ## Limits
 
-**qex does not limit the CPU of a job.** The `cpu` controller of cgroup v2 is
+**fairq does not limit the CPU of a job.** The `cpu` controller of cgroup v2 is
 not available to a user on a usual Linux system, and macOS has no equivalent.
-The queue controls the number of cores instead: qex does not start more work
+The queue controls the number of cores instead: fairq does not start more work
 than the budget permits.
 
-**qex does not limit the memory of a job.** A claim controls the queue only, and
+**fairq does not limit the memory of a job.** A claim controls the queue only, and
 the behaviour is the same on Linux and on macOS. Nothing holds a job to its
 claim after the job starts.
 
 **A claim is a promise, and not a measurement.** A job that claims 2GB and uses
-20GB can still fill the machine. qex tests the free memory of the machine before
+20GB can still fill the machine. fairq tests the free memory of the machine before
 each start, which limits the damage, but an accurate claim is better.
 
-**After a supervisor dies, qex can stop a group that is not the job's.** qex
+**After a supervisor dies, fairq can stop a group that is not the job's.** fairq
 stops what the job left in its process group, also after the system collected
 the job process. It first checks that the job ran in the pid namespace of the
 coordinator that looks, and that every process in the group belongs to this
 user and started no earlier than the job. One rare chain passes those
 checks: the whole group ended, a new process of this user got the same number,
-made its own group with it, and left processes in that group, all before qex
-looked. qex then stops that group. For a coordinator that runs as root, this
+made its own group with it, and left processes in that group, all before fairq
+looked. fairq then stops that group. For a coordinator that runs as root, this
 user is root, whose processes include the services of the system.
 
 ## The property that an agent needs most
@@ -175,7 +175,7 @@ Somebody can therefore stop your agent at any moment. The job continues, it
 writes its result, and a later session attaches to the same job with the id:
 
 ```sh
-qex status "$(cat build.id)" --wait
+fairq status "$(cat build.id)" --wait
 ```
 
 A monitor script cannot do this, because a monitor holds the answer in its own
@@ -185,7 +185,7 @@ memory. Stop the monitor, and the answer is gone.
 
 The CLI and the coordinator speak JSON on a Unix socket. A coordinator can
 operate for hours, and a new build can replace the program in that time, so a
-mixture of versions is normal and qex must say what it promises.
+mixture of versions is normal and fairq must say what it promises.
 
 **The format is additive only.**
 
@@ -219,7 +219,7 @@ expectation.
 early CLI sends the fields that it knows, and a new coordinator understands each
 of them. In the opposite direction, a new CLI can send an option that an old
 coordinator ignores in silence — and a job that runs without the lock that you
-asked for is worse than a job that does not run. qex thus asks the coordinator
+asked for is worse than a job that does not run. fairq thus asks the coordinator
 what it can do, and it refuses the job with the option and the remedy.
 
 ## The capability floor
@@ -243,13 +243,13 @@ of each job is on the disk, and a new coordinator reads the same records.
 ### A development build gets a warning, and not a refusal
 
 A build that a person makes reports a version such as `0.0.0-dev+g98513e2`,
-which names the commit that it holds. qex names such a version a development
+which names the commit that it holds. fairq names such a version a development
 build, and a coordinator from one gets a warning only.
 
 The floor is a backstop for a coordinator so early that it came before the
 capability handshake: such a build cannot say what it cannot do, so the only
 safe answer is to refuse it. A development build is not that. It answers the
-`Capabilities` request like every other build, so qex still refuses each option
+`Capabilities` request like every other build, so fairq still refuses each option
 that it cannot obey, and it names the option. The floor is the coarse gate, and
 the capability test is the exact one.
 
@@ -275,15 +275,15 @@ MemAvailable 1.6GB, 10GB in swap, no page operations, the machine is healthy
 ```
 
 A job that claims 6.5GB waits there, although the machine can supply the memory
-by taking it back from swap. qex now says so in the reason: when the pressure is
+by taking it back from swap. fairq now says so in the reason: when the pressure is
 low, the reason states that the machine is not short of memory, that the number
 does not count the memory in swap, and that a smaller claim or a lower
 `reserve_mem` corrects it.
 
 The pressure, and not the free memory, is the measurement that separates a
-machine that is full from a machine that parked memory nobody wants. qex reads
+machine that is full from a machine that parked memory nobody wants. fairq reads
 it (`/proc/pressure/memory`, Linux only) as a second test with `max_pressure`.
-**qex does not yet use the pressure to RELEASE a job that the free-memory test
+**fairq does not yet use the pressure to RELEASE a job that the free-memory test
 holds.** That is the correct change for this case, and it needs a machine in
 that state to test it, so it waits.
 
@@ -293,17 +293,17 @@ that state to test it, so it waits.
 
 The measurement is `max_rss` from `getrusage(RUSAGE_CHILDREN)`, which is the
 highest memory that the job reached, and not its memory at the end and not an
-average. qex keeps several samples and uses the **largest** of them with a
+average. fairq keeps several samples and uses the **largest** of them with a
 margin.
 
 This is deliberate, and the reason is the job that climbs for hours: a claim
 that is too small stops the job, and a claim that is a little large costs
 capacity only.
 
-qex records a job that COMPLETED, and nothing else. A job that somebody stopped,
+fairq records a job that COMPLETED, and nothing else. A job that somebody stopped,
 that reached its time limit, or that the kernel stopped for memory shows the
 memory that it REACHED and not the memory that it needs, and that number would
-teach qex the wrong size.
+teach fairq the wrong size.
 
 ### Is there fairness between agents?
 
@@ -311,7 +311,7 @@ teach qex the wrong size.
 
 Each user has one coordinator, and each coordinator holds its own queue in the
 order of submission, with the priority first. Between users, the coordinators
-publish their claims to `/tmp/qex` and each one subtracts the claims of the
+publish their claims to `/tmp/fairq` and each one subtracts the claims of the
 others from its budget.
 
 That controls the total load, and it does NOT divide the load. A fan-out of 11
@@ -319,12 +319,12 @@ jobs from one agent takes the capacity, and the 2 jobs of the other agent wait
 until it ends. Nothing gives a share to each agent, and nothing reserves a slot
 for the agent that arrives second.
 
-Use `--priority` inside one queue. Between agents there is no answer in qex
+Use `--priority` inside one queue. Between agents there is no answer in fairq
 today, and a user who needs one must divide the budget by hand, with `[budget]`
 in the configuration of each user.
 
 ## The boundary: one machine
 
-qex controls one machine. Two machines that farm work to each other are not
+fairq controls one machine. Two machines that farm work to each other are not
 coordinated, and the accounting on each machine sees its own jobs and the jobs
 of the other users OF THAT MACHINE only.

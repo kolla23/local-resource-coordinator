@@ -18,7 +18,7 @@
 //! result. The supervisor writes `status.json` when the job stops.
 //!
 //! The coordinator gives the supervisor a session. The supervisor gives the
-//! job a process group. The command `qex kill` can then signal every process
+//! job a process group. The command `fairq kill` can then signal every process
 //! of the job with one call, and no process of the job can avoid the signal.
 
 use crate::daemon::{log, Coordinator};
@@ -32,7 +32,7 @@ use std::time::Duration;
 
 /// Starts the supervisor process for one job. Gives its process id.
 ///
-/// The supervisor is a new `qex` process. It is not a copy of the coordinator,
+/// The supervisor is a new `fairq` process. It is not a copy of the coordinator,
 /// so the coordinator does not fork its threads and its memory.
 pub fn spawn(id: uuid::Uuid) -> Result<i32> {
     let exe = paths::program_path()?;
@@ -103,7 +103,7 @@ pub fn record_supervisor_pid(id: &uuid::Uuid, pid: i32) {
 
 /// Reads that pid, and the start time beside it.
 ///
-/// The start time is `None` for a file that an earlier version of qex wrote,
+/// The start time is `None` for a file that an earlier version of fairq wrote,
 /// which held the pid alone.
 pub fn supervisor_record_of(dir: &std::path::Path) -> Option<(i32, Option<u64>)> {
     let text = std::fs::read_to_string(dir.join("supervisor.pid")).ok()?;
@@ -132,7 +132,7 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
             watch_until_gone(pid);
         } else {
             log(&format!(
-                "qex could not wait for the supervisor {pid} of the job {id}: {e}"
+                "fairq could not wait for the supervisor {pid} of the job {id}: {e}"
             ));
         }
     }
@@ -194,9 +194,9 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
                 // stopped it: a signal, or the out-of-memory killer.
                 //
                 // The job process can still operate. The system gives it to the
-                // init process, and it continues to use memory and cores. qex
+                // init process, and it continues to use memory and cores. fairq
                 // must stop it here. Without this step, the job continues, the
-                // budget shows the memory as free, and no qex command can stop
+                // budget shows the memory as free, and no fairq command can stop
                 // the job, because its record says that it stopped.
                 // The pid and its start time come from ONE record: the pair is
                 // the identity, and a pid of one write with the start time of
@@ -244,15 +244,15 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
                 if sys::job_pid_alive(pid) && sys::same_process_start(pid, job_start) {
                     log(&format!(
                         "the supervisor of the job {id} stopped, and the job {pid} \
-                         continues; qex stops the job now"
+                         continues; fairq stops the job now"
                     ));
-                    // A test of qex makes the signal step fail here; a release build has no switch.
+                    // A test of fairq makes the signal step fail here; a release build has no switch.
                     #[cfg(debug_assertions)]
                     if std::env::var_os(PANIC_IN_SIGNAL_STEP).is_some() {
                         panic!("{PANIC_IN_SIGNAL_STEP} is set: reap's signal step fails here");
                     }
                     stop_process_group(id, pid, job_start, job_ns);
-                    note.push_str("; qex stopped the job process");
+                    note.push_str("; fairq stopped the job process");
                 } else {
                     kill_what_the_job_left(id, pid, job_start, job_ns);
                 }
@@ -265,7 +265,7 @@ pub fn reap(coord: Arc<Coordinator>, id: uuid::Uuid, pid: i32) {
             // the next recovery fails the job and stops what it left.
             Err(_) => {
                 log_without_panic(&format!(
-                    "job {id}: a fault in qex ended reap's signal step; the coordinator stops \
+                    "job {id}: a fault in fairq ended reap's signal step; the coordinator stops \
                      now, and the next coordinator's recovery fails the job and stops what it left"
                 ));
                 unsafe { libc::_exit(101) }
@@ -333,9 +333,9 @@ fn persist_legacy_requeue(dir: &std::path::Path, status: &mut JobStatus) {
 }
 
 /// Names the variable that makes reap's signal step fail. **This variable exists for the tests
-/// of qex**, and a release build does not read it.
+/// of fairq**, and a release build does not read it.
 #[cfg(debug_assertions)]
-const PANIC_IN_SIGNAL_STEP: &str = "QEX_TEST_PANIC_IN_REAP_SIGNAL_STEP";
+const PANIC_IN_SIGNAL_STEP: &str = "FAIRQ_TEST_PANIC_IN_REAP_SIGNAL_STEP";
 
 /// Writes a line as `daemon::log` does, but ignores a failed write: println! panics then, and
 /// these lines run where a panic would skip the exit or poison the state lock.
@@ -419,7 +419,7 @@ pub(crate) enum LeftGroup {
     /// No group of the job is left to signal: the number is held by another process, or the
     /// group is empty.
     Nothing,
-    /// The group has members that qex could not verify; the coordinator log says why.
+    /// The group has members that fairq could not verify; the coordinator log says why.
     Unverified,
 }
 
@@ -443,14 +443,14 @@ pub(crate) fn check_what_the_job_left(
     } else if last_error_is(libc::ESRCH) {
         Ok(false)
     } else {
-        Err("qex may signal none of its members".to_string())
+        Err("fairq may signal none of its members".to_string())
     };
     match verdict {
         Ok(true) => LeftGroup::TheJobs,
         Ok(false) => LeftGroup::Nothing,
         Err(reason) => {
             log(&format!(
-                "job {id}: qex leaves the process group {pid} alone: {reason}"
+                "job {id}: fairq leaves the process group {pid} alone: {reason}"
             ));
             LeftGroup::Unverified
         }
@@ -458,14 +458,14 @@ pub(crate) fn check_what_the_job_left(
 }
 
 /// Pauses `kill_what_the_job_left` before its check, in milliseconds. **This variable exists for
-/// the tests of qex**, and a release build does not read it.
+/// the tests of fairq**, and a release build does not read it.
 #[cfg(debug_assertions)]
-const PAUSE_BEFORE_LEFTOVER_KILL: &str = "QEX_TEST_PAUSE_BEFORE_LEFTOVER_KILL_MS";
+const PAUSE_BEFORE_LEFTOVER_KILL: &str = "FAIRQ_TEST_PAUSE_BEFORE_LEFTOVER_KILL_MS";
 
 /// Pauses the time limit's timer before its TERM, in milliseconds. **This variable exists for the
-/// tests of qex**, and a release build does not read it.
+/// tests of fairq**, and a release build does not read it.
 #[cfg(debug_assertions)]
-const PAUSE_BEFORE_TIMER_TERM: &str = "QEX_TEST_PAUSE_BEFORE_TIMER_TERM_MS";
+const PAUSE_BEFORE_TIMER_TERM: &str = "FAIRQ_TEST_PAUSE_BEFORE_TIMER_TERM_MS";
 
 /// Sends SIGKILL to what a job left in its group once its leader ended, when
 /// `check_what_the_job_left` finds the group the job's.
@@ -475,7 +475,7 @@ pub(crate) fn kill_what_the_job_left(
     recorded_start: Option<u64>,
     recorded_ns: Option<(&str, u64)>,
 ) {
-    // A test makes the check slow here, as a hung `ps` does on macOS (#164); `qex kill` runs the
+    // A test makes the check slow here, as a hung `ps` does on macOS (#164); `fairq kill` runs the
     // check without this function, so its own check is not paused.
     #[cfg(debug_assertions)]
     if let Some(ms) = std::env::var(PAUSE_BEFORE_LEFTOVER_KILL)
@@ -536,7 +536,7 @@ fn collected_group(
     }
     let members = match sys::group_members(pid) {
         Some(members) if !members.is_empty() => members,
-        _ => return Err("qex cannot list its members".to_string()),
+        _ => return Err("fairq cannot list its members".to_string()),
     };
     let user = unsafe { libc::geteuid() };
     let mut verified = false;
@@ -545,7 +545,7 @@ fn collected_group(
             if last_error_is(libc::ESRCH) {
                 continue;
             }
-            return Err(format!("qex may not signal its member {member}"));
+            return Err(format!("fairq may not signal its member {member}"));
         }
         if sys::process_uids(member) != Some((user, user)) {
             return Err(format!(
@@ -570,7 +570,7 @@ fn last_error_is(code: i32) -> bool {
     std::io::Error::last_os_error().raw_os_error() == Some(code)
 }
 
-/// Runs one job. This function is the body of the `qex supervise` command.
+/// Runs one job. This function is the body of the `fairq supervise` command.
 ///
 /// The supervisor does not stop when the coordinator stops. It does not use
 /// `PR_SET_PDEATHSIG`, because the job must continue in that case.
@@ -579,7 +579,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     let spec = job::read_spec(&dir).context("reading the job specification")?;
     let mut status = job::read_status(&dir).context("reading the job status")?;
 
-    // The error belongs to one attempt. A failed attempt writes why qex starts
+    // The error belongs to one attempt. A failed attempt writes why fairq starts
     // the job again, but that statement stops being true when the next attempt
     // starts. Faults in this attempt add themselves below.
     status.error = None;
@@ -602,7 +602,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     // Delete the marks of the attempt before this one.
     //
     // Each mark says what stopped ONE attempt. This point is safe for both: the
-    // job has no process id yet, so `qex kill` refuses the job and can write no
+    // job has no process id yet, so `fairq kill` refuses the job and can write no
     // mark, and no job process operates that the kernel can stop.
     //
     // Without this step, a job with `--retries` that a command stopped on the
@@ -619,13 +619,13 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
 
     // Read the configuration before anything else uses it.
     //
-    // A configuration that qex cannot read must never become the default
+    // A configuration that fairq cannot read must never become the default
     // configuration in silence. The default has no enforcement, so a fault in
     // the file would turn `must enforce` into `no limit`, and the job would run
     // with no limit and no word to anybody.
     //
     // The job continues, because the work of the user is more important than the
-    // file. The fault goes into the record of the job, where `qex status` shows
+    // file. The fault goes into the record of the job, where `fairq status` shows
     // it, and into the log of the supervisor.
     //
     // This message goes into a record, so it takes the SHORT form of the fault.
@@ -638,9 +638,9 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
         Ok(cfg) => cfg,
         Err(e) => {
             let message = format!(
-                "qex could not read the configuration ({e}). This job uses the default values, \
+                "fairq could not read the configuration ({e}). This job uses the default values, \
                  SO NO LIMIT OPERATES. Correct the file, and start the job again with \
-                 `qex rerun {id}`. Run `qex config show` for the complete message."
+                 `fairq rerun {id}`. Run `fairq config show` for the complete message."
             );
             log(&message);
             eprintln!("{message}");
@@ -656,7 +656,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
         Err(e) => {
             let message = format!("{e}. This job uses the default limit.");
             log(&message);
-            eprintln!("qex: {message}");
+            eprintln!("fairq: {message}");
             crate::config::Config::default()
                 .log_max_bytes()
                 .ok()
@@ -690,7 +690,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     let out_cap = crate::logcap::CapWriter::new(&out_path, stdout, out_len, log_limit);
     let err_cap = crate::logcap::CapWriter::new(&err_path, stderr, err_len, log_limit);
 
-    // The environment of THIS attempt. qex changes no claim, so the environment
+    // The environment of THIS attempt. fairq changes no claim, so the environment
     // of the specification is the environment of every attempt.
     let job_env = spec.env.clone();
 
@@ -713,7 +713,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     //
     // These values REPLACE the captured environment. The coordinator owns the
     // assignment, so a value that came from the shell of the user would send
-    // the job to a device that qex gave to a different job.
+    // the job to a device that fairq gave to a different job.
     //
     // The job sees the record as well as the environment. The environment is
     // what a framework reads with no change to its code; the record is what an
@@ -721,7 +721,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     for (name, given) in &status.assigned {
         let upper = name.to_ascii_uppercase().replace('-', "_");
         if given.devices.is_empty() {
-            cmd.env(format!("QEX_CLAIM_{upper}"), given.units.to_string());
+            cmd.env(format!("FAIRQ_CLAIM_{upper}"), given.units.to_string());
             continue;
         }
         let list = given
@@ -730,7 +730,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
             .map(|d| d.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        cmd.env(format!("QEX_{upper}_DEVICES"), &list);
+        cmd.env(format!("FAIRQ_{upper}_DEVICES"), &list);
         if let Some(pool) = cfg.pool(name) {
             if let Some(var) = &pool.env {
                 cmd.env(var, &list);
@@ -751,7 +751,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
                     .as_deref()
                     .unwrap_or("size")
                     .to_ascii_uppercase();
-                cmd.env(format!("QEX_{upper}_{quantity}"), size.to_string());
+                cmd.env(format!("FAIRQ_{upper}_{quantity}"), size.to_string());
             }
         }
     }
@@ -760,7 +760,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     // the job, below. That call needs the configuration, which this function
     // reads above, so one closure does both and the job forks once.
 
-    // A configuration that qex could not read is at least as important, and it
+    // A configuration that fairq could not read is at least as important, and it
     // keeps its own words. It goes after the block above, because a fault in
     // the configuration is the cause of any limit fault that follows it.
     if let Some(fault) = &config_fault {
@@ -770,9 +770,9 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     // How politely this job uses the machine. See `PolitenessConfig`.
     //
     // THE SUPERVISOR TESTS THESE VALUES AGAIN, and it does not trust the test
-    // that `qex submit` made. `load_short` above parses the file and does not
+    // that `fairq submit` made. `load_short` above parses the file and does not
     // validate it, and the file can change between the submission and the
-    // start: `qex rerun` needs no config file, and a job can wait in the queue
+    // start: `fairq rerun` needs no config file, and a job can wait in the queue
     // while somebody edits the file. Measured with `[politeness] nice = 100` in
     // the file at the start of the job: the job ran at nice 19, because
     // `setpriority` takes 19 for any number above the range and reports
@@ -784,7 +784,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
         Err(e) => {
             let message = format!(
                 "{e} This job uses the default politeness values, so it gives way as a job \
-                 of qex did before."
+                 of fairq did before."
             );
             log(&message);
             add_fault(&mut status.error, message);
@@ -797,7 +797,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
 
     unsafe {
         cmd.pre_exec(move || {
-            // The supervisor gives the job a process group. `qex kill` then
+            // The supervisor gives the job a process group. `fairq kill` then
             // signals every process of the job with one call to `killpg`.
             if libc::setpgid(0, 0) == -1 {
                 return Err(std::io::Error::last_os_error());
@@ -805,7 +805,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
 
             // The steps below make the job give way. NOT ONE OF THEM CAN STOP
             // THE JOB: a machine that refuses them gives a job that runs at the
-            // usual priority, which is what qex did before. A failure here must
+            // usual priority, which is what fairq did before. A failure here must
             // never take the work away from the user.
             apply_politeness(nice, &io_class, oom_adj);
             Ok(())
@@ -903,7 +903,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     //
     // A simple flag is not sufficient here. The timer can fire in the moment
     // between the exit of the job and the test of the flag. A job that
-    // succeeded then gets the state `timeout`, and `qex wait` reports a failure
+    // succeeded then gets the state `timeout`, and `fairq wait` reports a failure
     // for a job that succeeded.
     //
     // Each side thus changes the value from RACE_OPEN with one atomic
@@ -960,7 +960,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
         Err(e) => {
             mark_released(&released);
             log(&format!(
-                "the wait for the job {id} (pid {pid}) failed: {e}. qex sends no signal to that \
+                "the wait for the job {id} (pid {pid}) failed: {e}. fairq sends no signal to that \
                  process group, because the machine can give that pid to another process."
             ));
             false
@@ -984,11 +984,11 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     }
 
     // Ask the watch again. A kill during this attempt, with a SIGKILL that no
-    // qex command sent, is the out-of-memory killer.
+    // fairq command sent, is the out-of-memory killer.
     //
-    // qex reads the cgroup of its OWN PROCESS, and that counter counts the
+    // fairq reads the cgroup of its OWN PROCESS, and that counter counts the
     // kills in each cgroup below it. So a kill in a different program of this
-    // user raises the same number, and qex cannot name the victim: it reports
+    // user raises the same number, and fairq cannot name the victim: it reports
     // the state and says what it cannot prove.
     oom_watch.record(&dir);
 
@@ -1027,11 +1027,11 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
         // complete. Write the result, and say that a log file is not complete.
         // A record that arrives is worth more than a wait that has no end.
         log(&format!(
-            "the output of the job {id} did not close; qex writes the result now, and the \
+            "the output of the job {id} did not close; fairq writes the result now, and the \
              last part of a log file can be missing"
         ));
         // The file that holds the tail must not stay. Nothing reads it, and it
-        // holds disk space that `qex du` cannot explain. A copy that continues
+        // holds disk space that `fairq du` cannot explain. A copy that continues
         // keeps its open file, so this operation stops no work.
         for log_file in [&out_path, &err_path] {
             std::fs::remove_file(crate::logcap::tail_path(log_file)).ok();
@@ -1059,9 +1059,9 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
 
     status.state = classify(&spec, code, signal, timed_out, &dir);
     // Keep an earlier message. Three messages reach this field before this
-    // point: qex could not read the configuration, the politeness values have a
+    // point: fairq could not read the configuration, the politeness values have a
     // fault, or the output of the job did not close. Each of those NAMES a
-    // cause. The note below says only that qex cannot explain the kill, so it
+    // cause. The note below says only that fairq cannot explain the kill, so it
     // must never take the place of a message that explains it.
     if status.error.is_none() {
         if let Some(note) = unexplained_kill_note(status.state, signal, &dir) {
@@ -1072,7 +1072,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     status.signal = signal;
     status.finished_at = Some(sys::now_secs());
     status.usage = usage;
-    // Say what qex removed from the output. `qex status` and `qex logs` read
+    // Say what fairq removed from the output. `fairq status` and `fairq logs` read
     // this value, so a reader never takes a part of the output for the whole.
     status.logs_dropped = drops.any().then_some(drops);
     // The job stopped, so the pid stops being an identity: the machine can
@@ -1084,9 +1084,9 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     status.pid_ns_init_start = None;
     status.last_pid = Some(pid);
 
-    // Report a kill for memory. qex does not act on one.
+    // Report a kill for memory. fairq does not act on one.
     //
-    // qex finds a kill by reading a counter of the cgroup of THIS PROCESS. That
+    // fairq finds a kill by reading a counter of the cgroup of THIS PROCESS. That
     // counter counts every process below that cgroup, so it also counts a kill
     // in a different program of this user, and a machine that is short of
     // memory is the machine on which a person uses `kill -9`. The two arrive
@@ -1096,10 +1096,10 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     // does not say that this job was the victim, and it does not say that the
     // claim was too small: the machine can be full while the claim is correct.
     //
-    // qex therefore names the state and says what the reader can do. It starts
+    // fairq therefore names the state and says what the reader can do. It starts
     // no new attempt, and it teaches the learner nothing.
     if status.state == JobState::Oom {
-        let note = note_for_a_kill_that_qex_cannot_act_on(status.mem);
+        let note = note_for_a_kill_that_fairq_cannot_act_on(status.mem);
         log(&format!("job {id}: {note}"));
         // JOIN, and do not replace. This field can already hold another fault
         // of this attempt, and the reader needs both.
@@ -1113,7 +1113,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
 
     // Run the job again when it failed and a retry is left.
     //
-    // The job keeps one id and one record, so `qex wait` gives the final result
+    // The job keeps one id and one record, so `fairq wait` gives the final result
     // and an agent needs no extra command. A new job for each attempt would
     // give the agent an id that answers only for one attempt.
     //
@@ -1130,7 +1130,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
         status.retries_left -= 1;
         status.state = JobState::Running;
         status.error = Some(format!(
-            "attempt {} failed with the exit code {}; qex starts the job again",
+            "attempt {} failed with the exit code {}; fairq starts the job again",
             status.attempts,
             code.unwrap_or(-1)
         ));
@@ -1165,7 +1165,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
     // period in which it did not operate.
     //
     // The record on the disk already says that the job stopped, so this process
-    // holds nothing now: `qex wait` gives its answer, the budget is free, and
+    // holds nothing now: `fairq wait` gives its answer, the budget is free, and
     // the next job starts. A hook that hangs thus makes this process live
     // longer and does no other damage.
     crate::hook::fire(crate::hook::Origin::Supervisor, &dir, &status);
@@ -1180,7 +1180,7 @@ pub fn main(id: uuid::Uuid) -> Result<i32> {
 /// refuses, a NUL in a value, a name that is not a program. A PATH remedy
 /// for those sends the reader to test a name that is correct.
 fn spawn_fault_message(program: &str, err: &std::io::Error) -> String {
-    let head = format!("qex could not start `{program}`: {err}.");
+    let head = format!("fairq could not start `{program}`: {err}.");
     let remedy = match err.raw_os_error() {
         Some(e) if e == libc::E2BIG => {
             " An argument or the environment is larger than the kernel accepts. Shorten the command or the environment, and submit the job again."
@@ -1196,7 +1196,7 @@ fn spawn_fault_message(program: &str, err: &std::io::Error) -> String {
         }
         Some(e) if e == libc::ENOENT => " Test the program name and the PATH value.",
         _ if is_nul_in_spawn_value(err) => {
-            " A value that qex gave the program holds a NUL character. The kernel cannot start such a program. Remove the NUL from the command, the directory or the environment, and submit the job again."
+            " A value that fairq gave the program holds a NUL character. The kernel cannot start such a program. Remove the NUL from the command, the directory or the environment, and submit the job again."
         }
         _ => {
             " The kernel refused to start the program. Correct the cause that the error names, and submit the job again."
@@ -1255,7 +1255,7 @@ const COPY_LIMIT: Duration = Duration::from_secs(600);
 /// a test that measures nothing on a machine reports a pass there.
 ///
 /// Whether such a process survives is a property of the operating system. The
-/// DECISION is the property of qex, it is this loop, and a test drives it with a
+/// DECISION is the property of fairq, it is this loop, and a test drives it with a
 /// channel that it makes itself.
 fn drain_copies(
     rx: &std::sync::mpsc::Receiver<(bool, crate::logcap::Report)>,
@@ -1323,7 +1323,7 @@ const RACE_TIMER: u8 = 2;
 /// Adds a fault to the record of a job, and keeps the faults that are there.
 ///
 /// A job can meet more than one fault before it starts: a configuration file
-/// that qex cannot read AND politeness values that it refuses. A writer that
+/// that fairq cannot read AND politeness values that it refuses. A writer that
 /// REPLACED `error` would give the reader one of them and hide the rest, and
 /// the fault that it hid reaches `supervisor.log` only, which no command reads.
 /// The user then has a job that ran in a way that nobody asked for, and nothing
@@ -1348,24 +1348,24 @@ fn add_fault(error: &mut Option<String>, message: String) {
 /// This function operates in the child, between the fork and the exec. It must
 /// therefore call the system only: no allocation, and no lock. Each step gives
 /// up in silence, because a job that runs at the usual priority is the
-/// behaviour that qex had before, and it is far better than no job at all.
+/// behaviour that fairq had before, and it is far better than no job at all.
 fn apply_politeness(nice: i32, io_class: &str, oom_score_adj: i32) {
     // The processor. A larger number gives way to everything else.
     //
     // A user cannot ask for a number below the number that the process has,
-    // without privilege. qex still makes the call: it fails, the job continues
+    // without privilege. fairq still makes the call: it fails, the job continues
     // at the priority that it had, and no other step is lost. Measured on
     // Linux with the usual `RLIMIT_NICE` of 0: `setpriority(PRIO_PROCESS, 0,
     // -5)` from nice 0 gives EACCES and leaves the process at 0.
     //
     // The call happens for 0 as well. `--nice 0` asks that the job does not
-    // give way, so qex asks for 0 and does not leave the priority that the job
+    // give way, so fairq asks for 0 and does not leave the priority that the job
     // received from the supervisor. On a machine with no privilege that ASK
     // frequently gives nothing. Measured with a coordinator started under
     // `nice 5`: `--nice 0` gave a job at nice 5, and `--nice 10` and
-    // `--nice 19` gave 10 and 19. qex makes the call so that it obeys the user
+    // `--nice 19` gave 10 and 19. fairq makes the call so that it obeys the user
     // where the machine permits it, and the help text and the documentation say
-    // that qex can only make a job give way MORE than the coordinator does.
+    // that fairq can only make a job give way MORE than the coordinator does.
     //
     // A number ABOVE the range is worse than a number below it. `setpriority`
     // moves such a number INTO the range and reports success, so it never
@@ -1392,7 +1392,7 @@ fn apply_politeness(nice: i32, io_class: &str, oom_score_adj: i32) {
             // `ionice` gives the level of a process that asked for nothing as
             // `(cpu_nice + 20) / 5`, so a job at the default `nice = 10` gets
             // level 6 with no call at all, and level 4 asks for MORE of the
-            // disk than that. `none` is the default of qex for this reason, and
+            // disk than that. `none` is the default of fairq for this reason, and
             // `idle` is the value that makes a job give way.
             "best-effort" => Some((CLASS_BEST_EFFORT << IOPRIO_CLASS_SHIFT) | 4),
             "idle" => Some(CLASS_IDLE << IOPRIO_CLASS_SHIFT),
@@ -1458,7 +1458,7 @@ const OOM_TEXT: usize = 11;
 /// This code runs in the child, between the fork and the exec. An index outside
 /// a buffer is a panic; a panic formats a message; and that allocates and takes
 /// two locks in a process where no lock is safe. The job would then die. A
-/// buffer that fits the values that qex EXPECTS puts the life of the job behind
+/// buffer that fits the values that fairq EXPECTS puts the life of the job behind
 /// a test in another file. A buffer that fits every value it can RECEIVE does
 /// not.
 #[cfg(target_os = "linux")]
@@ -1497,7 +1497,7 @@ fn write_i32(value: i32, out: &mut [u8; OOM_TEXT]) -> usize {
 /// the job and a reader needs no second file.
 ///
 /// The result holds the last lines only, and it is one line of text, because it
-/// goes into a field that `qex status` shows.
+/// goes into a field that `fairq status` shows.
 pub(crate) fn supervisor_log_tail(dir: &std::path::Path) -> Option<String> {
     const KEEP: usize = 3;
     const LIMIT: usize = 400;
@@ -1593,16 +1593,16 @@ fn classify(
 
     // A kill from a command wins against every other test.
     //
-    // `qex kill` writes a mark before it sends the signal. The state `oom`
+    // `fairq kill` writes a mark before it sends the signal. The state `oom`
     // names the memory of the machine as the cause, so a job that a person
-    // stopped must never take that state: qex would give the reader a cause
+    // stopped must never take that state: fairq would give the reader a cause
     // that the reader knows is false.
     if signal.is_some() && crate::enforce::was_user_killed(dir) {
         return JobState::Killed;
     }
 
     // The kernel stops a process with SIGKILL for an out-of-memory event. Read
-    // the cgroup record to separate that event from a `qex kill` command.
+    // the cgroup record to separate that event from a `fairq kill` command.
     if signal == Some(libc::SIGKILL) && crate::enforce::was_oom_killed(dir) {
         return JobState::Oom;
     }
@@ -1616,7 +1616,7 @@ fn classify(
     }
 }
 
-/// Says what qex knows after a kill for memory, and what the reader can do.
+/// Says what fairq knows after a kill for memory, and what the reader can do.
 ///
 /// This function is separate so that a test reads the answer directly. The
 /// state that produces it needs a machine that is short of memory, and a test
@@ -1624,31 +1624,31 @@ fn classify(
 ///
 /// The answer names what the reader must DO, because an agent reads the record
 /// to decide whether to run the work again.
-fn note_for_a_kill_that_qex_cannot_act_on(claim: u64) -> String {
+fn note_for_a_kill_that_fairq_cannot_act_on(claim: u64) -> String {
     // SAY ONLY WHAT THE COUNT PROVED.
     //
-    // qex reads a counter of the cgroup of its own process. That counter counts
+    // fairq reads a counter of the cgroup of its own process. That counter counts
     // every process below that cgroup, so a kill in a different program of this
     // user raises it as well. A machine that is short of memory is also the
     // machine on which a person uses `kill -9`, and the two arrive together.
     //
-    // So qex knows that the kernel stopped a process for memory, and that this
+    // So fairq knows that the kernel stopped a process for memory, and that this
     // job stopped with the same signal. It cannot prove that this job was the
     // victim, and it cannot prove that the claim was too small.
     format!(
-        "the kernel stopped this job for memory, and its claim was {}. qex holds no count that belongs to this job alone, so it cannot say that the claim was too small: a machine that is short of memory is also the machine on which a person uses `kill -9`, and the machine can be full while the claim is correct. THE CLAIM CAN BE CORRECT, so qex started no new attempt and it learned nothing from this attempt. Compare the `usage` field with the claim. Run the same work again when the memory is free, and give a larger `--mem` value if the usage was near the claim.",
+        "the kernel stopped this job for memory, and its claim was {}. fairq holds no count that belongs to this job alone, so it cannot say that the claim was too small: a machine that is short of memory is also the machine on which a person uses `kill -9`, and the machine can be full while the claim is correct. THE CLAIM CAN BE CORRECT, so fairq started no new attempt and it learned nothing from this attempt. Compare the `usage` field with the claim. Run the same work again when the memory is free, and give a larger `--mem` value if the usage was near the claim.",
         crate::units::format_size(claim)
     )
 }
 
-/// Gives a note for a kill that qex cannot explain.
+/// Gives a note for a kill that fairq cannot explain.
 ///
-/// The kernel uses `SIGKILL` for an out-of-memory kill, and `qex kill` uses the
-/// same signal. Linux counts the out-of-memory kills in the cgroup, so qex has
+/// The kernel uses `SIGKILL` for an out-of-memory kill, and `fairq kill` uses the
+/// same signal. Linux counts the out-of-memory kills in the cgroup, so fairq has
 /// evidence there. A machine with no cgroup gives none.
 ///
-/// qex then gives the state `killed`, which is the safe answer: qex starts no
-/// new attempt for it. The reader must learn that qex GUESSED, and must not
+/// fairq then gives the state `killed`, which is the safe answer: fairq starts no
+/// new attempt for it. The reader must learn that fairq GUESSED, and must not
 /// believe that a command stopped the job.
 fn unexplained_kill_note(
     state: JobState,
@@ -1662,9 +1662,9 @@ fn unexplained_kill_note(
         return None;
     }
     Some(
-        "the signal KILL stopped this job, and no qex command sent it. This machine keeps no \
-         count of the kills for memory, so qex cannot say if the kernel stopped the job for \
-         memory or if a different program stopped it. qex gave the state `killed`. Compare the \
+        "the signal KILL stopped this job, and no fairq command sent it. This machine keeps no \
+         count of the kills for memory, so fairq cannot say if the kernel stopped the job for \
+         memory or if a different program stopped it. fairq gave the state `killed`. Compare the \
          `usage` field with the claim, and give a larger `--mem` value if the two are near."
             .to_string(),
     )
@@ -1724,7 +1724,7 @@ mod tests {
     #[test]
     fn a_legacy_requeue_clears_the_supervisor_on_disk() {
         let dir = crate::testutil::temp_dir()
-            .join(format!("qex-legacy-requeue-{}", uuid::Uuid::new_v4()));
+            .join(format!("fairq-legacy-requeue-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut status = JobStatus::new(&spec());
         status.state = JobState::Queued;
@@ -1738,19 +1738,19 @@ mod tests {
         std::fs::remove_dir_all(dir).ok();
     }
 
-    /// The answer must say what qex CANNOT prove.
+    /// The answer must say what fairq CANNOT prove.
     ///
-    /// qex reads the cgroup of its own process, and that counter holds every
+    /// fairq reads the cgroup of its own process, and that counter holds every
     /// program of this user. So a kill for memory in that counter does not name
     /// the victim, and the claim of this job can be correct. An answer that
     /// said the claim was too small would send a reader to raise a number that
     /// was right.
     #[test]
     fn the_answer_for_a_kill_for_memory_keeps_the_claim() {
-        let note = note_for_a_kill_that_qex_cannot_act_on(2 << 30);
+        let note = note_for_a_kill_that_fairq_cannot_act_on(2 << 30);
         assert!(
             note.contains("holds no count that belongs to this job alone"),
-            "the answer must say what qex holds: {note}"
+            "the answer must say what fairq holds: {note}"
         );
         assert!(
             note.contains("THE CLAIM CAN BE CORRECT"),
@@ -1762,23 +1762,23 @@ mod tests {
         );
         assert!(
             note.contains("cannot say that the claim was too small"),
-            "the answer must say what qex cannot prove: {note}"
+            "the answer must say what fairq cannot prove: {note}"
         );
         assert!(
             !note.contains("[enforce] mode"),
-            "no setting gives qex a count for one job, so the answer must name none: {note}"
+            "no setting gives fairq a count for one job, so the answer must name none: {note}"
         );
     }
 
     /// No message may hold a run of spaces.
     ///
-    /// A message goes into the `error` field of `qex status --json` and into
+    /// A message goes into the `error` field of `fairq status --json` and into
     /// the log. A text that keeps the indentation of the source puts that
     /// indentation in front of a reader. `cargo fmt` does not change the text
     /// of a string, so this test is the only guard.
     #[test]
     fn no_message_holds_a_run_of_spaces() {
-        let note = note_for_a_kill_that_qex_cannot_act_on(2 << 30);
+        let note = note_for_a_kill_that_fairq_cannot_act_on(2 << 30);
         assert!(
             !note.contains("  "),
             "a message must hold one space between two words: {note:?}"
@@ -1888,18 +1888,18 @@ mod tests {
 
     /// A second fault must not push the first one out of the record.
     ///
-    /// A job can meet a configuration file that qex cannot read AND politeness
-    /// values that it refuses. `qex status --json` must give both. A fault that
+    /// A job can meet a configuration file that fairq cannot read AND politeness
+    /// values that it refuses. `fairq status --json` must give both. A fault that
     /// this field loses reaches `supervisor.log` only, which no command reads,
     /// so the user has a job that ran in a way that nobody asked for and
     /// nothing to read about it.
     #[test]
     fn a_job_with_two_faults_keeps_both_of_them() {
         let mut error = None;
-        add_fault(&mut error, "qex could not read the configuration.".into());
+        add_fault(&mut error, "fairq could not read the configuration.".into());
         assert_eq!(
             error.as_deref(),
-            Some("qex could not read the configuration.")
+            Some("fairq could not read the configuration.")
         );
 
         add_fault(&mut error, "the politeness values have a fault.".into());
@@ -1955,7 +1955,7 @@ mod tests {
     /// the record. No command read that file.
     #[test]
     fn the_last_words_of_the_supervisor_reach_the_record() {
-        let dir = crate::testutil::temp_dir().join(format!("qex-tail-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("fairq-tail-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
 
         // No file, and an empty file, both give nothing. A note that says
@@ -1975,7 +1975,7 @@ mod tests {
         assert!(tail.contains("renaming status.json"), "got: {tail}");
         assert!(!tail.contains("one"), "the oldest lines must go: {tail}");
 
-        // The text goes into a field that `qex status` shows, so it stays one
+        // The text goes into a field that `fairq status` shows, so it stays one
         // line and it has a limit.
         std::fs::write(dir.join("supervisor.log"), "x".repeat(5000).as_bytes()).unwrap();
         let tail = supervisor_log_tail(&dir).unwrap();
@@ -2033,11 +2033,11 @@ mod tests {
     ///
     /// A pipe closes when the last process that holds it stops, so a job that
     /// leaves a process behind keeps its output open for as long as that process
-    /// lives. Without the limit the supervisor waits with it: `qex wait` blocks,
+    /// lives. Without the limit the supervisor waits with it: `fairq wait` blocks,
     /// and every rule that asks "did this job stop?" receives no answer.
     ///
     /// The counts that DID arrive must stay. A count that arrived is true even
-    /// when another one is missing, and `qex status` shows it.
+    /// when another one is missing, and `fairq status` shows it.
     #[test]
     fn an_output_that_never_closes_stops_the_wait_and_keeps_what_arrived() {
         use crate::logcap::{Dropped, Report};
@@ -2208,7 +2208,7 @@ mod tests {
     /// Makes an empty job directory for a test of the classification.
     fn job_dir(tag: &str) -> std::path::PathBuf {
         let dir = crate::testutil::temp_dir().join(format!(
-            "qex-sv-{tag}-{}-{:?}",
+            "fairq-sv-{tag}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -2219,8 +2219,8 @@ mod tests {
 
     /// A kill for memory gives the state `oom`, and not the state `killed`.
     ///
-    /// The kernel and `qex kill` both use SIGKILL. Without the record in the
-    /// job directory, the two causes look the same, and qex would tell the user
+    /// The kernel and `fairq kill` both use SIGKILL. Without the record in the
+    /// job directory, the two causes look the same, and fairq would tell the user
     /// to correct a claim that was correct.
     #[test]
     fn a_kill_for_memory_gives_the_state_oom() {
@@ -2238,7 +2238,7 @@ mod tests {
     /// The state `oom` names the memory of the machine as the cause. A job that
     /// somebody stopped on purpose must not take that state, because the reader
     /// who sent the kill knows the true cause and must not receive a different
-    /// one from qex.
+    /// one from fairq.
     ///
     /// The two marks can both exist: the out-of-memory count of a session also
     /// counts a kill in a different program of the same user. The mark from the
@@ -2265,14 +2265,14 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// A kill that qex cannot explain gives the safe answer, and it says that
-    /// qex could not tell. A machine with no cgroup counts no kill for memory,
+    /// A kill that fairq cannot explain gives the safe answer, and it says that
+    /// fairq could not tell. A machine with no cgroup counts no kill for memory,
     /// so a guess there would send the reader to the wrong correction.
     #[test]
-    fn a_kill_that_qex_cannot_explain_says_so() {
+    fn a_kill_that_fairq_cannot_explain_says_so() {
         let dir = job_dir("unexplained");
 
-        // A job that a command stopped needs no note: qex knows the cause.
+        // A job that a command stopped needs no note: fairq knows the cause.
         crate::enforce::mark_user_kill(&dir);
         assert_eq!(
             unexplained_kill_note(JobState::Killed, Some(libc::SIGKILL), &dir),
@@ -2282,11 +2282,11 @@ mod tests {
 
         let note = unexplained_kill_note(JobState::Killed, Some(libc::SIGKILL), &dir);
         if crate::enforce::oom_evidence_is_available() {
-            // This machine counts the kills for memory, so qex knows that the
+            // This machine counts the kills for memory, so fairq knows that the
             // kernel did not stop this job.
             assert_eq!(note, None);
         } else {
-            let note = note.expect("qex must say that it could not tell the cause");
+            let note = note.expect("fairq must say that it could not tell the cause");
             assert!(note.contains("cannot say"), "got: {note}");
             assert!(
                 note.contains("--mem"),
@@ -2294,7 +2294,7 @@ mod tests {
             );
         }
 
-        // No note for a state that qex did not guess.
+        // No note for a state that fairq did not guess.
         assert_eq!(
             unexplained_kill_note(JobState::Completed, Some(libc::SIGKILL), &dir),
             None

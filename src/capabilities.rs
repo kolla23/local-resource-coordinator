@@ -19,7 +19,7 @@
 //! The CLI reads the version first, because every version answers `Info`. It
 //! then asks the coordinator what it can do.
 //!
-//! Every version that qex supports answers the `Capabilities` request, so there
+//! Every version that fairq supports answers the `Capabilities` request, so there
 //! is one path and no table of earlier versions. `CAPABILITY_FLOOR` is what makes
 //! that true: a coordinator below it is refused before any question about one
 //! job.
@@ -53,7 +53,7 @@
 //! it obeys, and it must not let a user believe a rule holds when it may not.
 //! The CLI refuses such a coordinator and gives the way to correct it.
 //!
-//! The number says nothing about which versions get a correction: qex corrects
+//! The number says nothing about which versions get a correction: fairq corrects
 //! a fault in the NEXT version and never in an earlier one. Read the constant
 //! itself for the whole of the reasoning.
 //!
@@ -85,8 +85,8 @@ use crate::version::is_development;
 ///
 /// # This number says nothing about which versions get a correction
 ///
-/// qex corrects a fault in the NEXT version, and never in an earlier one. So
-/// "the versions that qex supports" is always "the newest one", and no number
+/// fairq corrects a fault in the NEXT version, and never in an earlier one. So
+/// "the versions that fairq supports" is always "the newest one", and no number
 /// could say it.
 ///
 /// This number means one thing: **below it, a coordinator does not report what
@@ -153,11 +153,11 @@ pub fn check_floor(coordinator_version: &str, coordinator_pid: i32) -> Floor {
         return Floor::Development(format!(
             "the coordinator (pid {coordinator_pid}) is version {coordinator_version}, which is \
              a development build and not a release.\n\n\
-             qex gives no promise about which options such a coordinator obeys. It still says \
-             what it can do, and qex still refuses a job with an option that it cannot obey, \
+             fairq gives no promise about which options such a coordinator obeys. It still says \
+             what it can do, and fairq still refuses a job with an option that it cannot obey, \
              so this is a warning and not an error.\n\n\
              The coordinator stops when no job operates, and the next command then starts one \
-             from the program that you have now. `qex info` gives its pid. To change it now:\n\
+             from the program that you have now. `fairq info` gives its pid. To change it now:\n\
              \x20   kill {coordinator_pid}\n\n\
              The jobs that operate now continue; a new coordinator reads the same records."
         ));
@@ -171,7 +171,7 @@ pub fn check_floor(coordinator_version: &str, coordinator_pid: i32) -> Floor {
     Floor::Below(format!(
         "the coordinator (pid {coordinator_pid}) is version {coordinator_version}, and a \
          coordinator says what it can do from {major}.{minor}.{patch} and above.\n\n\
-         That coordinator does not answer the question, so qex cannot learn which options it \
+         That coordinator does not answer the question, so fairq cannot learn which options it \
          obeys, and it must not let you believe a rule holds when it may not.\n\n\
          The coordinator stops when no job operates, and the next command then starts one from \
          the program that you have now. To change it now:\n\
@@ -247,7 +247,7 @@ pub fn required_by(spec: &JobSpec) -> Vec<&'static str> {
     }
     // A coordinator without this capability keeps the field, gives a job id, and
     // lets the job wait for ever. That is exactly the fault that the option
-    // removes, so qex must refuse the job.
+    // removes, so fairq must refuse the job.
     if spec.max_queue_time.is_some() {
         out.push("max-queue-time");
     }
@@ -284,7 +284,7 @@ pub fn option_for(capability: &'static str) -> &'static str {
         "pools" => "--gpu, --vram and --claim",
         "retries" => "--retries",
         "dependencies" => "--needs and --after",
-        "groups" => "qex pipeline",
+        "groups" => "fairq pipeline",
         "politeness" => "--nice",
         "dedupe" => "--dedupe-key",
         // A capability that no option names keeps its own name. Every
@@ -299,7 +299,7 @@ pub fn option_for(capability: &'static str) -> &'static str {
 ///
 /// The message names the option that the coordinator cannot obey, and it gives
 /// the way to correct the problem. A user must never receive a job id for a job
-/// that qex will run without the rule that the user asked for.
+/// that fairq will run without the rule that the user asked for.
 pub fn check(
     have: &[String],
     coordinator_version: &str,
@@ -320,7 +320,7 @@ pub fn check(
     Err(format!(
         "the coordinator (pid {coordinator_pid}) is version {coordinator_version}, and it \
          cannot obey {}.\n\n\
-         qex refuses this job. The coordinator would ignore that option in silence, give \
+         fairq refuses this job. The coordinator would ignore that option in silence, give \
          you a job id, and run the job without the rule that you asked for.\n\n\
          The coordinator stops when no job operates, and the next command then starts one \
          that can obey. To change it now:\n\
@@ -348,7 +348,7 @@ pub struct StageNeeds {
 pub enum Source {
     /// Every pipeline asks for it, whatever the file holds.
     EveryPipeline,
-    /// The configuration of qex fills the field, and no stage names it.
+    /// The configuration of fairq fills the field, and no stage names it.
     Configuration,
 }
 
@@ -438,7 +438,7 @@ pub fn check_pipeline(
         "the coordinator (pid {coordinator_pid}) is version {coordinator_version}, and it \
          cannot obey:\n\n\
          {lines}\n\
-         qex refuses this pipeline, and it started no job. The coordinator would ignore each \
+         fairq refuses this pipeline, and it started no job. The coordinator would ignore each \
          option in silence, give you an id for every stage, and run the pipeline without the \
          rules that you asked for.\n\n\
          The coordinator stops when no job operates, and the next command then starts one \
@@ -451,14 +451,14 @@ pub fn check_pipeline(
 /// Tests one COMMAND against a coordinator.
 ///
 /// `check` covers a job that carries an option. This function covers a command
-/// that needs a request name, such as `qex events`. The two faults are the same
+/// that needs a request name, such as `fairq events`. The two faults are the same
 /// fault: a coordinator that cannot obey must refuse, and it must never leave
 /// the user with a command that gives nothing and says nothing.
 ///
 /// `danger` says why the refusal matters, and the caller gives it. It is not a
 /// fixed sentence, because one capability can gate two commands whose dangers
-/// are opposite: a `qex pause` that an earlier coordinator ignores starts work
-/// while the person believes that the machine is quiet, and a `qex resume` that
+/// are opposite: a `fairq pause` that an earlier coordinator ignores starts work
+/// while the person believes that the machine is quiet, and a `fairq resume` that
 /// it ignores changes nothing at all. One sentence for both would state a
 /// reason that is not true for one of them, and a reader who acts on it acts on
 /// a fault that does not exist.
@@ -476,7 +476,7 @@ pub fn check_command(
     Err(format!(
         "the coordinator (pid {coordinator_pid}) is version {coordinator_version}, and it \
          cannot obey `{command}`.\n\n\
-         qex refuses this command. {danger}\n\n\
+         fairq refuses this command. {danger}\n\n\
          The coordinator stops when no job operates, and the next command then starts one \
          that can obey. To change it now:\n\
          \x20   kill {coordinator_pid}\n\n\
@@ -541,7 +541,7 @@ mod tests {
     /// A coordinator below the first published version must be refused.
     ///
     /// Two agents on one machine can hold different builds, and a coordinator
-    /// operates for hours. qex must therefore say which mixtures of versions it
+    /// operates for hours. fairq must therefore say which mixtures of versions it
     /// supports, and the answer is: the first release and above.
     fn below(version: &str, pid: i32) -> String {
         match check_floor(version, pid) {
@@ -558,7 +558,7 @@ mod tests {
     /// A coordinator below the first published version must be refused.
     ///
     /// Two agents on one machine can hold different builds, and a coordinator
-    /// operates for hours. qex must therefore say which mixtures of versions it
+    /// operates for hours. fairq must therefore say which mixtures of versions it
     /// supports, and the answer is: the first release and above.
     ///
     /// THIS TEST HOLDS THE RULE THAT THE CARVE-OUT MUST NOT SWALLOW. A build
@@ -607,7 +607,7 @@ mod tests {
             "the message must say why it matters: {warning}"
         );
         assert!(
-            warning.contains("kill 4321") && warning.contains("qex info"),
+            warning.contains("kill 4321") && warning.contains("fairq info"),
             "the message must give the remedy: {warning}"
         );
 
@@ -631,9 +631,9 @@ mod tests {
 
     /// This build must never be below its own floor without saying so.
     ///
-    /// A release that qex itself would refuse cannot exist. `main` holds
+    /// A release that fairq itself would refuse cannot exist. `main` holds
     /// `0.0.0-dev`, so a build of `main` with no git IS below the floor, and it
-    /// must then be a build that qex names as a development build.
+    /// must then be a build that fairq names as a development build.
     ///
     /// The test fails for a build that is below the floor and is NOT a
     /// development build, which is exactly the state that must not exist.
@@ -643,12 +643,12 @@ mod tests {
     /// the number is written in both places. `build.rs` refuses a build whose
     /// `Cargo.toml` holds a release number below its own copy — so if the two
     /// went apart, that refusal would use one number while `check_floor` used
-    /// another, and a release could be made that qex then refuses.
+    /// another, and a release could be made that fairq then refuses.
     ///
     /// `build.rs` writes its copy into the build, so this test reads it.
     #[test]
     fn the_floor_of_the_build_agrees_with_the_floor_of_the_code() {
-        let written = env!("QEX_BUILD_FLOOR");
+        let written = env!("FAIRQ_BUILD_FLOOR");
         let (major, minor, patch) = CAPABILITY_FLOOR;
         assert_eq!(
             written,
@@ -754,7 +754,7 @@ mod tests {
     /// A dedupe key must be refused by a coordinator that has no dedupe.
     ///
     /// This is the most dangerous option to ignore in silence. The caller asks
-    /// qex to start no second copy of the work. An earlier coordinator would
+    /// fairq to start no second copy of the work. An earlier coordinator would
     /// start that second copy, give a new id, and say nothing, so the caller
     /// would get two four-hour runs and no message.
     #[test]
@@ -882,10 +882,10 @@ mod tests {
     /// A command that needs a request name must be refused by a coordinator
     /// that does not know that name.
     ///
-    /// `qex events` against such a coordinator gave no line and no error. The
+    /// `fairq events` against such a coordinator gave no line and no error. The
     /// reader then cannot tell "no job changed" from "this coordinator has no
-    /// stream", and it waits for ever. That is the fault that qex exists to
-    /// remove, in qex itself.
+    /// stream", and it waits for ever. That is the fault that fairq exists to
+    /// remove, in fairq itself.
     #[test]
     fn a_command_is_refused_by_a_coordinator_that_does_not_know_it() {
         let old: Vec<String> = ALL
@@ -894,9 +894,9 @@ mod tests {
             .map(|c| c.to_string())
             .collect();
         let err =
-            check_command(&old, "0.7.1", 4321, "events", "qex events", "no reason").unwrap_err();
+            check_command(&old, "0.7.1", 4321, "events", "fairq events", "no reason").unwrap_err();
         assert!(
-            err.contains("qex events"),
+            err.contains("fairq events"),
             "the message must name the command: {err}"
         );
         assert!(
@@ -905,12 +905,12 @@ mod tests {
         );
 
         let new: Vec<String> = ALL.iter().map(|c| c.to_string()).collect();
-        assert!(check_command(&new, "0.8.0", 4321, "events", "qex events", "no reason").is_ok());
+        assert!(check_command(&new, "0.8.0", 4321, "events", "fairq events", "no reason").is_ok());
     }
 
-    /// `qex pause` must be refused by a coordinator that cannot obey it.
+    /// `fairq pause` must be refused by a coordinator that cannot obey it.
     ///
-    /// The failure to prevent is the silent one: the person types `qex pause
+    /// The failure to prevent is the silent one: the person types `fairq pause
     /// queue`, gets no clear reason, and believes that the machine is quiet
     /// while the coordinator continues to start jobs.
     #[test]
@@ -925,13 +925,13 @@ mod tests {
             "0.7.1",
             3507877,
             "pause",
-            "qex pause queue",
+            "fairq pause queue",
             "The coordinator would start the jobs of the queue, and you would believe that the \
              machine is quiet.",
         )
         .unwrap_err();
         assert!(
-            err.contains("qex pause queue"),
+            err.contains("fairq pause queue"),
             "the message must name the command: {err}"
         );
         assert!(
@@ -940,17 +940,17 @@ mod tests {
         );
 
         let new: Vec<String> = ALL.iter().map(|c| c.to_string()).collect();
-        assert!(check_command(&new, "0.8.0", 1, "pause", "qex pause queue", "no reason").is_ok());
+        assert!(check_command(&new, "0.8.0", 1, "pause", "fairq pause queue", "no reason").is_ok());
 
-        // The danger of a refused `qex resume` is the opposite of the danger of
-        // a refused `qex pause`. One fixed sentence would state a reason that
+        // The danger of a refused `fairq resume` is the opposite of the danger of
+        // a refused `fairq pause`. One fixed sentence would state a reason that
         // is not true for one of the two commands.
         let resume = check_command(
             &old,
             "0.7.1",
             3507877,
             "pause",
-            "qex resume queue",
+            "fairq resume queue",
             "That coordinator does not read the pause record, so it already starts the jobs of \
              the queue. This command would change nothing.",
         )

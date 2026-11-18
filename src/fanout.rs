@@ -1,13 +1,13 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 //! This module reads a file of input lines, and makes one job for each line.
 //!
-//! `qex submit --each-line inputs.txt -- ./process {}` is the shape. Every job
+//! `fairq submit --each-line inputs.txt -- ./process {}` is the shape. Every job
 //! of one command shares a group id, so the user holds one handle for the whole
 //! fan-out.
 //!
 //! # Why the substitution is on the argument list
 //!
-//! qex starts no shell. It gives the program an argument list, and the operating
+//! fairq starts no shell. It gives the program an argument list, and the operating
 //! system passes that list to the program with no further reading. This module
 //! keeps that property: it puts the text of a line INSIDE one argument, and it
 //! never divides the line into more arguments.
@@ -24,25 +24,25 @@ use std::path::Path;
 /// The text that each line replaces.
 pub const PLACEHOLDER: &str = "{}";
 
-/// The largest fan-out that qex accepts with no option.
+/// The largest fan-out that fairq accepts with no option.
 ///
 /// A file with 100000 lines would make 100000 job directories and fill the
 /// state directory. A limit stops that mistake at the moment of the command,
 /// and the message says how to raise it.
 ///
-/// The limit does not ask a question. The main user of qex is an agent, and an
+/// The limit does not ask a question. The main user of fairq is an agent, and an
 /// agent cannot answer a prompt: a limit that waits for a key gives that user
 /// no way forward at all.
 pub const DEFAULT_MAX_JOBS: usize = 1000;
 
-/// The longest name that qex makes for one job of a fan-out.
+/// The longest name that fairq makes for one job of a fan-out.
 const MAX_NAME: usize = 48;
 /// The part of the name that comes from the line.
 const MAX_SLUG: usize = 24;
 /// The part of the name that comes from the command or from `--name`.
 const MAX_BASE: usize = 16;
 
-/// The lines of an input file, and a count of the lines that qex passed over.
+/// The lines of an input file, and a count of the lines that fairq passed over.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Input {
     /// The lines that become jobs, in the order of the file.
@@ -54,7 +54,7 @@ pub struct Input {
 }
 
 impl Input {
-    /// True when qex passed over one line or more.
+    /// True when fairq passed over one line or more.
     pub fn skipped(&self) -> usize {
         self.blank + self.comments
     }
@@ -68,7 +68,7 @@ impl Input {
 ///   CRLF endings gives the same jobs as a file with LF endings. A file that
 ///   came from Windows is common, and a job name that ends in a control
 ///   character is never what a user wanted.
-/// * qex removes the space at the start and at the end of a line. A space at
+/// * fairq removes the space at the start and at the end of a line. A space at
 ///   the end of a line is invisible, and it is almost always an accident of the
 ///   program that wrote the file.
 /// * An empty line becomes no job.
@@ -76,8 +76,8 @@ impl Input {
 ///   is frequently written by a person, and a person writes notes in it.
 /// * The last line counts, also when the file has no final newline.
 ///
-/// The caller REPORTS the count of each kind that qex passed over. A line that
-/// a user expected to run and qex passed over in silence is the quiet wrong
+/// The caller REPORTS the count of each kind that fairq passed over. A line that
+/// a user expected to run and fairq passed over in silence is the quiet wrong
 /// answer that this project exists to prevent.
 pub fn parse(text: &str) -> Input {
     let mut input = Input::default();
@@ -96,21 +96,21 @@ pub fn parse(text: &str) -> Input {
 
 /// The largest input that `--each-line` reads.
 ///
-/// qex holds the whole input in memory, because it must count the lines and
+/// fairq holds the whole input in memory, because it must count the lines and
 /// make every job specification before it submits the first job. With no limit,
-/// `qex submit --each-line /var/log/huge.log` or a pipe that never ends takes
+/// `fairq submit --each-line /var/log/huge.log` or a pipe that never ends takes
 /// the memory of the machine, and the fault arrives as an out-of-memory kill
 /// with no message that a reader can act on.
 ///
 /// 64 MiB holds about one million lines of a path. The limit is on the BYTES
-/// and not on the lines, because qex must read the bytes before it can count
+/// and not on the lines, because fairq must read the bytes before it can count
 /// the lines. `--max-jobs` is the limit on the jobs, and it applies after this
 /// one.
 pub const MAX_INPUT_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Reads the input file, or standard input for the name `-`.
 ///
-/// `qex submit` reads nothing from standard input for any other purpose, so the
+/// `fairq submit` reads nothing from standard input for any other purpose, so the
 /// name `-` is free and it has its usual meaning.
 ///
 /// The read stops at `MAX_INPUT_BYTES`, on a file and on a pipe.
@@ -126,23 +126,23 @@ pub fn read(path: &Path) -> Result<Input> {
             .read_to_end(&mut buffer)
             .map_err(|e| {
                 anyhow::anyhow!(
-                    "qex cannot read the lines from standard input: {e}\n\n\
-                 `--each-line -` needs those lines, and one line makes one job, so qex \
+                    "fairq cannot read the lines from standard input: {e}\n\n\
+                 `--each-line -` needs those lines, and one line makes one job, so fairq \
                  submits nothing.\n\n\
                  Send the lines through a pipe, or give the path of a file:\n\
-                 \x20   ls *.csv | qex submit --each-line - -- ./process {PLACEHOLDER}"
+                 \x20   ls *.csv | fairq submit --each-line - -- ./process {PLACEHOLDER}"
                 )
             })?;
     } else {
         // `File::open` succeeds on a directory, and the read below then gives
-        // `Is a directory`. The message says the same thing in both cases: qex
+        // `Is a directory`. The message says the same thing in both cases: fairq
         // cannot read this input, so it submits nothing.
         std::fs::File::open(path)
             .and_then(|f| f.take(MAX_INPUT_BYTES + 1).read_to_end(&mut buffer))
             .map_err(|e| {
                 anyhow::anyhow!(
-                    "qex cannot read the input file {}: {e}\n\n\
-                     `--each-line` needs that file, and one line makes one job, so qex \
+                    "fairq cannot read the input file {}: {e}\n\n\
+                     `--each-line` needs that file, and one line makes one job, so fairq \
                      submits nothing.\n\n\
                      Give the path of a file that exists, or use `-` to read the lines from \
                      another program.",
@@ -158,8 +158,8 @@ pub fn read(path: &Path) -> Result<Input> {
             format!("the input file {}", path.display())
         };
         bail!(
-            "{name} is larger than {} MiB, and qex submits no job at all.\n\n\
-             qex holds the whole input in memory, because it makes every job before it \
+            "{name} is larger than {} MiB, and fairq submits no job at all.\n\n\
+             fairq holds the whole input in memory, because it makes every job before it \
              submits the first one. An input of this size is almost always the wrong \
              file.\n\n\
              Give a file that holds one line for each job, or divide the work into \
@@ -169,10 +169,10 @@ pub fn read(path: &Path) -> Result<Input> {
     }
     let bytes = buffer;
 
-    // The text must be UTF-8, and qex refuses the whole file when it is not.
+    // The text must be UTF-8, and fairq refuses the whole file when it is not.
     //
     // A command of a job goes into `spec.json` as text. A byte that is not
-    // UTF-8 cannot go there, so qex cannot run such a line at all. To pass over
+    // UTF-8 cannot go there, so fairq cannot run such a line at all. To pass over
     // the line would hide the fault, and to submit the other lines would give a
     // fan-out that is not the file.
     let text = match String::from_utf8(bytes) {
@@ -187,7 +187,7 @@ pub fn read(path: &Path) -> Result<Input> {
             };
             bail!(
                 "{name} is not UTF-8 text. The first incorrect byte is on line {line}.\n\n\
-                 The command of a job is text, so qex cannot run that line, and qex \
+                 The command of a job is text, so fairq cannot run that line, and fairq \
                  submits no job at all.\n\n\
                  Correct line {line}, or write the file again with UTF-8."
             );
@@ -239,7 +239,7 @@ fn scan(arg: &str, line: Option<&str>) -> (String, usize) {
             rest = next;
         } else {
             // A `{` with no `}` after it is ordinary text. A user writes one in
-            // a format string, in JSON and in a shell brace, and qex must not
+            // a format string, in JSON and in a shell brace, and fairq must not
             // change it.
             out.push('{');
             rest = &tail[1..];
@@ -250,24 +250,24 @@ fn scan(arg: &str, line: Option<&str>) -> (String, usize) {
 /// Tests the command that the user gave after `--`.
 ///
 /// A command with no place for the line would give N jobs that are all the
-/// same. That is never what a fan-out means, so qex refuses it. A user who
+/// same. That is never what a fan-out means, so fairq refuses it. A user who
 /// really wants N copies of one command writes a loop.
 pub fn check_command(command: &[String]) -> Result<()> {
     if command.is_empty() {
         bail!(
             "no command.\n\n\
              Write the command after `--`, and put `{PLACEHOLDER}` where each line goes:\n\
-             \x20   qex submit --each-line inputs.txt -- ./process {PLACEHOLDER}"
+             \x20   fairq submit --each-line inputs.txt -- ./process {PLACEHOLDER}"
         );
     }
     if count_placeholders(command) == 0 {
         bail!(
             "the command holds no `{PLACEHOLDER}`, so every job would be the same command.\n\n\
              `--each-line` runs one job for each line, and `{PLACEHOLDER}` says where the \
-             line goes. With no `{PLACEHOLDER}` the lines have no effect, and qex submits \
+             line goes. With no `{PLACEHOLDER}` the lines have no effect, and fairq submits \
              nothing.\n\n\
              Put `{PLACEHOLDER}` in the command:\n\
-             \x20   qex submit --each-line inputs.txt -- ./process {PLACEHOLDER}\n\n\
+             \x20   fairq submit --each-line inputs.txt -- ./process {PLACEHOLDER}\n\n\
              `{PLACEHOLDER}` goes in any argument, in the program name, or inside an \
              argument such as `--out={PLACEHOLDER}.log`. Write `{{{{}}}}` for a literal \
              `{PLACEHOLDER}`."
@@ -280,16 +280,16 @@ pub fn check_command(command: &[String]) -> Result<()> {
 pub fn check_count(count: usize, max: usize) -> Result<()> {
     if count == 0 {
         bail!(
-            "the input holds no line that gives a job, so qex submits nothing.\n\n\
-             qex passes over an empty line and a line that starts with `#`. Add one \
+            "the input holds no line that gives a job, so fairq submits nothing.\n\n\
+             fairq passes over an empty line and a line that starts with `#`. Add one \
              line with the input for a job."
         );
     }
     if count > max {
         bail!(
             "the input holds {}, and the limit is {}.\n\n\
-             Each job takes a directory in the state of qex, so a very large fan-out \
-             fills the disk and makes `qex list` hard to read.\n\n\
+             Each job takes a directory in the state of fairq, so a very large fan-out \
+             fills the disk and makes `fairq list` hard to read.\n\n\
              Give fewer lines, or raise the limit with `--max-jobs {count}`.",
             crate::units::count_of(count, "line"),
             crate::units::count_of(max, "job")
@@ -298,7 +298,7 @@ pub fn check_count(count: usize, max: usize) -> Result<()> {
     Ok(())
 }
 
-/// Makes the name that `qex list` shows for one job of the fan-out.
+/// Makes the name that `fairq list` shows for one job of the fan-out.
 ///
 /// The name holds three parts: a base, the position in the file, and as much of
 /// the line as fits. The position comes BEFORE the line, and it has the same
@@ -314,9 +314,9 @@ pub fn check_count(count: usize, max: usize) -> Result<()> {
 /// program name of the first line.
 ///
 /// A name goes to the terminal of the user, in the output of the submission and
-/// in every later `qex list`. A line that holds a terminal control sequence
+/// in every later `fairq list`. A line that holds a terminal control sequence
 /// would move the cursor, change the colour, empty the screen or write the
-/// title of the window, and rows of `qex list` would go away in front of the
+/// title of the window, and rows of `fairq list` would go away in front of the
 /// reader. `slug` therefore cleans BOTH parts, and this function can give the
 /// letters, the numbers, `.`, `_` and `-` only.
 pub fn job_name(base: &str, index: usize, count: usize, line: &str) -> String {
@@ -340,7 +340,7 @@ pub fn job_name(base: &str, index: usize, count: usize, line: &str) -> String {
 /// Changes text into the part of a job name that a person reads.
 ///
 /// A line is a path, a URL or a record, and it holds characters that make a
-/// name hard to read and hard to type in `qex status <name>`. A line can also
+/// name hard to read and hard to type in `fairq status <name>`. A line can also
 /// hold a terminal control sequence, and a name goes to the terminal of the
 /// user. This function keeps the letters, the numbers, `.` and `_`, and each
 /// run of the other characters becomes one dash.
@@ -503,9 +503,9 @@ mod tests {
     /// The line is data of the file, and so is the base: `{}` can go in the
     /// program position, and the base is then the program name of the first
     /// line. A name goes to the terminal of the user at the submission and in
-    /// every later `qex list`. An escape sequence there changes the colour,
+    /// every later `fairq list`. An escape sequence there changes the colour,
     /// moves the cursor, empties the screen or writes the window title, and
-    /// rows of `qex list` go away in front of the reader.
+    /// rows of `fairq list` go away in front of the reader.
     #[test]
     fn a_job_name_holds_no_control_character_from_the_file() {
         // The base and the line both hold escape sequences.
@@ -523,7 +523,7 @@ mod tests {
         assert!(!name.contains('\u{1b}'), "got: {name:?}");
 
         // A name that a file made must never hold a newline either. A newline
-        // would make one row of `qex list` into two.
+        // would make one row of `fairq list` into two.
         let name = job_name("a\nb", 2, 9, "c\r\nd");
         assert!(
             !name.contains('\n') && !name.contains('\r'),
@@ -542,13 +542,13 @@ mod tests {
 
     /// An input that is larger than the limit gives an error, and no job.
     ///
-    /// Without the limit, qex reads the whole file into memory before it counts
+    /// Without the limit, fairq reads the whole file into memory before it counts
     /// the lines, so a very large file takes the memory of the machine and the
     /// fault arrives as an out-of-memory kill with no message.
     #[test]
     fn an_input_above_the_size_limit_is_refused() {
         let dir = crate::testutil::temp_dir().join(format!(
-            "qex-fanout-{}-{}",
+            "fairq-fanout-{}-{}",
             std::process::id(),
             MAX_INPUT_BYTES
         ));
@@ -570,11 +570,11 @@ mod tests {
     }
 
     /// A directory in the place of the input file must give the message of a
-    /// file that qex cannot read, and no job.
+    /// file that fairq cannot read, and no job.
     #[test]
     fn a_directory_in_the_place_of_the_input_is_refused() {
         let dir =
-            crate::testutil::temp_dir().join(format!("qex-fanout-dir-{}", std::process::id()));
+            crate::testutil::temp_dir().join(format!("fairq-fanout-dir-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let err = read(&dir).unwrap_err().to_string();
         std::fs::remove_dir_all(&dir).ok();

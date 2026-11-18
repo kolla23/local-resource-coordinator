@@ -8,7 +8,7 @@ set -euo pipefail
 
 version="${1:?give the version}"
 previous="${2:-}"
-repository="${GITHUB_REPOSITORY:-OWNER/qex}"
+repository="${GITHUB_REPOSITORY:-OWNER/fairq}"
 
 cd "$(dirname "$0")/../.."
 
@@ -44,7 +44,7 @@ Take the file for your machine, and put it where your shell finds it:
 
 \`\`\`sh
 dir=\$(mktemp -d) &&
-archive="qex-\$(uname -s)-\$(uname -m).tar.gz" &&
+archive="fairq-\$(uname -s)-\$(uname -m).tar.gz" &&
 curl -fsSL -o "\$dir/\$archive" \\
   "https://github.com/$repository/releases/download/v$version/\$archive" &&
 curl -fsSL -o "\$dir/\$archive.sha256" \\
@@ -53,11 +53,11 @@ if command -v sha256sum >/dev/null
 then (cd "\$dir" && sha256sum -c "\$archive.sha256")
 else (cd "\$dir" && shasum -a 256 -c "\$archive.sha256")
 fi &&
-tar -xzf "\$dir/\$archive" -C "\$dir" qex &&
+tar -xzf "\$dir/\$archive" -C "\$dir" fairq &&
 mkdir -p ~/.local/bin &&
-install -m 755 "\$dir/qex" ~/.local/bin/qex
+install -m 755 "\$dir/fairq" ~/.local/bin/fairq
 [ -n "\$dir" ] && rm -rf "\$dir"
-command -v qex
+command -v fairq
 \`\`\`
 
 These commands write into a temporary directory, and they do not write into
@@ -67,14 +67,14 @@ The \`&&\` after each write means a line that fails stops the writes that follow
 The \`rm\` line still runs, and it removes the temporary directory.
 
 \`mkdir\` makes \`~/.local/bin\` when that directory is not there. \`install\` puts
-\`qex\` in that directory, and it REPLACES a \`qex\` that is already there.
+\`fairq\` in that directory, and it REPLACES a \`fairq\` that is already there.
 
-**\`install\` does not put \`~/.local/bin\` on your path.** \`command -v qex\` must
+**\`install\` does not put \`~/.local/bin\` on your path.** \`command -v fairq\` must
 show a file in \`~/.local/bin\`. If it shows nothing, add \`~/.local/bin\` to the
 path of this shell. If it shows a different file, that file is the one the
 shell will run.
 
-Then \`qex help agents\` is the page for agents. The first qex command starts
+Then \`fairq help agents\` is the page for agents. The first fairq command starts
 the coordinator. The Linux binaries hold no dynamic library, so they run on
 any Linux of that architecture.
 EOF

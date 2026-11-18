@@ -6,9 +6,9 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: state_dir checks the owner of the state directory and the directories above it, and makes it private (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the three opens of a pid file use O_NOFOLLOW, with a test that the sweep does not claim a linked pid file (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: hold_pid_file gives DirGone when a sweep deleted the socket directory, and a sweep claims nothing through a pid file with no name, with tests (issue #132).
-//! This module gives the location of each file that qex uses.
+//! This module gives the location of each file that fairq uses.
 //!
-//! qex uses the XDG directories on Linux and on macOS. On macOS it does not use
+//! fairq uses the XDG directories on Linux and on macOS. On macOS it does not use
 //! `~/Library/Application Support`. A user who shares dotfiles between machines
 //! then finds the config file in the same location on each machine.
 
@@ -19,7 +19,7 @@ fn home() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty())
-        .context("HOME is not set; qex cannot locate its config or state directory")
+        .context("HOME is not set; fairq cannot locate its config or state directory")
 }
 
 fn xdg(var: &str, default_suffix: &str) -> Result<PathBuf> {
@@ -29,19 +29,19 @@ fn xdg(var: &str, default_suffix: &str) -> Result<PathBuf> {
     }
 }
 
-/// Gives the location of the config file: `~/.config/qex.toml`.
+/// Gives the location of the config file: `~/.config/fairq.toml`.
 ///
-/// qex has one config file only.
+/// fairq has one config file only.
 pub fn config_file() -> Result<PathBuf> {
-    Ok(xdg("XDG_CONFIG_HOME", ".config")?.join("qex.toml"))
+    Ok(xdg("XDG_CONFIG_HOME", ".config")?.join("fairq.toml"))
 }
 
-/// Gives the location of the state directory: `~/.local/state/qex`.
+/// Gives the location of the state directory: `~/.local/state/fairq`.
 ///
 /// This directory holds the job records and the log files. These files must
 /// stay available after a restart of the machine.
 pub fn state_dir() -> Result<PathBuf> {
-    let dir = xdg("XDG_STATE_HOME", ".local/state")?.join("qex");
+    let dir = xdg("XDG_STATE_HOME", ".local/state")?.join("fairq");
     // Keyed by path, since tests change XDG_STATE_HOME; a missing directory is
     // checked again on every call, so one that another user makes later is refused.
     static CHECKED: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
@@ -55,7 +55,7 @@ pub fn state_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// `~/.local/state/qex/jobs`
+/// `~/.local/state/fairq/jobs`
 pub fn jobs_dir() -> Result<PathBuf> {
     Ok(state_dir()?.join("jobs"))
 }
@@ -74,7 +74,7 @@ pub fn jobs_dir() -> Result<PathBuf> {
 /// frequently do not set it. Two sessions with one home directory would then
 /// use two sockets and start two coordinators. Each coordinator would hold the
 /// full budget, and together they would start twice the permitted work. That
-/// result is the fault that qex prevents.
+/// result is the fault that fairq prevents.
 ///
 /// The socket and the lock file are thus beside the jobs that they control.
 pub fn runtime_dir() -> Result<PathBuf> {
@@ -109,7 +109,7 @@ pub fn socket_path() -> Result<PathBuf> {
 ///
 /// The directory is in `/tmp`, which every user can write. The function thus
 /// tests the owner and the mode. If a different user owns the directory, the
-/// function gives an error and qex stops. It does not use that directory.
+/// function gives an error and fairq stops. It does not use that directory.
 fn short_socket_dir(preferred: &std::path::Path) -> Result<PathBuf> {
     use std::os::unix::fs::MetadataExt;
 
@@ -117,19 +117,19 @@ fn short_socket_dir(preferred: &std::path::Path) -> Result<PathBuf> {
     // The socket directory follows `TMPDIR` on purpose (clippy.toml forbids
     // the call in tests only).
     #[allow(clippy::disallowed_methods)]
-    let dir = std::env::temp_dir().join(format!("qex-{uid}-{}", path_hash(preferred)));
+    let dir = std::env::temp_dir().join(format!("fairq-{uid}-{}", path_hash(preferred)));
 
     match std::fs::symlink_metadata(&dir) {
         Ok(meta) => {
             if !meta.is_dir() {
                 anyhow::bail!(
-                    "qex needs the directory {} for its socket, but that path is a file",
+                    "fairq needs the directory {} for its socket, but that path is a file",
                     dir.display()
                 );
             }
             if meta.uid() != uid {
                 anyhow::bail!(
-                    "the directory {} belongs to the user {}, and qex will not use it",
+                    "the directory {} belongs to the user {}, and fairq will not use it",
                     dir.display(),
                     meta.uid()
                 );
@@ -167,7 +167,7 @@ fn short_socket_dir(preferred: &std::path::Path) -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// The time that qex waits for one socket to answer.
+/// The time that fairq waits for one socket to answer.
 ///
 /// A socket on this machine answers in less than one millisecond. A longer wait
 /// gives no more information. Without this limit, a connect to a socket that a
@@ -209,7 +209,7 @@ const SWEEP_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
 /// coordinator, and the commands of that user then start a second coordinator
 /// on the same state directory. Two coordinators each hold the full budget, and
 /// together they start twice the permitted work. That result is the fault that
-/// qex prevents.
+/// fairq prevents.
 ///
 /// The coordinator calls this function on a thread, and after it opens its own
 /// socket. The sweep touches the directories of other coordinators only, so no
@@ -243,7 +243,7 @@ fn sweep_socket_dirs(dir: &std::path::Path, own: &[PathBuf], limit: std::time::D
     use std::os::unix::fs::MetadataExt;
     let start = std::time::Instant::now();
     let uid = unsafe { libc::getuid() };
-    let prefix = format!("qex-{uid}-");
+    let prefix = format!("fairq-{uid}-");
 
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -321,7 +321,7 @@ fn claim_unused_dir(dir: &std::path::Path, limit: std::time::Duration) -> Option
         .open(dir.join(PID_FILE))
     {
         Ok(file) => file,
-        // qex cannot use the file, so it cannot say that the directory is free.
+        // fairq cannot use the file, so it cannot say that the directory is free.
         Err(_) => return None,
     };
     claim_opened(dir, file, limit)
@@ -389,7 +389,7 @@ pub enum PidFile {
     /// No process holds the lock, and the file thus says nothing about a
     /// coordinator. A file that is not there gives this state as well.
     Free,
-    /// qex cannot test the file.
+    /// fairq cannot test the file.
     Unknown,
 }
 
@@ -450,7 +450,7 @@ pub enum PidHold {
     Held(PidFileLock),
     /// A different process holds the lock. A coordinator operates.
     Busy,
-    /// qex cannot use the file. The text says what the reader must do.
+    /// fairq cannot use the file. The text says what the reader must do.
     Unusable(String),
     /// A sweep deleted the directory before this process held the lock. The caller
     /// makes it again and tries again; the text is for when it gives up.
@@ -551,13 +551,13 @@ pub fn hold_pid_file(socket: &std::path::Path, patience: std::time::Duration) ->
             // it.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return PidHold::DirGone(format!(
-                    "qex cannot make the file {}: {e}. Start qex again.",
+                    "fairq cannot make the file {}: {e}. Start fairq again.",
                     path.display()
                 ))
             }
             Err(e) => {
                 return PidHold::Unusable(format!(
-                    "qex cannot open the file {}: {e}. Delete that file if no coordinator \
+                    "fairq cannot open the file {}: {e}. Delete that file if no coordinator \
                      operates.",
                     path.display()
                 ))
@@ -575,7 +575,7 @@ pub fn hold_pid_file(socket: &std::path::Path, patience: std::time::Duration) ->
                 }
                 LockTry::Failed(e) => {
                     return PidHold::Unusable(format!(
-                        "qex cannot lock the file {}: {e}. Delete that file if no \
+                        "fairq cannot lock the file {}: {e}. Delete that file if no \
                          coordinator operates.",
                         path.display(),
                     ))
@@ -599,7 +599,7 @@ pub fn hold_pid_file(socket: &std::path::Path, patience: std::time::Duration) ->
             file.flush()
         }) {
             return PidHold::Unusable(format!(
-                "qex cannot write the file {}: {e}. Delete that file if no coordinator \
+                "fairq cannot write the file {}: {e}. Delete that file if no coordinator \
                  operates.",
                 path.display()
             ));
@@ -609,7 +609,7 @@ pub fn hold_pid_file(socket: &std::path::Path, patience: std::time::Duration) ->
     }
 
     PidHold::Unusable(format!(
-        "a sweep deleted the file {} while qex took the lock on it. Start qex again.",
+        "a sweep deleted the file {} while fairq took the lock on it. Start fairq again.",
         path.display()
     ))
 }
@@ -635,7 +635,7 @@ pub fn pid_file_state(dir: &std::path::Path) -> PidFile {
     {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return PidFile::Free,
-        // qex cannot read the file, so it cannot say that the directory is
+        // fairq cannot read the file, so it cannot say that the directory is
         // free. The caller keeps the directory.
         Err(_) => return PidFile::Unknown,
     };
@@ -723,7 +723,7 @@ fn unix_address(path: &std::path::Path) -> Option<libc::sockaddr_un> {
 /// * `ENOENT` — no file at the path.
 /// * `ENOTSOCK` — a file that is not a socket. Nothing can listen at such a
 ///   path. One system gives `ECONNREFUSED` for it and another gives this error,
-///   and the two must give one answer to qex.
+///   and the two must give one answer to fairq.
 ///
 /// Every other error gives `Unknown`, and a caller then keeps the socket.
 fn answer_of(error: Option<i32>) -> SocketAnswer {
@@ -843,7 +843,7 @@ fn connect_once(address: &libc::sockaddr_un, deadline: std::time::Instant) -> Op
 ///
 /// `ask_socket` tests a socket and closes what it opened. A command needs the
 /// connection itself, and it needs the three answers apart, because the answer
-/// decides whether qex may start a coordinator.
+/// decides whether fairq may start a coordinator.
 pub enum Connected {
     /// A coordinator accepted, and this is the connection to it.
     Open(std::os::unix::net::UnixStream),
@@ -957,7 +957,7 @@ fn open_once(
 /// Gives a short name for a long path.
 ///
 /// This function uses the FNV-1a method. The result identifies the path. It is
-/// not a secure hash, and qex does not use it for security.
+/// not a secure hash, and fairq does not use it for security.
 fn path_hash(path: &std::path::Path) -> String {
     use std::os::unix::ffi::OsStrExt;
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -968,7 +968,7 @@ fn path_hash(path: &std::path::Path) -> String {
     format!("{hash:08x}")
 }
 
-/// Gives the path of the qex program file, in a form that qex can start again.
+/// Gives the path of the fairq program file, in a form that fairq can start again.
 ///
 /// `current_exe` reads `/proc/self/exe`. When something replaces the program
 /// file, the kernel keeps the running program but adds ` (deleted)` to that
@@ -982,7 +982,7 @@ fn path_hash(path: &std::path::Path) -> String {
 /// path is the new one, and its records have the same format, so a job starts
 /// correctly.
 pub fn program_path() -> Result<PathBuf> {
-    let exe = std::env::current_exe().context("finding the qex program file")?;
+    let exe = std::env::current_exe().context("finding the fairq program file")?;
 
     if exe.exists() {
         return Ok(exe);
@@ -995,15 +995,15 @@ pub fn program_path() -> Result<PathBuf> {
             return Ok(path);
         }
         anyhow::bail!(
-            "the qex program file {} no longer exists. Something replaced or deleted it \
+            "the fairq program file {} no longer exists. Something replaced or deleted it \
              while the coordinator was operating. Stop the coordinator and start it again: \
-             `qex info --no-start --json` gives its process id.",
+             `fairq info --no-start --json` gives its process id.",
             stripped
         );
     }
 
     anyhow::bail!(
-        "the qex program file {} no longer exists. Stop the coordinator and start it again.",
+        "the fairq program file {} no longer exists. Stop the coordinator and start it again.",
         exe.display()
     )
 }
@@ -1029,7 +1029,7 @@ pub fn daemon_log_path() -> Result<PathBuf> {
 
 /// Gives the location of the directory for one job.
 ///
-/// qex makes this directory with mode `0700`. The directory holds the captured
+/// fairq makes this directory with mode `0700`. The directory holds the captured
 /// environment, which can contain secrets.
 pub fn job_dir(id: &uuid::Uuid) -> Result<PathBuf> {
     Ok(jobs_dir()?.join(id.to_string()))
@@ -1049,12 +1049,12 @@ mod tests {
     /// AN UNKNOWN ANSWER AUTHORISES NOTHING.
     ///
     /// `NobodyListens` is the answer that lets a caller start a coordinator. A
-    /// socket that qex cannot even LOOK at says nothing about whether one
+    /// socket that fairq cannot even LOOK at says nothing about whether one
     /// operates, and a second coordinator on one state directory holds the
     /// whole budget again.
     #[test]
-    fn a_socket_that_qex_cannot_look_at_does_not_say_that_nobody_listens() {
-        let dir = crate::testutil::temp_dir().join(format!("qex-lookat-{}", std::process::id()));
+    fn a_socket_that_fairq_cannot_look_at_does_not_say_that_nobody_listens() {
+        let dir = crate::testutil::temp_dir().join(format!("fairq-lookat-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let shut = dir.join("shut");
         std::fs::create_dir_all(&shut).unwrap();
@@ -1079,7 +1079,7 @@ mod tests {
         }
         assert!(
             !says_nobody,
-            "a socket that qex cannot look at must not say that nobody listens: \
+            "a socket that fairq cannot look at must not say that nobody listens: \
              that answer lets a caller start a SECOND coordinator"
         );
     }
@@ -1093,15 +1093,15 @@ mod tests {
     #[test]
     fn xdg_overrides_are_honoured() {
         let _guard = env_lock();
-        let _c = EnvVar::set("XDG_CONFIG_HOME", "/tmp/qex-test-cfg");
-        let _s = EnvVar::set("XDG_STATE_HOME", "/tmp/qex-test-state");
+        let _c = EnvVar::set("XDG_CONFIG_HOME", "/tmp/fairq-test-cfg");
+        let _s = EnvVar::set("XDG_STATE_HOME", "/tmp/fairq-test-state");
         assert_eq!(
             config_file().unwrap(),
-            PathBuf::from("/tmp/qex-test-cfg/qex.toml")
+            PathBuf::from("/tmp/fairq-test-cfg/fairq.toml")
         );
         assert_eq!(
             jobs_dir().unwrap(),
-            PathBuf::from("/tmp/qex-test-state/qex/jobs")
+            PathBuf::from("/tmp/fairq-test-state/fairq/jobs")
         );
     }
 
@@ -1115,25 +1115,25 @@ mod tests {
         let _r = EnvVar::unset("XDG_RUNTIME_DIR");
         assert_eq!(
             config_file().unwrap(),
-            PathBuf::from("/home/example/.config/qex.toml")
+            PathBuf::from("/home/example/.config/fairq.toml")
         );
         assert_eq!(
             state_dir().unwrap(),
-            PathBuf::from("/home/example/.local/state/qex")
+            PathBuf::from("/home/example/.local/state/fairq")
         );
         // macOS does not set XDG_RUNTIME_DIR. The socket needs a location there.
         assert_eq!(
             runtime_dir().unwrap(),
-            PathBuf::from("/home/example/.local/state/qex/run")
+            PathBuf::from("/home/example/.local/state/fairq/run")
         );
     }
 
     #[test]
     fn socket_path_stays_within_sun_path_limits() {
         let _guard = env_lock();
-        let _s = EnvVar::set("XDG_STATE_HOME", "/tmp/qex-sock-test");
+        let _s = EnvVar::set("XDG_STATE_HOME", "/tmp/fairq-sock-test");
         let p = socket_path().unwrap();
-        assert_eq!(p, PathBuf::from("/tmp/qex-sock-test/qex/run/s"));
+        assert_eq!(p, PathBuf::from("/tmp/fairq-sock-test/fairq/run/s"));
         assert!(p.as_os_str().len() <= MAX_SOCKET_PATH);
     }
 
@@ -1147,7 +1147,7 @@ mod tests {
     #[test]
     fn the_socket_does_not_depend_on_the_runtime_variable() {
         let _guard = env_lock();
-        let _s = EnvVar::set("XDG_STATE_HOME", "/tmp/qex-one-state");
+        let _s = EnvVar::set("XDG_STATE_HOME", "/tmp/fairq-one-state");
 
         let with_variable = {
             let _r = EnvVar::set("XDG_RUNTIME_DIR", "/run/user/1000");
@@ -1164,7 +1164,7 @@ mod tests {
         );
     }
 
-    /// A deep directory must not stop qex. A test harness and a long `$HOME`
+    /// A deep directory must not stop fairq. A test harness and a long `$HOME`
     /// both give a path that does not fit in `sun_path`.
     #[test]
     fn a_long_state_directory_gives_a_short_socket_path() {
@@ -1175,7 +1175,7 @@ mod tests {
         // state directory, so every copy of this test calculates one name in
         // one shared directory. A second copy deletes it, and a sweep of a
         // coordinator on this machine deletes it as well.
-        let own_tmp = TestDir::make("qex-shortdirtest");
+        let own_tmp = TestDir::make("fairq-shortdirtest");
         let _t = EnvVar::set("TMPDIR", own_tmp.path().to_str().unwrap());
         let long = format!("/tmp/{}", "very-long-directory-name/".repeat(8));
         let _s = EnvVar::set("XDG_STATE_HOME", &long);
@@ -1219,7 +1219,7 @@ mod tests {
     /// Removes a directory when the test ends, and also when it panics.
     ///
     /// A test that leaves a directory in `/tmp` adds to the fault that the
-    /// sweep corrects. The name of the directory is outside the `qex-<uid>-`
+    /// sweep corrects. The name of the directory is outside the `fairq-<uid>-`
     /// set, so no sweep collects it.
     struct TestDir(PathBuf);
 
@@ -1385,14 +1385,14 @@ mod tests {
     #[test]
     fn the_sweep_keeps_the_directory_of_a_coordinator_that_operates() {
         let uid = unsafe { libc::getuid() };
-        let base = TestDir::make("qex-reaptest");
+        let base = TestDir::make("fairq-reaptest");
 
         // THE DIRECTORIES THAT THE LOCK KEEPS. These run on every system, and
         // nothing below makes them conditional. The lock is the mechanism that
         // carries this property on a system where a socket cannot give "no
         // answer".
-        let refuses_but_live = base.path().join(format!("qex-{uid}-livepid"));
-        let own = base.path().join(format!("qex-{uid}-own"));
+        let refuses_but_live = base.path().join(format!("fairq-{uid}-livepid"));
+        let own = base.path().join(format!("fairq-{uid}-own"));
         std::fs::create_dir_all(&refuses_but_live).unwrap();
         std::fs::create_dir_all(&own).unwrap();
 
@@ -1409,8 +1409,8 @@ mod tests {
         // in this one block. A system that cannot hold a connect open thus
         // leaves NO half-made directory, and no step after this block depends
         // on the directories or on the result.
-        let busy_with_pid = base.path().join(format!("qex-{uid}-busypid"));
-        let busy_no_pid = base.path().join(format!("qex-{uid}-busy"));
+        let busy_with_pid = base.path().join(format!("fairq-{uid}-busypid"));
+        let busy_no_pid = base.path().join(format!("fairq-{uid}-busy"));
         let busy = (|| {
             std::fs::create_dir_all(&busy_with_pid).unwrap();
             std::fs::create_dir_all(&busy_no_pid).unwrap();
@@ -1443,7 +1443,7 @@ mod tests {
 
         assert!(
             finished,
-            "the sweep waits for a socket that never answers; every qex command then waits"
+            "the sweep waits for a socket that never answers; every fairq command then waits"
         );
         if busy.is_some() {
             assert!(
@@ -1476,11 +1476,11 @@ mod tests {
     #[test]
     fn the_sweep_deletes_the_directory_of_a_coordinator_that_stopped() {
         let uid = unsafe { libc::getuid() };
-        let base = TestDir::make("qex-deadtest");
+        let base = TestDir::make("fairq-deadtest");
 
-        let no_socket = base.path().join(format!("qex-{uid}-nosocket"));
-        let dead_socket = base.path().join(format!("qex-{uid}-dead"));
-        let dead_pid = base.path().join(format!("qex-{uid}-deadpid"));
+        let no_socket = base.path().join(format!("fairq-{uid}-nosocket"));
+        let dead_socket = base.path().join(format!("fairq-{uid}-dead"));
+        let dead_pid = base.path().join(format!("fairq-{uid}-deadpid"));
         for dir in [&no_socket, &dead_socket, &dead_pid] {
             std::fs::create_dir_all(dir).unwrap();
         }
@@ -1526,10 +1526,10 @@ mod tests {
     #[test]
     fn each_sweep_continues_the_work_that_the_limit_stopped() {
         let uid = unsafe { libc::getuid() };
-        let base = TestDir::make("qex-limittest");
+        let base = TestDir::make("fairq-limittest");
         let count = 200;
         for n in 0..count {
-            std::fs::create_dir_all(base.path().join(format!("qex-{uid}-{n}"))).unwrap();
+            std::fs::create_dir_all(base.path().join(format!("fairq-{uid}-{n}"))).unwrap();
         }
         let left = || std::fs::read_dir(base.path()).unwrap().count();
 
@@ -1556,7 +1556,7 @@ mod tests {
 
         // A generous limit must do the whole work in one sweep.
         for n in 0..count {
-            std::fs::create_dir_all(base.path().join(format!("qex-{uid}-{n}"))).unwrap();
+            std::fs::create_dir_all(base.path().join(format!("fairq-{uid}-{n}"))).unwrap();
         }
         sweep_socket_dirs(base.path(), &[], std::time::Duration::from_secs(30));
         assert_eq!(left(), 0, "a sweep with time must finish the work");
@@ -1568,7 +1568,7 @@ mod tests {
     /// different coordinator, so this test holds the meaning of that answer.
     #[test]
     fn a_socket_that_never_answers_gives_the_unknown_answer() {
-        let base = TestDir::make("qex-answertest");
+        let base = TestDir::make("fairq-answertest");
         let stuck = base.path().join("s");
         let Some(_sockets) = a_socket_that_never_answers(&stuck) else {
             // This system refuses a connection when the queue of a socket is
@@ -1656,7 +1656,7 @@ mod tests {
 
             if answer == Some(SocketAnswer::Answers) {
                 // A program listens at this port. The test cannot measure a
-                // refusal, and it must not report a fault of qex.
+                // refusal, and it must not report a fault of fairq.
                 eprintln!(
                     "this test did not run: a program listens at the port {port}, so this \
                      test cannot measure a refusal"
@@ -1675,7 +1675,7 @@ mod tests {
     /// A socket that no process holds must say that nobody listens.
     #[test]
     fn a_socket_with_no_process_says_that_nobody_listens() {
-        let base = TestDir::make("qex-refusetest");
+        let base = TestDir::make("fairq-refusetest");
         let missing = base.path().join("s");
         assert_eq!(
             ask_socket(&missing, std::time::Duration::from_millis(50)),
@@ -1695,7 +1695,7 @@ mod tests {
 
         // A file that is not a socket. One system refuses a connection to it
         // and another says that the path is not a socket. Nothing can listen at
-        // such a path, so qex must give one answer for both.
+        // such a path, so fairq must give one answer for both.
         let plain = base.path().join("plain");
         std::fs::write(&plain, b"").unwrap();
         assert_eq!(
@@ -1729,7 +1729,7 @@ mod tests {
     /// directory that no coordinator uses, and nothing can correct it.
     #[test]
     fn a_number_in_the_pid_file_is_not_evidence_of_a_coordinator() {
-        let base = TestDir::make("qex-pidtest");
+        let base = TestDir::make("fairq-pidtest");
 
         assert_eq!(
             pid_file_state(base.path()),
@@ -1760,7 +1760,7 @@ mod tests {
     /// owns the lock, and that coordinator loses its number for a reader.
     #[test]
     fn a_try_that_fails_leaves_the_file_of_the_owner_as_it_was() {
-        let base = TestDir::make("qex-truncatetest");
+        let base = TestDir::make("fairq-truncatetest");
         let socket = base.path().join("s");
         let path = base.path().join(PID_FILE);
         std::fs::write(&path, b"12345").unwrap();
@@ -1792,7 +1792,7 @@ mod tests {
     /// the system. The count of the names is the one mark that it leaves.
     #[test]
     fn the_lock_of_a_coordinator_is_on_a_file_that_a_name_points_to() {
-        let base = TestDir::make("qex-nlinktest");
+        let base = TestDir::make("fairq-nlinktest");
         let socket = base.path().join("s");
         let path = base.path().join(PID_FILE);
         std::fs::write(&path, b"").unwrap();
@@ -1832,7 +1832,7 @@ mod tests {
     /// `DirGone`, so the coordinator makes the directory again (issue #132).
     #[test]
     fn a_sweep_that_deletes_the_directory_during_the_wait_gives_dir_gone() {
-        let base = TestDir::make("qex-dirgonetest");
+        let base = TestDir::make("fairq-dirgonetest");
         let dir = base.path().join("d");
         std::fs::create_dir(&dir).unwrap();
         let socket = dir.join("s");
@@ -1862,7 +1862,7 @@ mod tests {
             panic!("a directory that a sweep deleted must give DirGone");
         };
         assert!(
-            text.contains("Start qex again"),
+            text.contains("Start fairq again"),
             "the message must give a step that the reader can take: {text}"
         );
     }
@@ -1871,7 +1871,7 @@ mod tests {
     /// it keeps the directory that a new coordinator made at that name (issue #132).
     #[test]
     fn a_sweep_does_not_claim_a_directory_through_a_deleted_pid_file() {
-        let base = TestDir::make("qex-stalesweeptest");
+        let base = TestDir::make("fairq-stalesweeptest");
         let dir = base.path().join("d");
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join(PID_FILE), b"").unwrap();
@@ -1900,7 +1900,7 @@ mod tests {
     /// of a message, so a wrong step costs it a command and gives no progress.
     #[test]
     fn a_file_that_is_not_there_does_not_ask_the_reader_to_delete_it() {
-        let base = TestDir::make("qex-remedytest");
+        let base = TestDir::make("fairq-remedytest");
         // A directory that is not there. The open of the pid file gives
         // `NotFound`, and no deletion can correct that.
         let socket = base.path().join("no-such-directory").join("s");
@@ -1914,7 +1914,7 @@ mod tests {
             "the message asks the reader to delete a file that is not there: {text}"
         );
         assert!(
-            text.contains("Start qex again"),
+            text.contains("Start fairq again"),
             "the message must give a step that the reader can take: {text}"
         );
     }
@@ -1926,7 +1926,7 @@ mod tests {
     /// refuse to start with no coordinator alive.
     #[test]
     fn a_coordinator_waits_through_the_moment_that_a_probe_holds_the_lock() {
-        let base = TestDir::make("qex-patiencetest");
+        let base = TestDir::make("fairq-patiencetest");
         let socket = base.path().join("s");
         std::fs::write(base.path().join(PID_FILE), b"").unwrap();
 
@@ -1961,7 +1961,7 @@ mod tests {
     /// its directory. It must meet the lock instead.
     #[test]
     fn the_sweep_holds_the_lock_while_it_deletes() {
-        let base = TestDir::make("qex-claimtest");
+        let base = TestDir::make("fairq-claimtest");
         std::fs::write(base.path().join(PID_FILE), b"").unwrap();
 
         let claim = claim_unused_dir(base.path(), std::time::Duration::from_millis(50))
@@ -1983,7 +1983,7 @@ mod tests {
         // The sweep and a coordinator that starts in the directory must lock
         // one inode. A sweep that only reads takes no lock here, and the two
         // then have no common lock at all.
-        let empty = TestDir::make("qex-claimempty");
+        let empty = TestDir::make("fairq-claimempty");
         let claim = claim_unused_dir(empty.path(), std::time::Duration::from_millis(50))
             .expect("a directory with no pid file must give a claim");
         assert_eq!(
@@ -2000,8 +2000,8 @@ mod tests {
     #[test]
     fn a_pid_file_link_is_not_claimed() {
         use std::os::unix::fs::PermissionsExt;
-        let base = TestDir::make("qex-claimlink");
-        let outside = TestDir::make("qex-claimtarget");
+        let base = TestDir::make("fairq-claimlink");
+        let outside = TestDir::make("fairq-claimtarget");
         let target = outside.path().join("target");
         std::fs::write(&target, b"ORIGINAL\n").unwrap();
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
@@ -2024,7 +2024,7 @@ mod tests {
     /// outlives it.
     #[test]
     fn a_kill_of_the_process_gives_the_lock_back() {
-        let base = TestDir::make("qex-killtest");
+        let base = TestDir::make("fairq-killtest");
         let path = base.path().join(PID_FILE);
         std::fs::write(&path, b"").unwrap();
         let name = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
@@ -2049,7 +2049,7 @@ mod tests {
         if held != PidFile::Held {
             // The child could not take the lock, so this test cannot measure
             // the product. A machine with no more file descriptors gives this.
-            // Say so, and do not report a fault of qex that this test did not
+            // Say so, and do not report a fault of fairq that this test did not
             // see.
             let mut status = 0;
             let gone = unsafe { libc::waitpid(child, &mut status, libc::WNOHANG) };
@@ -2057,10 +2057,10 @@ mod tests {
                 // The child stopped before it took the lock. A machine with no
                 // more file descriptors gives this. The test cannot measure the
                 // product, so it says so and stops. It must not report a fault
-                // of qex that it did not see.
+                // of fairq that it did not see.
                 eprintln!(
                     "this test did not run: the child could not take the lock, and the \
-                     state of qex is not known from it"
+                     state of fairq is not known from it"
                 );
                 return;
             }
@@ -2087,7 +2087,7 @@ mod tests {
     #[test]
     fn ensure_dir_applies_mode_regardless_of_umask() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = test_root().join(format!("qex-mode-{}", std::process::id()));
+        let dir = test_root().join(format!("fairq-mode-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         ensure_dir(&dir, 0o700).unwrap();
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
@@ -2106,8 +2106,8 @@ mod tests {
     #[test]
     fn a_kept_socket_directory_keeps_a_private_pid_file() {
         use std::os::unix::fs::PermissionsExt;
-        let base = TestDir::make("qex-claimmode");
-        let dir = base.path().join("qex-claim");
+        let base = TestDir::make("fairq-claimmode");
+        let dir = base.path().join("fairq-claim");
         std::fs::create_dir_all(&dir).unwrap();
         let _listener = std::os::unix::net::UnixListener::bind(dir.join("s")).unwrap();
         // A child that a different test forks can hold the last claim's lock for a moment (see

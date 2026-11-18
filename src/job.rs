@@ -3,7 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: read_all_from_disk skips a symbolic link in jobs/ (issue #129).
 // Modified by the local-resource-coordinator fork, 2026-11-03: read_all_from_disk skips a record whose id is not its folder's name (issue #135).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the record names the pid namespace of its pid, pid_ns and pid_ns_init_start (issue #115).
-//! This module holds the job state that qex writes to the disk.
+//! This module holds the job state that fairq writes to the disk.
 //!
 //! The file `status.json` is the primary record of a job result. The supervisor
 //! writes this file in one operation. The coordinator keeps a copy in memory
@@ -17,20 +17,20 @@ use std::path::Path;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum JobState {
-    /// qex accepted the job. The job waits for free capacity in the budget.
+    /// fairq accepted the job. The job waits for free capacity in the budget.
     Queued,
-    /// qex started the supervisor. The supervisor starts the job process.
+    /// fairq started the supervisor. The supervisor starts the job process.
     Starting,
     Running,
     /// The job stopped with the exit code 0.
     Completed,
     /// The job stopped with an exit code that is not 0, or a signal stopped it.
     Failed,
-    /// The command `qex kill` stopped the job.
+    /// The command `fairq kill` stopped the job.
     ///
-    /// qex also gives this state to a kill that it cannot explain. The kernel
-    /// and `qex kill` both use SIGKILL, and a machine without a cgroup gives no
-    /// evidence to separate them. `killed` is then the safe answer, because qex
+    /// fairq also gives this state to a kill that it cannot explain. The kernel
+    /// and `fairq kill` both use SIGKILL, and a machine without a cgroup gives no
+    /// evidence to separate them. `killed` is then the safe answer, because fairq
     /// starts no new attempt for it.
     Killed,
     /// The job used more time than the `--timeout` value.
@@ -46,11 +46,11 @@ pub enum JobState {
     /// The out-of-memory killer or the cgroup limit stopped the job.
     ///
     /// This state is different from `failed`, and so is the correction: the
-    /// claim can be too small, or the machine can be too small. qex REPORTS
+    /// claim can be too small, or the machine can be too small. fairq REPORTS
     /// this state and acts on it in no way, because the count that it reads
     /// covers every program of this user and cannot name the victim.
     Oom,
-    /// qex removed the job from the queue before the job started.
+    /// fairq removed the job from the queue before the job started.
     Cancelled,
     /// A job that this job needed did not succeed, so this job did not start.
     ///
@@ -136,7 +136,7 @@ impl std::str::FromStr for JobState {
             // It was written by hand, and a rebase dropped `skipped` from it in
             // silence, because two changes wrote the same line. A reader who
             // took the list as complete, and then wrote `skipped`, met "unknown
-            // job state" for a state that qex uses and shows. `ALL` cannot go
+            // job state" for a state that fairq uses and shows. `ALL` cannot go
             // out of date: `place_in_all` stops the build when somebody adds a
             // variant without giving it a place.
             other => Err(format!(
@@ -151,9 +151,9 @@ impl std::str::FromStr for JobState {
     }
 }
 
-/// The resources that the job used. qex measures these values.
+/// The resources that the job used. fairq measures these values.
 ///
-/// An agent uses these values to correct its estimates. `qex status` shows a
+/// An agent uses these values to correct its estimates. `fairq status` shows a
 /// job that claimed 40GB and used 6GB. The agent needs no other tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Usage {
@@ -163,7 +163,7 @@ pub struct Usage {
     pub cpu_secs: f64,
 }
 
-/// Gives the SAFE FORM of a job name: the ONLY form that qex shows.
+/// Gives the SAFE FORM of a job name: the ONLY form that fairq shows.
 ///
 /// A safe name holds the letters `A` to `Z` and `a` to `z`, the numbers `0` to
 /// `9`, and the three characters `-`, `_` and `.`. Every other character
@@ -176,32 +176,32 @@ pub struct Usage {
 ///
 /// # Where this is used
 ///
-/// **Every place that qex puts a name in front of a reader**: `qex list`, `qex
-/// status`, `qex top`, `qex du`, `qex gc`, the sentence that says why a job
+/// **Every place that fairq puts a name in front of a reader**: `fairq list`, `fairq
+/// status`, `fairq top`, `fairq du`, `fairq gc`, the sentence that says why a job
 /// waits, the log of the coordinator, the completions, and the JSON of each of
 /// them. The record on the disk keeps the name that the user gave.
 ///
-/// A machine that reads the JSON renders what qex gives it, and it knows no
-/// more than qex does, so the JSON holds the safe form as well.
+/// A machine that reads the JSON renders what fairq gives it, and it knows no
+/// more than fairq does, so the JSON holds the safe form as well.
 ///
 /// # Why
 ///
 /// A name is text that another agent chose. A name that holds an ESC byte,
-/// written to a terminal by `qex list`, moves the cursor and writes over the
+/// written to a terminal by `fairq list`, moves the cursor and writes over the
 /// text around it. No shell and no TAB are needed for that. A name that holds a
 /// space or a `;` teaches a word that the reader cannot paste back.
 ///
-/// A record on the disk is not a promise about its content. qex wrote records
+/// A record on the disk is not a promise about its content. fairq wrote records
 /// before this rule, and one of them can hold such a name. NOTHING is carried
 /// over: the safe form comes from the name that the record holds, so the rule
-/// reaches every record at once and `qex gc` is not the thing that applies it.
+/// reaches every record at once and `fairq gc` is not the thing that applies it.
 ///
 /// The job stays reachable, because `resolve_id` finds a job by its safe name
-/// as well as by the name that the record holds. A safe name that `qex list`
-/// shows thus goes back into `qex status` as it stands.
+/// as well as by the name that the record holds. A safe name that `fairq list`
+/// shows thus goes back into `fairq status` as it stands.
 ///
 /// **This is not a reason to write a word to a command line as it stands.**
-/// Each shell still makes the word safe at the point of use. The answer of `qex
+/// Each shell still makes the word safe at the point of use. The answer of `fairq
 /// __complete` is text that came off a disk, and it is not a guarantee. The two
 /// work together, and one does not replace the other.
 pub fn safe_name(name: &str) -> String {
@@ -254,7 +254,7 @@ pub fn name_is_safe(name: &str) -> bool {
 
 /// Gives a stored name that is already in the safe form.
 ///
-/// A derived name, and a name that `qex rerun` copies from an old record,
+/// A derived name, and a name that `fairq rerun` copies from an old record,
 /// take this path: the user did not choose the name of this new job.
 pub fn sanitize_name(raw: &str) -> String {
     let name = safe_name(raw);
@@ -296,19 +296,19 @@ pub fn visible(value: &str) -> String {
 /// THIS IS THE RULE FOR A SENTENCE, AND `safe_name` IS THE RULE FOR A NAME.
 /// A name is a handle: a reader pastes it back into a command, so `safe_name`
 /// keeps the letters, the numbers and `-_.` and nothing else. A sentence is
-/// prose that qex wrote, and it holds spaces, back quotes and punctuation that
+/// prose that fairq wrote, and it holds spaces, back quotes and punctuation that
 /// a reader needs. `safe_name` on a sentence would destroy it, so a sentence
 /// takes this rule instead: it loses the bytes that move a cursor, and nothing
 /// else.
 ///
 /// # Where a sentence gets text that a user chose
 ///
-/// A sentence that qex writes is not safe because qex wrote it. It carries
+/// A sentence that fairq writes is not safe because fairq wrote it. It carries
 /// values that came from the submission:
 ///
 ///   * `blocked_reason` names the LOCK that a job waits for, and a lock name is
 ///     a word that the caller chose. Measured with a lock named
-///     `lk<ESC>[2Jbad`: `qex events` and `qex status` each wrote that ESC byte
+///     `lk<ESC>[2Jbad`: `fairq events` and `fairq status` each wrote that ESC byte
 ///     to the terminal, and the byte cleared the screen.
 ///   * `error` on an expired job folds the last `blocked_reason` into itself, so
 ///     the same word reaches the reader a second time on a TERMINAL line.
@@ -322,32 +322,32 @@ pub fn printable(value: &str) -> String {
         .collect()
 }
 
-/// What qex removed from the output files of a job.
+/// What fairq removed from the output files of a job.
 ///
-/// The output of a job has a limit, so `qex status` and `qex logs` must be able
+/// The output of a job has a limit, so `fairq status` and `fairq logs` must be able
 /// to say that a file is not the whole output. A reader who believes that a
 /// truncated file is complete reads a wrong conclusion from it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogsDropped {
-    /// The bytes that qex did not keep from `stdout.log`.
+    /// The bytes that fairq did not keep from `stdout.log`.
     #[serde(default)]
     pub stdout_bytes: u64,
-    /// The lines that qex did not keep from `stdout.log`.
+    /// The lines that fairq did not keep from `stdout.log`.
     #[serde(default)]
     pub stdout_lines: u64,
-    /// The bytes that qex did not keep from `stderr.log`.
+    /// The bytes that fairq did not keep from `stderr.log`.
     #[serde(default)]
     pub stderr_bytes: u64,
-    /// The lines that qex did not keep from `stderr.log`.
+    /// The lines that fairq did not keep from `stderr.log`.
     #[serde(default)]
     pub stderr_lines: u64,
     /// The limit that operated, from `[logs] max_bytes`.
     #[serde(default)]
     pub limit: u64,
-    /// True when qex could not complete a log file, and could not count what
+    /// True when fairq could not complete a log file, and could not count what
     /// went.
     ///
-    /// A process of the job can hold the output open after the job stops. qex
+    /// A process of the job can hold the output open after the job stops. fairq
     /// then writes the record and leaves the copy. The counts above are the
     /// counts that arrived, and they are not the full quantity. Without this
     /// field, the record of that job says that the files are complete, and a
@@ -369,13 +369,13 @@ impl LogsDropped {
         (bytes > 0).then_some((bytes, lines))
     }
 
-    /// Tests if qex removed output, or could not complete a file.
+    /// Tests if fairq removed output, or could not complete a file.
     pub fn any(&self) -> bool {
         self.stdout_bytes > 0 || self.stderr_bytes > 0 || self.incomplete
     }
 }
 
-/// The units and the devices that qex gave one job from one pool.
+/// The units and the devices that fairq gave one job from one pool.
 ///
 /// This value is a RESULT and not a request, so it lives in `status.json` and
 /// never in `spec.json`. The coordinator writes it inside the same lock hold
@@ -412,7 +412,7 @@ pub struct Ancestor {
     /// The name of the program, in the SAFE form. See `safe_name`.
     #[serde(default)]
     pub name: String,
-    /// The working directory of the process, when qex could read it.
+    /// The working directory of the process, when fairq could read it.
     #[serde(default)]
     pub cwd: Option<String>,
     /// True when the process has a controlling terminal.
@@ -481,7 +481,7 @@ pub struct JobStatus {
     /// The processes above the command that submitted the job, from the parent
     /// of that command up to the first process of the machine.
     ///
-    /// `qex abort` reads this list to decide if a job belongs to the caller:
+    /// `fairq abort` reads this list to decide if a job belongs to the caller:
     /// see the `context` module for the rule. Each entry carries the start
     /// time of the process, so a later process with the same number never
     /// matches. An empty list means that the submission recorded nothing,
@@ -497,7 +497,7 @@ pub struct JobStatus {
     /// points at nothing, or at a process that has no connection with the job.
     /// A record from an earlier start of the machine is therefore dead,
     /// whatever its pids say. A record WITHOUT the value comes from an earlier
-    /// version of qex; recovery dates such a record by the time of its file
+    /// version of fairq; recovery dates such a record by the time of its file
     /// against `sys::boot_time_secs`.
     #[serde(default)]
     pub boot_id: Option<String>,
@@ -518,7 +518,7 @@ pub struct JobStatus {
     /// The position of this job in the order of submission.
     ///
     /// The time has a resolution of one second, and an agent submits the stages
-    /// of a pipeline in the same second. Without this value, `qex list` shows
+    /// of a pipeline in the same second. Without this value, `fairq list` shows
     /// those stages in an order that has no meaning to the reader.
     #[serde(default)]
     pub sequence: u64,
@@ -534,11 +534,11 @@ pub struct JobStatus {
     #[serde(default)]
     pub claim_source: String,
     /// Where the number of cores came from, with the same words as
-    /// `claim_source`. `claim_source` says `learned` when qex learned one value
-    /// only, so `qex status` reads this field and `mem_source` to put its note
-    /// beside the value that qex chose.
+    /// `claim_source`. `claim_source` says `learned` when fairq learned one value
+    /// only, so `fairq status` reads this field and `mem_source` to put its note
+    /// beside the value that fairq chose.
     ///
-    /// The value is empty in a record of a qex that did not write it.
+    /// The value is empty in a record of a fairq that did not write it.
     #[serde(default)]
     pub cpu_source: String,
     /// Where the memory claim came from. See `cpu_source`.
@@ -551,9 +551,9 @@ pub struct JobStatus {
     #[serde(default)]
     pub group_name: Option<String>,
     pub usage: Usage,
-    /// Shows that qex started the job although it is larger than the budget.
+    /// Shows that fairq started the job although it is larger than the budget.
     ///
-    /// qex starts such a job when no other job operates. A job that stays in
+    /// fairq starts such a job when no other job operates. A job that stays in
     /// the queue for ever gives no data to the agent.
     #[serde(default)]
     pub forced: bool,
@@ -590,7 +590,7 @@ pub struct JobStatus {
     /// A reader uses it to see how long the front of the queue has not moved.
     #[serde(default)]
     pub blocked_since: Option<u64>,
-    /// The number of jobs that qex started after this job reached the front of
+    /// The number of jobs that fairq started after this job reached the front of
     /// the queue.
     ///
     /// This count is in a field of its own, and it is NOT in `blocked_reason`.
@@ -603,7 +603,7 @@ pub struct JobStatus {
     /// scheduler cycle in which that user releases the capacity.
     #[serde(default)]
     pub passed_by: u32,
-    /// The reason that a job failed, when qex itself gives the reason.
+    /// The reason that a job failed, when fairq itself gives the reason.
     ///
     /// A command that does not exist is the usual cause. This field is separate
     /// from `blocked_reason`, because a job that failed does not wait for
@@ -622,8 +622,8 @@ pub struct JobStatus {
     pub locks: Vec<String>,
     /// The key that made this submission idempotent, if the user gave one.
     ///
-    /// THIS FIELD IS FOR A READER, AND NOT FOR THE COORDINATOR. `qex list` and
-    /// `qex status` show it, and the JSON schema names it.
+    /// THIS FIELD IS FOR A READER, AND NOT FOR THE COORDINATOR. `fairq list` and
+    /// `fairq status` show it, and the JSON schema names it.
     ///
     /// A coordinator that starts again reads the key from `spec.json`, and not
     /// from here. See `recover` in the `daemon` module, which reads
@@ -635,16 +635,16 @@ pub struct JobStatus {
     /// The counted claims of this job. The key is the pool name.
     #[serde(default)]
     pub claims: std::collections::BTreeMap<String, crate::spec::PoolClaim>,
-    /// The devices and units that qex gave this job. The key is the pool name.
+    /// The devices and units that fairq gave this job. The key is the pool name.
     #[serde(default)]
     pub assigned: std::collections::BTreeMap<String, Assignment>,
-    /// The number of times that qex started this job.
+    /// The number of times that fairq started this job.
     ///
-    /// The value is more than 1 when the job failed and `--retries` let qex
+    /// The value is more than 1 when the job failed and `--retries` let fairq
     /// start it again.
     #[serde(default)]
     pub attempts: u32,
-    /// The number of times that qex may still start this job again.
+    /// The number of times that fairq may still start this job again.
     #[serde(default)]
     pub retries_left: u32,
     /// The job that caused this job to stop, for a job in the state `skipped`.
@@ -655,15 +655,15 @@ pub struct JobStatus {
     /// command, and does not follow the chain.
     #[serde(default)]
     pub caused_by: Option<uuid::Uuid>,
-    /// What qex removed from the output files, when the job wrote more than
-    /// `[logs] max_bytes`. The value is `None` when qex kept everything.
+    /// What fairq removed from the output files, when the job wrote more than
+    /// `[logs] max_bytes`. The value is `None` when fairq kept everything.
     #[serde(default)]
     pub logs_dropped: Option<LogsDropped>,
     pub tags: Vec<String>,
 }
 
 impl JobStatus {
-    /// The name that qex SHOWS. See `safe_name`.
+    /// The name that fairq SHOWS. See `safe_name`.
     ///
     /// Read the field `name` only to write the record, or to find a job by the
     /// name that the user gave.
@@ -740,12 +740,12 @@ impl JobStatus {
 /// the temporary file to the target name. A reader thus sees the old contents
 /// or the new contents. A reader never sees a part of the new contents.
 ///
-/// This behaviour is necessary because `qex wait` reads `status.json` directly
+/// This behaviour is necessary because `fairq wait` reads `status.json` directly
 /// when the coordinator does not operate.
 ///
 /// # The three steps that make the record durable
 ///
-/// qex says that a job keeps its result when the coordinator stops and when the
+/// fairq says that a job keeps its result when the coordinator stops and when the
 /// machine loses power. Three steps together give that, and two of the three are
 /// easy to forget:
 ///
@@ -758,7 +758,7 @@ impl JobStatus {
 ///    file at all.
 ///
 /// An error in any of these steps is an error of this function. A record that
-/// qex could not write is not a record, and a caller must hear that.
+/// fairq could not write is not a record, and a caller must hear that.
 pub fn write_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
     write_atomic_with(path, bytes, mode, true)
 }
@@ -814,7 +814,7 @@ fn write_atomic_with(path: &Path, bytes: &[u8], mode: u32, sync: bool) -> Result
     // Step 2.
     if let Err(e) = std::fs::rename(&tmp, path) {
         // The temporary file must not stay behind. A directory that fills with
-        // these files holds space that `qex du` cannot explain.
+        // these files holds space that `fairq du` cannot explain.
         std::fs::remove_file(&tmp).ok();
         return Err(e).with_context(|| format!("renaming {} into place", tmp.display()));
     }
@@ -840,7 +840,7 @@ fn read_status_as(dir: &Path, euid: u32) -> Result<JobStatus> {
     serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
 }
 
-/// A job record that another user owns, which qex does not read.
+/// A job record that another user owns, which fairq does not read.
 #[derive(Debug)]
 pub struct NotOwned(pub std::path::PathBuf);
 
@@ -880,7 +880,7 @@ pub fn write_status(dir: &Path, status: &JobStatus) -> Result<()> {
 /// Writes the record of a job, and does not wait for the disk.
 ///
 /// See `write_atomic_unsynced` for what this form promises and what it does
-/// not. `qex abort` uses it under the lock of the coordinator: a wait for the
+/// not. `fairq abort` uses it under the lock of the coordinator: a wait for the
 /// disk on each of thousands of records would hold every other request for
 /// the whole abort, and the record protects against the death of the
 /// coordinator, which the page cache survives.
@@ -1074,7 +1074,7 @@ mod tests {
 
     #[test]
     fn atomic_write_applies_the_requested_mode() {
-        let dir = crate::testutil::temp_dir().join(format!("qex-atomic-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("fairq-atomic-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("secret.json");
         write_atomic(&path, b"{}", 0o600).unwrap();
@@ -1106,7 +1106,7 @@ mod tests {
     #[test]
     fn a_job_record_is_read_only_when_the_user_owns_it() {
         let dir =
-            crate::testutil::temp_dir().join(format!("qex-own-record-{}", uuid::Uuid::new_v4()));
+            crate::testutil::temp_dir().join(format!("fairq-own-record-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
         let me = unsafe { libc::geteuid() };
         let elsewhere = dir.join("elsewhere.json");

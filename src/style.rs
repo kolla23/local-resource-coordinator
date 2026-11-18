@@ -1,8 +1,8 @@
 //! This module holds the terminal codes for colour and weight.
 //!
-//! qex writes these codes only when the standard output is a terminal. A file
+//! fairq writes these codes only when the standard output is a terminal. A file
 //! or a pipe thus receives clean text, and a command such as
-//! `qex top --once > page.txt` gives a file that a program can read.
+//! `fairq top --once > page.txt` gives a file that a program can read.
 //!
 //! The module also follows the `NO_COLOR` variable, which a user sets to ask
 //! every program for text with no colour.
@@ -19,7 +19,7 @@ const YELLOW: &str = "\x1b[33m";
 const BLUE: &str = "\x1b[34m";
 const MAGENTA: &str = "\x1b[35m";
 
-/// Tests if qex may write terminal codes.
+/// Tests if fairq may write terminal codes.
 ///
 /// The answer stays the same for the life of the process, so this function
 /// reads the conditions one time.
@@ -66,7 +66,7 @@ pub fn faint(text: &str) -> String {
     wrap(DIM, text)
 }
 
-/// Writes the selected line of `qex top`.
+/// Writes the selected line of `fairq top`.
 ///
 /// Inverse video is the usual mark of a selection on a terminal. When colour
 /// is off, the caller must mark the line in another way, because this
@@ -99,7 +99,7 @@ pub fn state(name: &str, text: &str) -> String {
     }
 }
 
-/// Gives the terminal codes of a job state, or `None` for a name that qex does
+/// Gives the terminal codes of a job state, or `None` for a name that fairq does
 /// not know.
 ///
 /// This function is separate from [`state`] so that a test can read the choice.
@@ -153,8 +153,8 @@ mod tests {
     /// EVERY FINAL STATE MUST HAVE A COLOUR, AND `expired` MUST LOOK LIKE
     /// `skipped`.
     ///
-    /// A state with no colour falls to the branch for a name that qex does not
-    /// know, and `qex top` then gives it plain text while every other state has
+    /// A state with no colour falls to the branch for a name that fairq does not
+    /// know, and `fairq top` then gives it plain text while every other state has
     /// a colour. A reader sees that as a fault in the program.
     ///
     /// `expired` and `skipped` take the same colour because they say the same
@@ -162,7 +162,7 @@ mod tests {
     /// must not take the colour of `failed`, which says that the work ran and
     /// gave a bad result.
     #[test]
-    fn every_state_that_qex_writes_has_a_colour() {
+    fn every_state_that_fairq_writes_has_a_colour() {
         for name in [
             "running",
             "starting",
@@ -178,7 +178,7 @@ mod tests {
         ] {
             assert!(
                 state_codes(name).is_some(),
-                "the state `{name}` has no colour, so `qex top` writes it as plain text"
+                "the state `{name}` has no colour, so `fairq top` writes it as plain text"
             );
         }
         assert_eq!(

@@ -4,10 +4,10 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: a read returns the clocks its age was measured against; a read with a future mtime has no age (issue #17).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the config file is read only when the user or root owns it and other users cannot write it (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the default [update] url names this project's releases (issue #113).
-//! This module reads the config file `~/.config/qex.toml`.
+//! This module reads the config file `~/.config/fairq.toml`.
 //!
 //! Each field has a default value. The config file is thus optional. If the
-//! file does not exist, qex uses the default values and does not give an error.
+//! file does not exist, fairq uses the default values and does not give an error.
 
 use crate::{paths, sys, units};
 use anyhow::{Context, Result};
@@ -65,11 +65,11 @@ pub enum OversizedPolicy {
     Queue,
 }
 
-/// What qex may ASSUME about the machine that it runs on.
+/// What fairq may ASSUME about the machine that it runs on.
 ///
 /// # This key does not enforce anything
 ///
-/// qex does not limit a job in either mode. A claim decides what STARTS and
+/// fairq does not limit a job in either mode. A claim decides what STARTS and
 /// when, and a job that claims two gigabytes and uses twenty still fills the
 /// machine. The name of the section is `[enforce]` because a way to hold a job
 /// to its claim would attach to `single-user`, and a config file that already
@@ -79,21 +79,21 @@ pub enum OversizedPolicy {
 pub enum EnforceMode {
     /// Other users, other agents and people share this machine.
     ///
-    /// qex finds the coordinators of the other users and counts their claims
+    /// fairq finds the coordinators of the other users and counts their claims
     /// against the budget, and it leaves room for work that it does not
     /// control.
     #[default]
     Cooperative,
-    /// qex may assume that it decides what runs on this machine.
+    /// fairq may assume that it decides what runs on this machine.
     ///
-    /// qex then uses more of the machine, because the room that `cooperative`
+    /// fairq then uses more of the machine, because the room that `cooperative`
     /// leaves is room for work that does not exist here. It also looks for no
     /// other coordinator.
     SingleUser,
 }
 
 impl EnforceMode {
-    /// True when qex may assume that it decides what runs here.
+    /// True when fairq may assume that it decides what runs here.
     pub fn is_single_user(self) -> bool {
         self == Self::SingleUser
     }
@@ -106,7 +106,7 @@ impl EnforceMode {
 /// A field such as `[budget] cpu` takes an integer OR a percentage, so the
 /// field is text in this program. TOML then refused `cpu = 2` with
 /// ``invalid type: integer `2`, expected a string``, while `[defaults] cpu = 1`
-/// accepted an integer in the same file, and `qex help config` shows both
+/// accepted an integer in the same file, and `fairq help config` shows both
 /// forms. A user who wrote the obvious thing received an error that named a
 /// type in the program and gave no remedy.
 ///
@@ -182,7 +182,7 @@ where
 ///
 /// A percentage stops here. `[budget] cpu` takes a percentage because it names
 /// a part of the machine. `[defaults] cpu` names the cores for ONE job, so a
-/// percentage there has no meaning that qex can defend, and qex must not choose
+/// percentage there has no meaning that fairq can defend, and fairq must not choose
 /// one in silence.
 fn whole_number_opt<'de, D>(d: D) -> Result<Option<u64>, D::Error>
 where
@@ -207,7 +207,7 @@ where
         fn visit_i64<E: de::Error>(self, v: i64) -> Result<u64, E> {
             u64::try_from(v).map_err(|_| {
                 de::Error::custom(format!(
-                    "the number is {v}, and a count cannot be below zero. qex cannot \
+                    "the number is {v}, and a count cannot be below zero. fairq cannot \
                      calculate a size from it, and it stops. Write a whole number of \
                      1 or more."
                 ))
@@ -227,7 +227,7 @@ where
             }
             t.parse::<u64>().map_err(|_| {
                 de::Error::custom(format!(
-                    "the value is `{v}`, and qex cannot read a whole number from it. qex \
+                    "the value is `{v}`, and fairq cannot read a whole number from it. fairq \
                      cannot calculate the size of a job, and it stops. Write a whole \
                      number, such as 1."
                 ))
@@ -257,10 +257,10 @@ where
     use serde::de::{self, Visitor};
     use std::fmt;
 
-    /// The message for a value from which qex can read no whole number.
+    /// The message for a value from which fairq can read no whole number.
     fn refuse<E: de::Error>(wrote: &dyn fmt::Display) -> E {
         de::Error::custom(format!(
-            "the value is `{wrote}`, and qex cannot read a whole number from it. Write a \
+            "the value is `{wrote}`, and fairq cannot read a whole number from it. Write a \
              whole number, such as 10, with or without quotation marks. A number below \
              zero takes a minus sign, such as -5."
         ))
@@ -283,7 +283,7 @@ where
             i32::try_from(v).map_err(|_| refuse(&v))
         }
         // A whole number that TOML read as a float, such as `10.0`. A value
-        // with a fraction stops here, because qex cannot obey half a step of
+        // with a fraction stops here, because fairq cannot obey half a step of
         // priority and it must not choose one of the two neighbours in silence.
         fn visit_f64<E: de::Error>(self, v: f64) -> Result<i32, E> {
             if v.fract() == 0.0 && v >= i32::MIN as f64 && v <= i32::MAX as f64 {
@@ -312,13 +312,13 @@ where
 ///
 /// # Why `nan` and `inf` stop here
 ///
-/// TOML has the values `nan` and `inf`, and each field here is a limit that qex
+/// TOML has the values `nan` and `inf`, and each field here is a limit that fairq
 /// compares against a measurement. A test against `nan` is false for EVERY
 /// measurement, so the limit never operates: `max_pressure = nan` accepted the
 /// file, passed `validate` (because `nan < 1.0` is false), and then held no job
-/// back. `qex config show --json` wrote it as `null`, because JSON has no such
+/// back. `fairq config show --json` wrote it as `null`, because JSON has no such
 /// value. A limit that never operates and does not show itself is worse than a
-/// file that qex refuses.
+/// file that fairq refuses.
 ///
 /// The text form already stopped, because `"nan"` reaches `visit_str`. The
 /// number form did not, so the two forms disagreed. This function is part of a
@@ -331,12 +331,12 @@ where
     use serde::de::{self, Visitor};
     use std::fmt;
 
-    /// The message for a value that is not a number that qex can compare.
+    /// The message for a value that is not a number that fairq can compare.
     fn refuse<E: de::Error>(wrote: &dyn fmt::Display) -> E {
         de::Error::custom(format!(
-            "the value is `{wrote}`, and qex cannot read a number from it. A limit that \
+            "the value is `{wrote}`, and fairq cannot read a number from it. A limit that \
              is not a number is false against every measurement, so it never operates \
-             and qex holds no job back. Write a number, such as 1.5."
+             and fairq holds no job back. Write a number, such as 1.5."
         ))
     }
 
@@ -378,32 +378,32 @@ where
     d.deserialize_any(DecimalNumber)
 }
 
-/// The share of the machine that qex uses.
+/// The share of the machine that fairq uses.
 ///
-/// AN EMPTY VALUE means "choose from `[enforce] mode`": a machine that qex
-/// shares needs room for work that qex does not control, and a machine that qex
+/// AN EMPTY VALUE means "choose from `[enforce] mode`": a machine that fairq
+/// shares needs room for work that fairq does not control, and a machine that fairq
 /// decides for does not. `budget_cpu` and `budget_mem` resolve it, and a value
 /// that the reader wrote always wins.
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BudgetConfig {
-    /// The number of cores that qex can use.
+    /// The number of cores that fairq can use.
     ///
     /// Give an integer, or a percentage of the machine.
     #[serde(deserialize_with = "text_or_number")]
     pub cpu: String,
-    /// The quantity of memory that qex can use.
+    /// The quantity of memory that fairq can use.
     ///
     /// Give a size, or a percentage of the machine.
     #[serde(deserialize_with = "text_or_number")]
     pub mem: String,
 }
 
-/// The share of the machine that qex uses when the config names no budget.
+/// The share of the machine that fairq uses when the config names no budget.
 ///
 /// `cooperative` leaves a quarter of the machine for the work of other users,
 /// of other agents and of a person. `single-user` says that no such work
-/// exists here, so qex uses more.
+/// exists here, so fairq uses more.
 fn default_budget(mode: EnforceMode) -> &'static str {
     match mode {
         EnforceMode::Cooperative => "75%",
@@ -416,14 +416,14 @@ fn default_budget(mode: EnforceMode) -> &'static str {
 pub struct SystemConfig {
     /// The quantity of memory to keep free at all times.
     ///
-    /// qex does not start a job if the job decreases the available memory below
+    /// fairq does not start a job if the job decreases the available memory below
     /// this value. This test finds the load from other users and from programs
-    /// that qex does not control.
+    /// that fairq does not control.
     #[serde(deserialize_with = "text_or_number")]
     pub reserve_mem: String,
     /// The maximum permitted memory pressure.
     ///
-    /// qex does not start a job while the PSI value is above this limit.
+    /// fairq does not start a job while the PSI value is above this limit.
     /// Linux supplies this measurement. macOS does not.
     #[serde(deserialize_with = "decimal_number")]
     pub max_pressure: f64,
@@ -442,7 +442,7 @@ impl Default for SystemConfig {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct EnforceConfig {
-    /// What qex may assume about this machine. See [`EnforceMode`].
+    /// What fairq may assume about this machine. See [`EnforceMode`].
     pub mode: EnforceMode,
 }
 
@@ -460,7 +460,7 @@ impl Default for PeersConfig {
     fn default() -> Self {
         Self {
             enabled: None,
-            dir: "/tmp/qex".into(),
+            dir: "/tmp/fairq".into(),
             stale_after: "30s".into(),
         }
     }
@@ -470,7 +470,7 @@ impl Default for PeersConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct QueueConfig {
     pub oversized: OversizedPolicy,
-    /// The time that the queue must stay empty before qex starts a large job.
+    /// The time that the queue must stay empty before fairq starts a large job.
     ///
     /// This delay prevents a start while the last jobs stop.
     #[serde(deserialize_with = "text_or_number")]
@@ -478,12 +478,12 @@ pub struct QueueConfig {
     /// How many jobs may start before the job at the front of the queue.
     ///
     /// A small job that passes a large job again and again keeps the large job
-    /// in the queue for ever. After this number of jobs, qex keeps the capacity
+    /// in the queue for ever. After this number of jobs, fairq keeps the capacity
     /// for the job at the front and starts nothing else.
     ///
     /// The value `0` gives a strict order for a job at the front that KEEPS
     /// capacity: no job passes it. The value changes nothing for a job that
-    /// another user, the machine, or the config file holds back, because qex
+    /// another user, the machine, or the config file holds back, because fairq
     /// keeps no capacity for those at any value.
     pub max_bypass: u32,
 }
@@ -523,7 +523,7 @@ pub const IO_CLASSES: [&str; 3] = ["none", "best-effort", "idle"];
 /// and a video call break up, because the job and the person ask the scheduler
 /// for the same cores and the scheduler treats them alike.
 ///
-/// qex knows something that the scheduler does not: this work is in a queue, so
+/// fairq knows something that the scheduler does not: this work is in a queue, so
 /// nobody is waiting for the next second of it.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -534,7 +534,7 @@ pub struct PolitenessConfig {
     /// wants it. 0 is the value of a command that you type.
     ///
     /// A user cannot LOWER this number without privilege, and the usual
-    /// `RLIMIT_NICE` of 0 makes every number below zero such a number. qex
+    /// `RLIMIT_NICE` of 0 makes every number below zero such a number. fairq
     /// still makes the call; the system refuses it; and the job then runs at
     /// the priority that it already had. Measured on Linux:
     /// `setpriority(PRIO_PROCESS, 0, -5)` from nice 0 gives EACCES, and a job
@@ -546,9 +546,9 @@ pub struct PolitenessConfig {
     /// `idle` gives the disk to everything else first. `best-effort` is the
     /// usual class, and `none` leaves the class as it is.
     ///
-    /// macOS has no equivalent, and qex ignores this value there.
+    /// macOS has no equivalent, and fairq ignores this value there.
     pub io: String,
-    /// The value that qex adds to the out-of-memory score of a job, on Linux.
+    /// The value that fairq adds to the out-of-memory score of a job, on Linux.
     ///
     /// The kernel chooses a victim when the machine has no memory left. A
     /// larger number makes the job a more likely victim, and 0 leaves the
@@ -578,9 +578,9 @@ impl Default for PolitenessConfig {
 /// A claim controls the QUEUE. It does not control the job, and a job that
 /// asks the machine how large it is gets the size of the MACHINE. A build with
 /// a claim of 2 cores on a machine of 16 then starts 16 threads, and the claim
-/// that qex made becomes a promise that the job breaks.
+/// that fairq made becomes a promise that the job breaks.
 ///
-/// Most runtimes read a variable in place of the machine, so qex writes those
+/// Most runtimes read a variable in place of the machine, so fairq writes those
 /// variables from the claim. This is the nearest thing to a limit that operates
 /// on macOS as well as on Linux, and it needs no cgroup and no privilege.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -588,7 +588,7 @@ impl Default for PolitenessConfig {
 pub struct ClaimsConfig {
     /// Write the size of the claim into the environment of the job.
     pub export_env: bool,
-    /// The variables that qex does not write without a request.
+    /// The variables that fairq does not write without a request.
     ///
     /// `java` writes `JAVA_TOOL_OPTIONS`, and each JVM then writes a line to
     /// ITS STANDARD ERROR: `Picked up JAVA_TOOL_OPTIONS: ...`. That line goes
@@ -617,7 +617,7 @@ pub enum ClaimHint {
 }
 
 impl ClaimHint {
-    /// The name that the config file uses. `qex config show` prints it.
+    /// The name that the config file uses. `fairq config show` prints it.
     pub fn name(self) -> &'static str {
         match self {
             Self::Java => "java",
@@ -634,7 +634,7 @@ impl<'de> Deserialize<'de> for ClaimHint {
             "make" => Ok(Self::Make),
             // The three parts: what happened, why it matters, what to do.
             _ => Err(serde::de::Error::custom(format!(
-                "unknown name `{s}` in `[claims] also`. qex writes no variable \
+                "unknown name `{s}` in `[claims] also`. fairq writes no variable \
                  for that name, so each job of a build receives the size of the \
                  machine and not the size of its claim. Give `java`, or `make`, \
                  or both."
@@ -674,9 +674,9 @@ impl Default for SubmitConfig {
     }
 }
 
-/// The job size that qex uses when a submission gives no size.
+/// The job size that fairq uses when a submission gives no size.
 ///
-/// Each field is optional. If a field has no value, qex calculates a default.
+/// Each field is optional. If a field has no value, fairq calculates a default.
 /// See [`Config::default_cpu`] and [`Config::default_mem`].
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -694,7 +694,7 @@ pub struct DefaultsConfig {
     pub timeout: Option<String>,
     /// The time that a job may wait in the queue. The default is no limit.
     ///
-    /// qex has NO built-in value here, and that is deliberate. A job that
+    /// fairq has NO built-in value here, and that is deliberate. A job that
     /// reaches this limit never runs. A built-in value would thus discard the
     /// work of a user who did not ask for the rule, on the day that the machine
     /// is busy. A user who wants the rule for every job writes it here one time.
@@ -703,8 +703,8 @@ pub struct DefaultsConfig {
     /// The quantity on each device for a job that claims a device.
     ///
     /// The value `0`, and no value, mean that the job takes the whole of each
-    /// device that qex gives it. That is the safe value: a job that consumed
-    /// nothing would let qex put four unlimited jobs on one card.
+    /// device that fairq gives it. That is the safe value: a job that consumed
+    /// nothing would let fairq put four unlimited jobs on one card.
     pub vram: Option<String>,
 }
 
@@ -719,9 +719,9 @@ pub const GPU_POOL: &str = "gpu";
 /// One pool of a countable resource, as the config file gives it.
 ///
 /// A pool has a name and a total. A pool with `devices` also has a capacity for
-/// each device, and qex then says WHICH device each job gets.
+/// each device, and fairq then says WHICH device each job gets.
 ///
-/// qex never probes a driver. The devices come from this file only, so a
+/// fairq never probes a driver. The devices come from this file only, so a
 /// machine with no CUDA and no driver library schedules GPU claims correctly.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -757,7 +757,7 @@ pub struct Pool {
 }
 
 impl Pool {
-    /// Tests if qex says WHICH device each job of this pool gets.
+    /// Tests if fairq says WHICH device each job of this pool gets.
     pub fn is_indexed(&self) -> bool {
         !self.devices.is_empty()
     }
@@ -767,7 +767,7 @@ impl Pool {
         self.devices.iter().copied().max().unwrap_or(0)
     }
 
-    /// Gives the pool that qex uses for a name that the configuration does not
+    /// Gives the pool that fairq uses for a name that the configuration does not
     /// declare.
     ///
     /// `--lock NAME` needs no configuration, and it must keep that. A name that
@@ -788,15 +788,15 @@ impl Pool {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct GcConfig {
-    /// The age of a record that `qex gc` deletes.
+    /// The age of a record that `fairq gc` deletes.
     ///
-    /// NOTHING READS THIS VALUE UNTIL A PERSON RUNS `qex gc`. The coordinator
+    /// NOTHING READS THIS VALUE UNTIL A PERSON RUNS `fairq gc`. The coordinator
     /// has no timer that deletes a record, and the word `keep` in a config file
     /// reads as a rule that something applies. Each page that names this value
     /// must say so.
     ///
-    /// `qex gc` works on every directory, so this value is larger than the one
-    /// hour of `qex clean --auto`, which works on one directory tree.
+    /// `fairq gc` works on every directory, so this value is larger than the one
+    /// hour of `fairq clean --auto`, which works on one directory tree.
     #[serde(deserialize_with = "text_or_number")]
     pub keep: String,
 }
@@ -807,9 +807,9 @@ impl Default for GcConfig {
     }
 }
 
-/// Controls the short record of the jobs that qex accepted.
+/// Controls the short record of the jobs that fairq accepted.
 ///
-/// The record lets `qex status` tell "the record was deleted" from "this job
+/// The record lets `fairq status` tell "the record was deleted" from "this job
 /// never existed". An agent then knows whether to submit the job again.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -817,7 +817,7 @@ pub struct HistoryConfig {
     /// The time to keep the id of a job after its record is gone.
     ///
     /// An agent asks about a job of the last minutes or hours. An id of last
-    /// month answers no question, so qex does not keep it.
+    /// month answers no question, so fairq does not keep it.
     #[serde(deserialize_with = "text_or_number")]
     pub keep: String,
 }
@@ -828,13 +828,13 @@ impl Default for HistoryConfig {
     }
 }
 
-/// Controls the limit on the output that qex keeps for each job.
+/// Controls the limit on the output that fairq keeps for each job.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LogsConfig {
-    /// The bytes that qex keeps for each stream of each job.
+    /// The bytes that fairq keeps for each stream of each job.
     ///
-    /// qex keeps the first part and the last part of the output, and it writes
+    /// fairq keeps the first part and the last part of the output, and it writes
     /// a line between them that says how much went. Use `"0"` for no limit.
     ///
     /// A size with no unit is a count of bytes, so `max_bytes = 65536` and
@@ -847,7 +847,7 @@ pub struct LogsConfig {
 impl Default for LogsConfig {
     fn default() -> Self {
         // A job wrote 386MB of standard output in a review, and nothing stopped
-        // it. qex is made to be started and left, so nobody sees a disk fill,
+        // it. fairq is made to be started and left, so nobody sees a disk fill,
         // and the same disk holds the record of each job. No limit is thus not
         // an acceptable default.
         //
@@ -861,15 +861,15 @@ impl Default for LogsConfig {
     }
 }
 
-/// Controls the claim that qex calculates from the earlier jobs.
+/// Controls the claim that fairq calculates from the earlier jobs.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LearnConfig {
-    /// Permits qex to use the measurements of the earlier jobs as the claim.
+    /// Permits fairq to use the measurements of the earlier jobs as the claim.
     pub enabled: bool,
     /// The multiplier for a measurement.
     ///
-    /// A measurement is the peak that qex saw. A job can use more with a larger
+    /// A measurement is the peak that fairq saw. A job can use more with a larger
     /// input, so the claim is larger than the measurement.
     #[serde(deserialize_with = "decimal_number")]
     pub margin: f64,
@@ -884,7 +884,7 @@ impl Default for LearnConfig {
     }
 }
 
-/// Controls the command that qex runs when a job stops.
+/// Controls the command that fairq runs when a job stops.
 ///
 /// This hook is in the config file and not on the job. It belongs to the
 /// machine and to the person at it: the same pipeline runs on a laptop with a
@@ -900,9 +900,9 @@ pub struct HooksConfig {
     /// can put there. Job data cannot become a command line, but a relative
     /// name lets it select WHICH program runs.
     ///
-    /// This is not a shell command line. qex starts no shell for a job, and it
+    /// This is not a shell command line. fairq starts no shell for a job, and it
     /// starts no shell here. To use a shell feature, name the shell:
-    /// `["bash", "-lc", "notify-send \"qex: $QEX_JOB_NAME\""]`. The values of
+    /// `["bash", "-lc", "notify-send \"fairq: $FAIRQ_JOB_NAME\""]`. The values of
     /// the job arrive in the environment, so a job name with a shell character
     /// stays a name.
     pub on_stop: Vec<String>,
@@ -915,8 +915,8 @@ pub struct HooksConfig {
     pub on_stop_states: Vec<String>,
     /// The time limit for the hook.
     ///
-    /// qex signals the process group of the hook at this limit. A hook with no
-    /// limit could hold a process of qex for ever.
+    /// fairq signals the process group of the hook at this limit. A hook with no
+    /// limit could hold a process of fairq for ever.
     ///
     /// The quotation marks make no difference here, as in every other field of
     /// this file that holds a time: `timeout = 30` and `timeout = "30"` and
@@ -973,32 +973,32 @@ pub struct Config {
     pub pools: Vec<PoolConfig>,
 }
 
-/// Whether qex looks for a newer release of itself, and how often.
+/// Whether fairq looks for a newer release of itself, and how often.
 ///
 /// THE COORDINATOR ASKS, AND THE CLI NEVER DOES. A check must not delay a
 /// command and must not fail one, and the one way to keep both rules
 /// absolutely is to take the network out of the path of a command. One call
 /// also serves every agent on the machine, which is the property that this
-/// queue exists for. `qex version --check` is the exception: a person asked
+/// queue exists for. `fairq version --check` is the exception: a person asked
 /// for it, so it asks now.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UpdateConfig {
-    /// How often qex looks: a time such as `24h` or `7d`, or `never`.
+    /// How often fairq looks: a time such as `24h` or `7d`, or `never`.
     ///
-    /// `never` stops the AUTOMATIC check absolutely: qex then opens no
+    /// `never` stops the AUTOMATIC check absolutely: fairq then opens no
     /// connection of its own, writes no file for this, and says nothing about
-    /// a version, for ever. `qex version --check` still asks, because a person
+    /// a version, for ever. `fairq version --check` still asks, because a person
     /// asked it to.
     #[serde(deserialize_with = "text_or_number")]
     pub check: String,
     /// The service that answers. Give a mirror here.
     ///
     /// The answer must be the JSON of a release of GitHub, which holds
-    /// `tag_name`. qex names this address when it reports, so a reader always
+    /// `tag_name`. fairq names this address when it reports, so a reader always
     /// learns WHO answered.
     pub url: String,
-    /// How long qex waits for that service.
+    /// How long fairq waits for that service.
     #[serde(deserialize_with = "text_or_number")]
     pub timeout: String,
 }
@@ -1023,28 +1023,28 @@ enum Detail {
     /// the cause and the remedy, because nothing else will tell them.
     Full,
     /// A place that keeps the message and shows it again later. The record of a
-    /// job is such a place, and `qex status` prints it.
+    /// job is such a place, and `fairq status` prints it.
     ///
     /// The long message is advice about an upgrade. In the `error:` field of a
-    /// job that ran, it reads as a fault in qex, and it hides the one line that
+    /// job that ran, it reads as a fault in fairq, and it hides the one line that
     /// the reader of that field needs. The short form gives the answer of the
     /// parser and nothing else.
     Short,
 }
 
-/// Makes the message for a config file that qex cannot read.
+/// Makes the message for a config file that fairq cannot read.
 ///
 /// # Why this is not the message of the parser alone
 ///
 /// `Config` refuses a field that it does not know, and that rule is correct: a
 /// value with a spelling fault must not be ignored in silence. But it has a
 /// second cause that the parser cannot see. A user who writes an option of a
-/// NEWER qex, and then runs an OLDER qex, gets "unknown field" for an option
+/// NEWER fairq, and then runs an OLDER fairq, gets "unknown field" for an option
 /// that is not a fault at all.
 ///
-/// The commands that need the config file then stop: `qex submit`, `qex run`,
-/// `qex pipeline`, `qex gc`, `qex du` and `qex config show`. `daemon` reads it
-/// too, so qex cannot START a coordinator.
+/// The commands that need the config file then stop: `fairq submit`, `fairq run`,
+/// `fairq pipeline`, `fairq gc`, `fairq du` and `fairq config show`. `daemon` reads it
+/// too, so fairq cannot START a coordinator.
 ///
 /// # Why the message names so few commands that continue
 ///
@@ -1052,19 +1052,19 @@ enum Detail {
 /// to miss. Test BOTH before you change this text.
 ///
 /// 1. Does the command read the config file? `grep -n 'Config::load' src/`. A
-///    call with `?` stops. `qex top` (it takes the default values and names
+///    call with `?` stops. `fairq top` (it takes the default values and names
 ///    the file on the page) and the supervisor of a job (it takes the default
 ///    values) continue.
 /// 2. Does the command need a COORDINATOR? `Client::connect` starts one when
-///    none operates, and a coordinator cannot start from a file that qex
-///    cannot read. `qex info`, `qex list`, `qex status`, `qex kill`, `qex
-///    cancel`, `qex clean` and `qex rerun` therefore continue only WHILE a
+///    none operates, and a coordinator cannot start from a file that fairq
+///    cannot read. `fairq info`, `fairq list`, `fairq status`, `fairq kill`, `fairq
+///    cancel`, `fairq clean` and `fairq rerun` therefore continue only WHILE a
 ///    coordinator operates. With none, each waits 10 seconds and then reports
 ///    that the coordinator did not start — a message that names no cause.
 ///
 /// This message tells the reader to `kill` the coordinator, so it must never
-/// promise a command that the `kill` takes away. Only `qex wait`, `qex top`,
-/// `qex logs` and `qex version` continue in every state.
+/// promise a command that the `kill` takes away. Only `fairq wait`, `fairq top`,
+/// `fairq logs` and `fairq version` continue in every state.
 ///
 /// The order matters, and the message gives it. A new option belongs in the
 /// config file only after the COORDINATOR is the new build. The program on the
@@ -1072,35 +1072,35 @@ enum Detail {
 /// code that started it. `daemon::reload_config` reads the file again when the
 /// content changes, but it reads that file with the code that the coordinator
 /// holds, and that code does not know the new option. The read gives this same
-/// error, the coordinator keeps `State.cfg`, and `qex info` reports the fault.
+/// error, the coordinator keeps `State.cfg`, and `fairq info` reports the fault.
 /// The new option thus has no effect until a NEW coordinator reads it, which is
 /// the fault that this message must stop.
-/// The keys that qex accepted before it became admission control only.
+/// The keys that fairq accepted before it became admission control only.
 ///
-/// A reader whose file holds one of these must learn what qex does NOW, and not
+/// A reader whose file holds one of these must learn what fairq does NOW, and not
 /// read "unknown field", which names no remedy.
 ///
 /// EVERY NAME HERE IS UNIQUE TO THE THING THAT WENT. `growth` and `on_oom` are
 /// NOT in this list, and they must not be: `growth` also names a field of
 /// `[learn]`, and an answer for that word gives a key of a different section a
-/// reason that qex invents for it. The whole `[retry]` section went, so the
+/// reason that fairq invents for it. The whole `[retry]` section went, so the
 /// section name answers for both of its fields.
 const KEYS_THAT_WENT: &[(&str, &str)] = &[
     (
         "retry",
-        "qex raised the claim and started the job again after a kill for memory.",
+        "fairq raised the claim and started the job again after a kill for memory.",
     ),
     (
         "mem_overcommit",
-        "qex applied a second memory limit with this multiplier.",
+        "fairq applied a second memory limit with this multiplier.",
     ),
     (
         "use_systemd",
-        "qex started the coordinator again under systemd, to get a cgroup that it owned.",
+        "fairq started the coordinator again under systemd, to get a cgroup that it owned.",
     ),
 ];
 
-/// Names a key that this qex no longer accepts, if the message holds one.
+/// Names a key that this fairq no longer accepts, if the message holds one.
 ///
 /// THE NAME MUST MATCH IN FULL. A test for the name alone also answers a key
 /// that only STARTS with the name: `[system] retry_mem` is such a key, and the
@@ -1112,9 +1112,9 @@ const KEYS_THAT_WENT: &[(&str, &str)] = &[
 /// message as the one for a key in an array of tables. `[enforce] mode =
 /// "retry"` is thus indistinguishable here from a `retry` KEY, and an answer
 /// for the value tells the reader to delete a key that the file does not hold.
-/// A file that gives a value qex does not take falls through to the answer for
+/// A file that gives a value fairq does not take falls through to the answer for
 /// `[enforce] mode`, which names a section that the file DOES hold and lists
-/// the values that qex accepts. That answer is less exact, and it is true.
+/// the values that fairq accepts. That answer is less exact, and it is true.
 fn key_that_went(error: &toml::de::Error) -> Option<(&'static str, &'static str)> {
     let message = error.message();
     KEYS_THAT_WENT
@@ -1126,13 +1126,13 @@ fn key_that_went(error: &toml::de::Error) -> Option<(&'static str, &'static str)
 fn config_error(path: &std::path::Path, error: toml::de::Error, detail: Detail) -> anyhow::Error {
     let short = anyhow::anyhow!("parsing config file {}: {error}", path.display());
 
-    // A key that qex REMOVED needs its own answer. "unknown field" is true and
-    // it names no remedy, and the reader wrote that key because an earlier qex
+    // A key that fairq REMOVED needs its own answer. "unknown field" is true and
+    // it names no remedy, and the reader wrote that key because an earlier fairq
     // asked for it.
     if let Some((key, what_it_did)) = key_that_went(&error) {
         return anyhow::anyhow!(
-            "the configuration file {} sets `{key}`, and qex does not accept it.\n\n\
-             {what_it_did} qex does not limit a job now: a claim decides what STARTS and \
+            "the configuration file {} sets `{key}`, and fairq does not accept it.\n\n\
+             {what_it_did} fairq does not limit a job now: a claim decides what STARTS and \
              when, and a job that claims two gigabytes and uses twenty still fills the \
              machine.\n\n\
              Delete `{key}` from {}. To hold a job to a number, give a claim that fits the \
@@ -1142,15 +1142,15 @@ fn config_error(path: &std::path::Path, error: toml::de::Error, detail: Detail) 
         );
     }
 
-    // A value that qex no longer accepts for a key that stays.
+    // A value that fairq no longer accepts for a key that stays.
     if error.message().contains("unknown variant") && error.message().contains("cooperative") {
         return anyhow::anyhow!(
-            "the configuration file {} gives a value for `[enforce] mode` that qex does not \
+            "the configuration file {} gives a value for `[enforce] mode` that fairq does not \
              accept: {error}\n\n\
-             `off`, `soft` and `hard` went with the memory limit. qex does not limit a job \
+             `off`, `soft` and `hard` went with the memory limit. fairq does not limit a job \
              now.\n\n\
              Use `cooperative` when other users, other agents or people share this machine. \
-             Use `single-user` when qex decides what runs here: qex then uses more of the \
+             Use `single-user` when fairq decides what runs here: fairq then uses more of the \
              machine and looks for no other coordinator. Neither value limits a job.",
             path.display()
         );
@@ -1162,28 +1162,28 @@ fn config_error(path: &std::path::Path, error: toml::de::Error, detail: Detail) 
 
     anyhow::anyhow!(
         "{short}\n\n\
-         qex refuses a field that it does not know, because a name with a spelling \
+         fairq refuses a field that it does not know, because a name with a spelling \
          fault must not be ignored in silence.\n\n\
-         This qex is version {}. If that name is an option of a NEWER qex, then the \
+         This fairq is version {}. If that name is an option of a NEWER fairq, then the \
          file and the program do not agree. Each command that needs this file stops \
-         until they agree, and qex cannot start a coordinator, so a queue whose \
-         coordinator retires stays where it is. Your jobs continue, and `qex wait` \
-         and `qex top` continue. `qex info`, `qex list` and `qex status` continue \
-         while a coordinator operates. Read `qex help config`.\n\n\
+         until they agree, and fairq cannot start a coordinator, so a queue whose \
+         coordinator retires stays where it is. Your jobs continue, and `fairq wait` \
+         and `fairq top` continue. `fairq info`, `fairq list` and `fairq status` continue \
+         while a coordinator operates. Read `fairq help config`.\n\n\
          Put a new option in the config file only AFTER the coordinator is the new \
          build. The program on the disk is not sufficient: a coordinator operates for \
          hours, and it holds the code that started it. A coordinator reads this file \
          again when it changes, but it reads the file with the code that it holds. It \
-         gives this same error, it keeps the values that it had, and `qex info` reports \
+         gives this same error, it keeps the values that it had, and `fairq info` reports \
          the fault. A new option that you write before that moment thus has no \
          effect.\n\n\
          To correct it now:\n\
-         \x20   1. Install the new qex. Do this FIRST: while the old qex is the \
+         \x20   1. Install the new fairq. Do this FIRST: while the old fairq is the \
          program on the disk, no coordinator can start from this file.\n\
-         \x20   2. Run `qex info` for the version and the pid of the coordinator. A \
+         \x20   2. Run `fairq info` for the version and the pid of the coordinator. A \
          coordinator stops when no job operates; `kill <pid>` changes it at once, and \
          the jobs that operate continue.\n\
-         \x20   3. Run `qex info` again. The version must be the new one.\n\n\
+         \x20   3. Run `fairq info` again. The version must be the new one.\n\n\
          To go back instead, remove that section from {}.",
         // The version of the BUILD, and not the number in Cargo.toml. `main`
         // holds `0.0.0-dev` for ever, so `CARGO_PKG_VERSION` says nothing about
@@ -1196,7 +1196,7 @@ fn config_error(path: &std::path::Path, error: toml::de::Error, detail: Detail) 
 
 /// What one look at the configuration file gave.
 pub enum ConfigFile {
-    /// The bytes of the file, and the AGE of the file when qex read it.
+    /// The bytes of the file, and the AGE of the file when fairq read it.
     ///
     /// The age is the measurement that says whether a writer finished. See
     /// `daemon::reload_config`. It is `None` where the system gives no time
@@ -1216,13 +1216,13 @@ pub enum ConfigFile {
 ///
 /// The scheduler runs this on every turn. A read of a file can take any length
 /// of time — a network file system that stops answering holds it for minutes —
-/// and the mutex of the state must stay free, or `qex info`, `qex list` and
-/// `qex submit` all wait with it.
+/// and the mutex of the state must stay free, or `fairq info`, `fairq list` and
+/// `fairq submit` all wait with it.
 ///
 /// # Why the type of the file matters
 ///
 /// A FIFO at this path stops the OPEN until somebody writes to the FIFO. A
-/// review measured that: `qex info` gave no answer in 15 seconds, three threads
+/// review measured that: `fairq info` gave no answer in 15 seconds, three threads
 /// waited for the mutex that the fourth held, and only `kill -9` ended it. A
 /// device node can do the same.
 ///
@@ -1309,7 +1309,7 @@ fn refuse_config_owner(
         return None;
     };
     Some(std::io::Error::other(format!(
-        "qex will not read the config file {}: {why}. Set XDG_CONFIG_HOME to a directory \
+        "fairq will not read the config file {}: {why}. Set XDG_CONFIG_HOME to a directory \
          that you own, with a config file that only you can change",
         path.display()
     )))
@@ -1351,7 +1351,7 @@ fn read_config_inner(
     //
     // An age from AFTER the read covers the read as well. A writer that
     // touched the file at any moment up to this line gives a young age, and a
-    // young file is one that qex does not take.
+    // young file is one that fairq does not take.
     let mut handle = file;
     let mut bytes = Vec::new();
     let read = std::io::Read::read_to_end(&mut handle, &mut bytes);
@@ -1381,7 +1381,7 @@ fn read_config_inner(
                     || now.ino() != read.ino()
                     || now.modified().ok() != read.modified().ok()
             }
-            // The file went, or qex cannot say: do not call it settled.
+            // The file went, or fairq cannot say: do not call it settled.
             _ => true,
         }
     };
@@ -1394,7 +1394,7 @@ fn read_config_inner(
 }
 
 impl Config {
-    /// Reads `~/.config/qex.toml`.
+    /// Reads `~/.config/fairq.toml`.
     ///
     /// If the file does not exist, this function gives the default values.
     ///
@@ -1415,14 +1415,14 @@ impl Config {
     /// Reads the config file where the message becomes DATA.
     ///
     /// Two callers need this form. The supervisor of a job puts the fault in
-    /// the record of the job, and `qex status` prints that record. The
+    /// the record of the job, and `fairq status` prints that record. The
     /// coordinator puts the fault of a reload in `config_error`, and every
-    /// `qex info` then carries it, in the text form and in the JSON form.
+    /// `fairq info` then carries it, in the text form and in the JSON form.
     ///
     /// The long message is advice about an upgrade. In an `error:` field it
-    /// reads as a fault in qex, and in a warning of 20 lines it hides the one
+    /// reads as a fault in fairq, and in a warning of 20 lines it hides the one
     /// line that matters. This form gives the answer of the parser only, and
-    /// `qex config show` gives the long message to the person who asks for it.
+    /// `fairq config show` gives the long message to the person who asks for it.
     pub fn load_short() -> Result<Self> {
         Self::read(Detail::Short)
     }
@@ -1451,7 +1451,7 @@ impl Config {
             ConfigFile::Text(bytes, _) => {
                 let text = String::from_utf8(bytes).map_err(|_| {
                     anyhow::anyhow!(
-                        "the configuration file {} is not text. qex cannot take any value \
+                        "the configuration file {} is not text. fairq cannot take any value \
                          from it. Write the file again as UTF-8 text.",
                         path.display()
                     )
@@ -1461,15 +1461,15 @@ impl Config {
             ConfigFile::Missing => Ok(Self::default()),
             // EVERY CALLER GETS THIS GUARD, and not the coordinator only.
             //
-            // `qex config show` and `qex submit` read this file for
+            // `fairq config show` and `fairq submit` read this file for
             // themselves. A review put a FIFO at this path and measured both
             // of them with no answer at all, because the OPEN of a FIFO waits
-            // for a writer. The warning of `qex info` names `qex config show`
+            // for a writer. The warning of `fairq info` names `fairq config show`
             // as the way to see the whole message, so without this guard that
             // advice walks the reader into the same wait.
             ConfigFile::NotRegular => Err(anyhow::anyhow!(
-                "the configuration file {} is not a regular file. qex takes no value \
-                 from a path of another kind, because such a path can stop qex for \
+                "the configuration file {} is not a regular file. fairq takes no value \
+                 from a path of another kind, because such a path can stop fairq for \
                  ever: the open of a FIFO waits for a writer, and a read of a device \
                  gives bytes without end. Put a regular file at that path, or a link \
                  to one.",
@@ -1517,7 +1517,7 @@ impl Config {
     /// `[budget] cpu`, `[budget] mem`, `[system] reserve_mem` and
     /// `[peers] enabled` take their value from `[enforce] mode` when the config
     /// file names none. The struct then holds the empty sentinel, and a reader
-    /// of `qex config show --json` would see a value that is NOT the value in
+    /// of `fairq config show --json` would see a value that is NOT the value in
     /// force, with no way to recover it.
     ///
     /// An agent reads the JSON form, so the JSON form must answer.
@@ -1536,11 +1536,11 @@ impl Config {
         c
     }
 
-    /// Says whether qex looks for the coordinators of other users.
+    /// Says whether fairq looks for the coordinators of other users.
     ///
     /// With no value in the config file, the answer comes from `[enforce]
-    /// mode`. A machine that qex shares has other coordinators, and their
-    /// claims count against the budget. A machine that qex decides for has
+    /// mode`. A machine that fairq shares has other coordinators, and their
+    /// claims count against the budget. A machine that fairq decides for has
     /// none, so the search reads a shared directory for nothing.
     ///
     /// A value that the reader wrote always wins.
@@ -1550,11 +1550,11 @@ impl Config {
             .unwrap_or(!self.enforce.mode.is_single_user())
     }
 
-    /// Gives the memory that qex keeps free for work outside the queue.
+    /// Gives the memory that fairq keeps free for work outside the queue.
     ///
     /// With no value in the config file, the answer comes from `[enforce]
-    /// mode`: a machine that qex shares keeps memory for the work of others,
-    /// and a machine that qex decides for keeps less.
+    /// mode`: a machine that fairq shares keeps memory for the work of others,
+    /// and a machine that fairq decides for keeps less.
     pub fn reserve_mem(&self) -> Result<u64> {
         if self.system.reserve_mem.is_empty() {
             return Ok(match self.enforce.mode {
@@ -1572,7 +1572,7 @@ impl Config {
             .map(|d| d.unwrap_or(std::time::Duration::ZERO))
     }
 
-    /// Gives the age of a record that `qex gc` deletes.
+    /// Gives the age of a record that `fairq gc` deletes.
     pub fn gc_keep(&self) -> Result<std::time::Duration> {
         units::parse_duration(&self.gc.keep)
             .map_err(|e| anyhow::anyhow!("config [gc] keep: {e}"))
@@ -1604,7 +1604,7 @@ impl Config {
 
     /// Gives the default quantity of memory for a job.
     ///
-    /// If the config file gives no value, qex divides the machine memory by the
+    /// If the config file gives no value, fairq divides the machine memory by the
     /// number of cores. A job of 1 core thus receives an equal part of the
     /// memory. The default job size then scales with the machine.
     pub fn default_mem(&self) -> Result<u64> {
@@ -1620,7 +1620,7 @@ impl Config {
                 let cores = sys::cpu_count().max(1);
                 let total = sys::total_memory();
                 // If the memory probe fails, use a small claim. A claim of zero
-                // lets qex start an unlimited number of jobs together.
+                // lets fairq start an unlimited number of jobs together.
                 Ok((total / cores).max(1 << 28))
             }
         }
@@ -1635,7 +1635,7 @@ impl Config {
                 let n = units::parse_size(s)
                     .map_err(|e| anyhow::anyhow!("config [defaults] vram: {e}"))?;
                 // `0` says "the whole device". A claim of zero bytes on a
-                // device would let qex put an unlimited number of jobs on one
+                // device would let fairq put an unlimited number of jobs on one
                 // card, which is the fault that a claim prevents.
                 Ok(if n == 0 { None } else { Some(n) })
             }
@@ -1680,10 +1680,10 @@ impl Config {
     /// Tests each `[[pool]]` entry.
     /// Tests the fields of `[update]`.
     ///
-    /// Without this, `check = \"banana\"` is silent everywhere: `qex config
-    /// show` says nothing, `qex info` gives no warning, and the check is
-    /// simply off for ever. A field that qex cannot read must be reported one
-    /// time, and not at the moment that qex first uses it.
+    /// Without this, `check = \"banana\"` is silent everywhere: `fairq config
+    /// show` says nothing, `fairq info` gives no warning, and the check is
+    /// simply off for ever. A field that fairq cannot read must be reported one
+    /// time, and not at the moment that fairq first uses it.
     fn update_fields(&self) -> Result<()> {
         let check = self.update.check.trim();
         if !check.eq_ignore_ascii_case(crate::update::NEVER) {
@@ -1735,13 +1735,13 @@ impl Config {
             if !p.devices.is_empty() && p.count.is_some() {
                 anyhow::bail!(
                     "config [[pool]] `{name}` gives `count` and `devices`. Give one only. \
-                     Use `devices` when qex must say WHICH one a job gets. Use `count` when \
+                     Use `devices` when fairq must say WHICH one a job gets. Use `count` when \
                      the number is sufficient."
                 );
             }
             if p.devices.is_empty() && p.count.is_none() {
                 anyhow::bail!(
-                    "config [[pool]] `{name}` gives no `count` and no `devices`, so qex \
+                    "config [[pool]] `{name}` gives no `count` and no `devices`, so fairq \
                      does not know its size. Give `count = 4`, or `devices = [\"24GB\", \
                      \"24GB\"]`."
                 );
@@ -1775,7 +1775,7 @@ impl Config {
         }
     }
 
-    /// Gives the bytes that qex keeps for each stream of each job.
+    /// Gives the bytes that fairq keeps for each stream of each job.
     ///
     /// `None` means that no limit operates. The values `0`, `none`, `never` and
     /// `unlimited` give that result. These are the four words that
@@ -1825,14 +1825,14 @@ impl Config {
     /// `io = "none"`; and the kernel refuses a write of
     /// `oom_score_adj = 90000`, so the job keeps the score that it had.
     ///
-    /// The test therefore belongs here, where qex can still name the file, the
+    /// The test therefore belongs here, where fairq can still name the file, the
     /// value and the remedy.
     pub fn politeness_values(&self) -> Result<()> {
         let p = &self.politeness;
         if !(-20..=19).contains(&p.nice) {
             anyhow::bail!(
                 "config [politeness] nice is {}. Use a number from -20 to 19. The system \
-                 takes no other number, and it does not tell qex: above the range it uses \
+                 takes no other number, and it does not tell fairq: above the range it uses \
                  19 and reports success, and below the range it refuses the change on a \
                  machine with no privilege. Each job then gets a priority that you did not \
                  ask for, and nothing says so.",
@@ -1841,7 +1841,7 @@ impl Config {
         }
         if !IO_CLASSES.contains(&p.io.as_str()) {
             anyhow::bail!(
-                "config [politeness] io is `{}`. Use one of: {}. qex sets the class of a job \
+                "config [politeness] io is `{}`. Use one of: {}. fairq sets the class of a job \
                  between the fork and the exec, where it cannot report a fault, so a name \
                  with a fault would leave every job in the usual class in silence.",
                 p.io,
@@ -1862,7 +1862,7 @@ impl Config {
     /// Gives the default queue limit for a job.
     ///
     /// If the config file gives no value, the result is `None`. A job then waits
-    /// for capacity with no end, which is the behaviour of every earlier qex.
+    /// for capacity with no end, which is the behaviour of every earlier fairq.
     pub fn default_max_queue_time(&self) -> Result<Option<std::time::Duration>> {
         match &self.defaults.max_queue_time {
             Some(s) => units::parse_duration(s)
@@ -1875,14 +1875,14 @@ impl Config {
     pub fn hook_timeout(&self) -> Result<std::time::Duration> {
         units::parse_duration(&self.hooks.timeout)
             .map_err(|e| anyhow::anyhow!("config [hooks] timeout: {e}"))
-            // A hook with no limit can hold a process of qex for ever, so `0`
+            // A hook with no limit can hold a process of fairq for ever, so `0`
             // gives the default limit and not "no limit".
             .map(|d| d.unwrap_or(std::time::Duration::from_secs(30)))
     }
 
     /// Reads each field that the config parser does not read immediately.
     ///
-    /// Call this function at start. qex then reports an incorrect config file
+    /// Call this function at start. fairq then reports an incorrect config file
     /// one time, and not at the moment that it first uses the field.
     pub fn validate(&self) -> Result<()> {
         self.update_fields()?;
@@ -1950,7 +1950,7 @@ mod tests {
         assert!(crate::update::interval(&cfg).unwrap().is_none());
     }
 
-    /// The default address is this project's releases, and `qex help config`
+    /// The default address is this project's releases, and `fairq help config`
     /// shows the same default as the code (issue #113).
     #[test]
     fn the_default_update_url_is_this_projects_releases() {
@@ -1961,7 +1961,7 @@ mod tests {
         );
         assert!(
             crate::help::CONFIG.contains(&format!("url     = \"{url}\"")),
-            "`qex help config` must show the default address {url}"
+            "`fairq help config` must show the default address {url}"
         );
         assert!(
             include_str!("../docs/reference.md").contains(&format!("url     = \"{url}\"")),
@@ -1973,7 +1973,7 @@ mod tests {
     ///
     /// `[budget] cpu = 2` gave ``invalid type: integer `2`, expected a string``
     /// while `[defaults] cpu = 1` accepted an integer in the same file, and
-    /// `qex help config` shows both forms. A user who writes the obvious thing
+    /// `fairq help config` shows both forms. A user who writes the obvious thing
     /// met an error that named a Rust type and gave no remedy.
     #[test]
     fn a_budget_accepts_a_number_and_text_alike() {
@@ -2036,7 +2036,7 @@ mod tests {
     /// A CONFIG FILE WITH A BAD QUEUE LIMIT MUST FAIL AT START.
     ///
     /// `validate` reads every field that the parser does not read at once, so
-    /// qex reports a fault one time and not at the moment that it first uses
+    /// fairq reports a fault one time and not at the moment that it first uses
     /// the field. Without the call for this field, a coordinator took a file
     /// with `max_queue_time = "soon"`, started, and gave every job no limit in
     /// silence — and the user who wrote the line believed that the limit
@@ -2050,16 +2050,16 @@ mod tests {
             "the error must name the field: {e}"
         );
 
-        // A file with a value that qex understands must pass.
+        // A file with a value that fairq understands must pass.
         let ok: Config = toml::from_str("[defaults]\nmax_queue_time = \"30m\"\n").unwrap();
         ok.validate().unwrap();
     }
 
-    /// `single-user` must CHANGE something, or it is a promise qex does not keep.
+    /// `single-user` must CHANGE something, or it is a promise fairq does not keep.
     ///
     /// A reader who sets it and gets nothing has met the fault that the removal
     /// of the memory limit exists to remove. Each value below follows from one
-    /// assumption: qex decides what runs here, so it needs no room for work
+    /// assumption: fairq decides what runs here, so it needs no room for work
     /// that it does not control.
     #[test]
     fn single_user_uses_more_of_the_machine_than_cooperative() {
@@ -2105,7 +2105,7 @@ mod tests {
 
     /// The JSON form must give the value in FORCE, and never a sentinel.
     ///
-    /// An agent reads `qex config show --json`. A value that the mode chose
+    /// An agent reads `fairq config show --json`. A value that the mode chose
     /// lives as an empty string in the struct, and an agent that read that
     /// would see no budget at all and could not recover the number.
     #[test]
@@ -2126,7 +2126,7 @@ mod tests {
                 Some(c.peers_enabled()),
                 "the peer answer of `{mode}` must be written down"
             );
-            // And the written value must be the value that qex uses.
+            // And the written value must be the value that fairq uses.
             let mut from_json: Config = toml::from_str("").unwrap();
             from_json.budget = r.budget.clone();
             from_json.system.reserve_mem = r.system.reserve_mem.clone();
@@ -2135,7 +2135,7 @@ mod tests {
         }
     }
 
-    /// A pool with no size declares nothing. qex must say so, and must not
+    /// A pool with no size declares nothing. fairq must say so, and must not
     /// give the pool a size that no person chose.
     #[test]
     fn a_pool_with_no_count_and_no_devices_is_refused() {
@@ -2146,7 +2146,7 @@ mod tests {
 
     #[test]
     fn typos_in_config_keys_are_rejected_not_ignored() {
-        // If qex ignores a key with a spelling error, the user believes that a
+        // If fairq ignores a key with a spelling error, the user believes that a
         // limit is active. The limit is not active.
         let err = toml::from_str::<Config>("[budget]\ncpuu = 4\n").unwrap_err();
         assert!(err.to_string().contains("cpuu"), "got: {err}");
@@ -2159,9 +2159,9 @@ mod tests {
         assert!(err.contains("[budget] mem"), "got: {err}");
     }
 
-    /// A key that qex removed must give an answer that a reader can act on.
+    /// A key that fairq removed must give an answer that a reader can act on.
     ///
-    /// A reader wrote that key because an earlier qex asked for it. "unknown
+    /// A reader wrote that key because an earlier fairq asked for it. "unknown
     /// field" is true and it names no remedy.
     #[test]
     fn a_key_that_went_names_itself_and_the_remedy() {
@@ -2174,7 +2174,7 @@ mod tests {
         ] {
             let e = toml::from_str::<Config>(text).unwrap_err();
             let message =
-                config_error(std::path::Path::new("/x/qex.toml"), e, Detail::Full).to_string();
+                config_error(std::path::Path::new("/x/fairq.toml"), e, Detail::Full).to_string();
             assert!(
                 message.contains(key),
                 "the answer must name the key `{key}`: {message}"
@@ -2185,7 +2185,7 @@ mod tests {
             );
             assert!(
                 message.contains("does not limit a job"),
-                "the answer must say what qex does now: {message}"
+                "the answer must say what fairq does now: {message}"
             );
         }
     }
@@ -2199,7 +2199,7 @@ mod tests {
     fn a_key_of_another_section_gets_no_answer_that_belongs_to_this_change() {
         let e = toml::from_str::<Config>("[learn]\ngrowth = 1.0\n").unwrap_err();
         let message =
-            config_error(std::path::Path::new("/x/qex.toml"), e, Detail::Full).to_string();
+            config_error(std::path::Path::new("/x/fairq.toml"), e, Detail::Full).to_string();
         assert!(
             !message.contains("at each raise"),
             "a key of another section must not take the reason of a key that went: {message}"
@@ -2220,27 +2220,27 @@ mod tests {
         ] {
             let e = toml::from_str::<Config>(text).unwrap_err();
             let message =
-                config_error(std::path::Path::new("/x/qex.toml"), e, Detail::Full).to_string();
+                config_error(std::path::Path::new("/x/fairq.toml"), e, Detail::Full).to_string();
             assert!(
-                !message.contains("and qex does not accept it"),
+                !message.contains("and fairq does not accept it"),
                 "a key that only starts with a key that went must not take its answer: {message}"
             );
             assert!(
                 message.contains("unknown field"),
-                "the reader must still learn that qex does not know the field: {message}"
+                "the reader must still learn that fairq does not know the field: {message}"
             );
         }
     }
 
-    /// A mode that qex removed must name the values that it takes.
+    /// A mode that fairq removed must name the values that it takes.
     #[test]
-    fn a_mode_that_went_names_the_values_that_qex_takes() {
+    fn a_mode_that_went_names_the_values_that_fairq_takes() {
         let e = toml::from_str::<Config>("[enforce]\nmode = \"hard\"\n").unwrap_err();
         let message =
-            config_error(std::path::Path::new("/x/qex.toml"), e, Detail::Full).to_string();
+            config_error(std::path::Path::new("/x/fairq.toml"), e, Detail::Full).to_string();
         assert!(
             message.contains("cooperative") && message.contains("single-user"),
-            "the answer must name the values that qex takes: {message}"
+            "the answer must name the values that fairq takes: {message}"
         );
         assert!(
             message.contains("does not limit a job"),
@@ -2333,7 +2333,7 @@ mod tests {
     /// A percentage in `[defaults] cpu` must give an error, and not a guess.
     ///
     /// `[budget] cpu` takes a percentage because it names a part of the
-    /// machine. `[defaults] cpu` names the cores for ONE job. qex has no
+    /// machine. `[defaults] cpu` names the cores for ONE job. fairq has no
     /// defensible meaning for a part of the machine there, so it must not
     /// choose one in silence.
     #[test]
@@ -2377,7 +2377,7 @@ mod tests {
     /// TOML has `nan` and `inf`. A test against `nan` is false for every
     /// measurement, so the limit never operates: `max_pressure = nan` passed
     /// `validate`, because `nan < 1.0` is false, and then held no job back.
-    /// `qex config show --json` wrote it as `null`. The text form `"nan"`
+    /// `fairq config show --json` wrote it as `null`. The text form `"nan"`
     /// already stopped, so the two forms disagreed, and the rule of this change
     /// is that the quotation marks make no difference.
     #[test]
@@ -2411,24 +2411,24 @@ mod tests {
         assert_eq!(c.system.max_pressure, 20.5);
     }
 
-    /// A field that qex does not know must give the order of the steps.
+    /// A field that fairq does not know must give the order of the steps.
     ///
     /// The usual cause is not a spelling fault. It is a user who wrote an
-    /// option of a NEWER qex and then ran an OLDER one. That state stops the
-    /// commands that need the file, and `qex submit` is the first one that the
+    /// option of a NEWER fairq and then ran an OLDER one. That state stops the
+    /// commands that need the file, and `fairq submit` is the first one that the
     /// user meets. The message must therefore say which commands continue, and
-    /// `qex info` is the one that gives the pid of the coordinator.
+    /// `fairq info` is the one that gives the pid of the coordinator.
     ///
     /// It must also say that the program on the disk is not sufficient. A
     /// coordinator operates for hours and holds the code that started it, so a
     /// new option reaches a coordinator that cannot read it.
     #[test]
-    fn a_field_that_qex_does_not_know_gives_the_order_of_the_steps() {
-        let path = std::path::Path::new("/home/me/.config/qex.toml");
-        // The section must be one that NO qex knows. This test read `[hooks]`
-        // until qex gained a `[hooks]` section, and the test then failed on a
+    fn a_field_that_fairq_does_not_know_gives_the_order_of_the_steps() {
+        let path = std::path::Path::new("/home/me/.config/fairq.toml");
+        // The section must be one that NO fairq knows. This test read `[hooks]`
+        // until fairq gained a `[hooks]` section, and the test then failed on a
         // file that parses. Choose a name that this build refuses, and change
-        // it again when qex takes that name.
+        // it again when fairq takes that name.
         let error =
             toml::from_str::<Config>("[telemetry]\nendpoint = \"https://example.invalid\"\n")
                 .unwrap_err();
@@ -2439,7 +2439,7 @@ mod tests {
             "the message must keep the answer of the parser: {text}"
         );
         // The way back must be there as well. A user who cannot install a new
-        // qex now needs a command that works now.
+        // fairq now needs a command that works now.
         assert!(
             text.contains("remove that section"),
             "the message must give the way back: {text}"
@@ -2447,19 +2447,19 @@ mod tests {
         // The message must name what stops and what continues. A user who
         // reads "every command stops" looks for a fault that is not there.
         assert!(
-            text.contains("qex info") && text.contains("continue"),
+            text.contains("fairq info") && text.contains("continue"),
             "the message must say which commands continue: {text}"
         );
-        // `qex info` needs a COORDINATOR, and step 2 of this same message tells
+        // `fairq info` needs a COORDINATOR, and step 2 of this same message tells
         // the reader to kill the coordinator. A promise with no qualifier would
         // therefore send that reader into a 10 second wait and a message that
         // names no cause.
         assert!(
             text.contains("while a coordinator operates"),
-            "the promise about `qex info` must carry its qualifier: {text}"
+            "the promise about `fairq info` must carry its qualifier: {text}"
         );
         // Step 1 must be first, and the message must say WHY. A reader who
-        // kills the coordinator with the old qex still on the disk cannot start
+        // kills the coordinator with the old fairq still on the disk cannot start
         // a new one.
         assert!(
             text.contains("Do this FIRST"),
@@ -2490,18 +2490,18 @@ mod tests {
 
     /// The record of a job takes the SHORT message.
     ///
-    /// The supervisor puts this text in the `error:` field of the job, and `qex
+    /// The supervisor puts this text in the `error:` field of the job, and `fairq
     /// status` prints it. The long message is advice about an upgrade of the
     /// coordinator. In the record of a job that already ran it reads as a fault
-    /// in qex, and it pushes the one line that matters — that no limit operates
+    /// in fairq, and it pushes the one line that matters — that no limit operates
     /// — off the screen.
     #[test]
     fn the_record_of_a_job_takes_the_short_message() {
-        let path = std::path::Path::new("/home/me/.config/qex.toml");
-        // The section must be one that NO qex knows. This test read `[hooks]`
-        // until qex gained a `[hooks]` section, and the test then failed on a
+        let path = std::path::Path::new("/home/me/.config/fairq.toml");
+        // The section must be one that NO fairq knows. This test read `[hooks]`
+        // until fairq gained a `[hooks]` section, and the test then failed on a
         // file that parses. Choose a name that this build refuses, and change
-        // it again when qex takes that name.
+        // it again when fairq takes that name.
         let error =
             toml::from_str::<Config>("[telemetry]\nendpoint = \"https://example.invalid\"\n")
                 .unwrap_err();
@@ -2548,7 +2548,7 @@ mod tests {
         let float: Config = toml::from_str("[politeness]\nnice = 10.0\n").unwrap();
         assert_eq!(float.politeness.nice, 10);
 
-        // A value from which qex can read no whole number must name the remedy
+        // A value from which fairq can read no whole number must name the remedy
         // and not a type in the program.
         //
         // The last one is ABOVE `i64::MAX`. The `toml` crate reads an integer as
@@ -2580,14 +2580,14 @@ mod tests {
             let err = toml::from_str::<Config>(text).unwrap_err().to_string();
             assert!(
                 err.contains("a whole number such as 10, with or without quotation marks"),
-                "the message for `{text}` must name the two forms that qex takes: {err}"
+                "the message for `{text}` must name the two forms that fairq takes: {err}"
             );
         }
     }
 
     /// A politeness value that the system cannot obey must be refused here.
     ///
-    /// qex applies these values between the fork and the exec of a job, where
+    /// fairq applies these values between the fork and the exec of a job, where
     /// it cannot report a fault and gives up in silence. A value with a fault
     /// would thus give every job something that nobody asked for, and say
     /// nothing. Measured on Linux: `nice = 100` gives a job at nice 19, because
@@ -2649,7 +2649,7 @@ mod tests {
     /// set `TMPDIR` for the whole process.
     fn a_config_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::path::PathBuf::from("/tmp").join(format!(
-            "qex-cfg-{tag}-{}-{}",
+            "fairq-cfg-{tag}-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4()
         ));
@@ -2676,11 +2676,11 @@ mod tests {
     #[test]
     fn a_file_replaced_during_the_read_is_young() {
         let dir = a_config_dir("replaced");
-        let path = dir.join("qex.toml");
+        let path = dir.join("fairq.toml");
         let half = "[budget]\ncpu = \"2\"\n";
         an_old_file(&path, half);
 
-        let temp = dir.join(".qex.toml.new");
+        let temp = dir.join(".fairq.toml.new");
         let read = read_config_at(&path, || {
             std::fs::write(&temp, "[budget]\ncpu = \"2\"\nmem = \"1GB\"\n").unwrap();
             std::fs::rename(&temp, &path).unwrap();
@@ -2702,8 +2702,8 @@ mod tests {
     fn a_link_to_a_config_file_the_user_owns_is_read() {
         let dir = a_config_dir("link");
         std::fs::write(dir.join("repo.toml"), "[budget]\ncpu = \"2\"\n").unwrap();
-        std::os::unix::fs::symlink(dir.join("repo.toml"), dir.join("qex.toml")).unwrap();
-        let read = read_config_at(&dir.join("qex.toml"), || {});
+        std::os::unix::fs::symlink(dir.join("repo.toml"), dir.join("fairq.toml")).unwrap();
+        let read = read_config_at(&dir.join("fairq.toml"), || {});
         assert!(
             matches!(read, ConfigFile::Text(..)),
             "the link must read as text"
@@ -2716,7 +2716,7 @@ mod tests {
     #[test]
     fn a_file_that_nothing_touched_keeps_its_age() {
         let dir = a_config_dir("untouched");
-        let path = dir.join("qex.toml");
+        let path = dir.join("fairq.toml");
         an_old_file(&path, "[budget]\ncpu = \"2\"\n");
 
         let ConfigFile::Text(_, age) = read_config_at(&path, || {}) else {
@@ -2735,7 +2735,7 @@ mod tests {
     #[test]
     fn the_clocks_of_a_read_are_the_clocks_of_its_age() {
         let dir = a_config_dir("clocks");
-        let path = dir.join("qex.toml");
+        let path = dir.join("fairq.toml");
         an_old_file(
             &path,
             "[budget]
@@ -2758,7 +2758,7 @@ cpu = \"2\"
     #[test]
     fn a_file_from_the_future_has_no_age() {
         let dir = a_config_dir("future");
-        let path = dir.join("qex.toml");
+        let path = dir.join("fairq.toml");
         std::fs::write(&path, "[budget]\ncpu = \"2\"\n").unwrap();
         std::fs::File::options()
             .write(true)
@@ -2823,7 +2823,7 @@ cpu = \"2\"
 
     #[test]
     fn documented_config_parses() {
-        // The command `qex help config` writes this example. If the parser
+        // The command `fairq help config` writes this example. If the parser
         // refuses it, the documentation is incorrect.
         let text = r#"
 [budget]
@@ -2839,7 +2839,7 @@ mode = "single-user"
 
 [peers]
 enabled = true
-dir = "/tmp/qex"
+dir = "/tmp/fairq"
 stale_after = "30s"
 
 [queue]
@@ -2860,7 +2860,7 @@ timeout = "0"
 vram = "0"
 
 [hooks]
-on_stop = ["bash", "-lc", "notify-send \"qex $QEX_STATE\" \"$QEX_JOB_NAME\""]
+on_stop = ["bash", "-lc", "notify-send \"fairq $FAIRQ_STATE\" \"$FAIRQ_JOB_NAME\""]
 on_stop_states = ["completed", "failed", "killed", "timeout", "oom"]
 timeout = "30s"
 
@@ -2932,7 +2932,7 @@ count = 4
     }
 
     /// A pool that gives `count` and `devices` says two different things, and
-    /// qex must not choose one of them in silence.
+    /// fairq must not choose one of them in silence.
     #[test]
     fn a_pool_with_a_count_and_devices_is_refused() {
         let c: Config =
@@ -3007,7 +3007,7 @@ count = 4
         );
         assert!(
             err.contains(&format!("Use {} bytes", crate::logcap::MIN_LIMIT)),
-            "the message must give the value that qex needs: {err}"
+            "the message must give the value that fairq needs: {err}"
         );
         assert!(
             !err.contains("is 16KB. Use 16KB"),
@@ -3114,7 +3114,7 @@ count = 4
     /// A state name with a spelling error must give an error. Without this
     /// test, the user waits for a notification that cannot arrive.
     #[test]
-    fn a_hook_state_that_qex_does_not_know_is_rejected() {
+    fn a_hook_state_that_fairq_does_not_know_is_rejected() {
         let c: Config =
             toml::from_str("[hooks]\non_stop = [\"true\"]\non_stop_states = [\"faild\"]\n")
                 .unwrap();

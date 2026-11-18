@@ -112,7 +112,7 @@ gives the next version number.
 
 A title starts with a type, and then a colon and a space:
 
-    feat: add a command that shows the space that qex holds
+    feat: add a command that shows the space that fairq holds
     fix(top): show the queue when no coordinator operates
     feat!: rename --lock to --exclusive
 

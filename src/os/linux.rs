@@ -84,7 +84,7 @@ pub fn process_info(pid: i32) -> Option<ProcessInfo> {
 /// Measures the processes of one process group.
 ///
 /// This function compares the process group id, which is a number. It does not
-/// read a command line, so it cannot match a command that holds the word `qex`.
+/// read a command line, so it cannot match a command that holds the word `fairq`.
 /// That fault is the reason for this program.
 #[cfg(target_os = "linux")]
 pub fn group_usage(pgid: i32) -> GroupUsage {

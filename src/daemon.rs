@@ -41,13 +41,13 @@ use std::time::{Duration, Instant};
 const IDLE_EXIT: Duration = Duration::from_secs(3600);
 
 /// The name of the variable that changes the idle time. The tests use it.
-const IDLE_EXIT_VAR: &str = "QEX_IDLE_EXIT_SECS";
+const IDLE_EXIT_VAR: &str = "FAIRQ_IDLE_EXIT_SECS";
 
 /// The time that this process waits for a socket file that is already present.
 ///
 /// The limit must exist: a connect without a limit waits for ever for a socket
 /// that a stuck process holds, and this test comes before the socket of this
-/// coordinator exists. Every qex command on the machine then waits, and each
+/// coordinator exists. Every fairq command on the machine then waits, and each
 /// one reports that the coordinator did not start.
 ///
 /// The length of this limit is safe, because the limit gives the answer
@@ -109,7 +109,7 @@ pub struct Job {
 ///
 /// The full record of such a job is on the disk, and a request for it reads it
 /// there. This entry holds what the coordinator must answer WITHOUT that read:
-/// a line of `qex list`, the test of a filter, the test of a dependency, the
+/// a line of `fairq list`, the test of a filter, the test of a dependency, the
 /// test of a dedupe key, and the rule that keeps a record that a job needs.
 #[derive(Debug, Clone)]
 pub struct Stopped {
@@ -284,13 +284,13 @@ pub struct State {
     pub config_bounded_age: Option<Duration>,
     /// The fault in the configuration file, if the last read gave one.
     ///
-    /// The coordinator keeps the values that it had. A file that qex cannot
+    /// The coordinator keeps the values that it had. A file that fairq cannot
     /// read must not become the DEFAULT values in silence: that would turn a
     /// budget of 2 cores into a budget of 12 with no word to anybody.
     pub config_error: Option<String>,
     /// The events that the coordinator holds for the readers of the stream.
     ///
-    /// The log is behind the same lock as the jobs. The stream and `qex list`
+    /// The log is behind the same lock as the jobs. The stream and `fairq list`
     /// thus read one map, and the two can never disagree.
     pub events: crate::events::EventLog,
     /// What a person paused. The file `paused.json` holds the same values.
@@ -301,14 +301,14 @@ pub struct State {
     pub head: Option<HeadInfo>,
     /// The claims of the other users, from the last scheduler pass.
     ///
-    /// `qex info` reads this copy and does not read the files of the other
+    /// `fairq info` reads this copy and does not read the files of the other
     /// users again. The answer then names the same numbers that the scheduler
     /// used for its decision.
     pub peer_claims: crate::peers::Claims,
     pub stop: bool,
 }
 
-/// The job at the front of the queue that cannot start, for `qex info`.
+/// The job at the front of the queue that cannot start, for `fairq info`.
 #[derive(Debug, Clone)]
 pub struct HeadInfo {
     pub id: uuid::Uuid,
@@ -316,14 +316,14 @@ pub struct HeadInfo {
     pub name: String,
     /// The word for the class of the cause. See `sched::Blocker`.
     pub blocker: String,
-    /// True when qex keeps the capacity for this job and starts nothing else.
+    /// True when fairq keeps the capacity for this job and starts nothing else.
     pub reserved: bool,
     /// The number of jobs that started after this job reached the front.
     pub passed_by: u32,
 }
 
 /// How long every look at the configuration file must give the same content
-/// before qex takes it.
+/// before fairq takes it.
 ///
 /// This is a TIME, and not a count of turns of the scheduler. It is also not a
 /// promise that the file held that content for the whole of it. See
@@ -343,7 +343,7 @@ pub const CONFIG_SETTLE: Duration = Duration::from_millis(500);
 /// The first byte separates the four answers, so that a file that goes away
 /// and a file with content give different numbers.
 ///
-/// This is FNV-1a, which qex uses in the other places that need a short name
+/// This is FNV-1a, which fairq uses in the other places that need a short name
 /// for a long value.
 fn config_fingerprint(read: &ConfigFile) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
@@ -370,10 +370,10 @@ fn config_fingerprint(read: &ConfigFile) -> u64 {
 /// # The fault that this removes
 ///
 /// The coordinator read the file one time, at its start, and it operates for
-/// hours. A user who changed `[budget] cpu` then saw `qex config show` report
-/// the NEW value, because that command reads the file, and `qex info` report
+/// hours. A user who changed `[budget] cpu` then saw `fairq config show` report
+/// the NEW value, because that command reads the file, and `fairq info` report
 /// the OLD one, because that command asks the coordinator. The two commands of
-/// qex disagreed about the budget of qex, and neither said that one of them was
+/// fairq disagreed about the budget of fairq, and neither said that one of them was
 /// old.
 ///
 /// The values that this changes are the budget, the reserve and the rules of
@@ -400,10 +400,10 @@ fn config_fingerprint(read: &ConfigFile) -> u64 {
 ///    review measured a budget of 2 cores that became 12, and 10 jobs that
 ///    started together in place of 2.
 /// 2. A stop in the MIDDLE OF A LINE gives a wrong value that is not a default
-///    value. A review measured a file that was becoming `cpu = 16` and that qex
+///    value. A review measured a file that was becoming `cpu = 16` and that fairq
 ///    read as `cpu = 1`.
 ///
-/// Both said nothing, because qex CAN read such a file.
+/// Both said nothing, because fairq CAN read such a file.
 ///
 /// # The measurement that made this a time and not a count of turns
 ///
@@ -412,7 +412,7 @@ fn config_fingerprint(read: &ConfigFile) -> u64 {
 /// timeout of 500ms, and every request thread calls `Coordinator::notify`, so a
 /// coordinator with work in the queue turns far faster than the timeout. A
 /// measurement with a mark on each turn gave a median gap of 500.7ms with
-/// nothing to do and 17.0ms with a loop of `qex submit` running, with a minimum
+/// nothing to do and 17.0ms with a loop of `fairq submit` running, with a minimum
 /// of 1.2ms. A partial write with a pause of 300ms in the middle then installed
 /// the DEFAULT budget in 3 trials of 3. The count of turns gave a guard about
 /// thirty times shorter than the words promised.
@@ -449,7 +449,7 @@ fn config_fingerprint(read: &ConfigFile) -> u64 {
 /// It is a WAIT, and not a fault of the file: the values that the coordinator
 /// holds are still the values of the last complete file.
 pub(crate) const WAITING_FOR_A_WRITER: &str =
-    "a writer changes the configuration file now, so qex waits for it. The coordinator keeps \
+    "a writer changes the configuration file now, so fairq waits for it. The coordinator keeps \
      the values that it had.";
 
 /// One look at the configuration file: what it gave, and both clocks then.
@@ -574,8 +574,8 @@ pub fn reload_config_at(state: &mut State, read: ConfigFile, clocks: LookClocks)
         state.config_settling = None;
         // The file gives what the coordinator holds, so no writer is in the
         // middle of it now. A message about a wait must not stay after the
-        // wait ends: a writer that stops with the content that qex already has
-        // would otherwise leave that sentence in `qex info` for ever.
+        // wait ends: a writer that stops with the content that fairq already has
+        // would otherwise leave that sentence in `fairq info` for ever.
         if state.config_error.as_deref() == Some(WAITING_FOR_A_WRITER) {
             state.config_error = None;
         }
@@ -588,18 +588,18 @@ pub fn reload_config_at(state: &mut State, read: ConfigFile, clocks: LookClocks)
     // enough apart. That test rests on how often this function runs, and a
     // coordinator with 300 queued jobs can take more than a second between two
     // turns. Two looks then land in two different windows of a writer, the
-    // whole file between them is never seen, and qex takes a file that never
+    // whole file between them is never seen, and fairq takes a file that never
     // existed for `CONFIG_SETTLE` at all. Measured: the budget of a person
     // became the budget of the machine, which is the one value that stops
     // several agents from filling it.
     //
     // The age of the file has no such window. A file that a writer changed a
-    // moment ago is young, whatever this coordinator is doing, and qex waits
+    // moment ago is young, whatever this coordinator is doing, and fairq waits
     // for it to become old. The time of a file is coarse — a few milliseconds
     // on the file systems of Linux and macOS, and as much as two seconds on
     // some others — and it rounds DOWN. A file system with a granularity above
     // `CONFIG_SETTLE` can thus give a young file an age that passes this test,
-    // which leaves qex on the older guard below and no worse than it was.
+    // which leaves fairq on the older guard below and no worse than it was.
     //
     // A system that gives no time for the file leaves the test below alone.
     let the_file_says_it_settled = match &read {
@@ -610,7 +610,7 @@ pub fn reload_config_at(state: &mut State, read: ConfigFile, clocks: LookClocks)
                 //
                 // SAY SO. A file that a writer changes for ever — a slow
                 // program, a backup tool that touches it, a clock that moves
-                // — is refused at every look, and a user who reads `qex info`
+                // — is refused at every look, and a user who reads `fairq info`
                 // would otherwise see the old values with nothing to say why
                 // the new ones did not arrive.
                 state.config_settling = None;
@@ -658,7 +658,7 @@ pub fn reload_config_at(state: &mut State, read: ConfigFile, clocks: LookClocks)
         // `>` that does the same, would turn a budget of 2 cores into the
         // default budget for as long as that window lasts. Keep the values.
         ConfigFile::Unreadable(e) => {
-            let message = format!("qex cannot read the file: {e}");
+            let message = format!("fairq cannot read the file: {e}");
             log(&format!(
                 "{message}. The coordinator keeps the values that it had."
             ));
@@ -669,7 +669,7 @@ pub fn reload_config_at(state: &mut State, read: ConfigFile, clocks: LookClocks)
             // Say WHICH fault this is. The earlier text of `config_error`
             // names a line of a file that no longer holds that line, and a
             // reader who looks for it does not find it.
-            let message = "the file is empty, or qex cannot read it".to_string();
+            let message = "the file is empty, or fairq cannot read it".to_string();
             log(&format!(
                 "{message}. The coordinator keeps the values that it had."
             ));
@@ -713,7 +713,7 @@ pub fn reload_config_at(state: &mut State, read: ConfigFile, clocks: LookClocks)
             // would be a budget that nobody asked for.
             let message = format!("{e:#}");
             log(&format!(
-                "the configuration file changed and qex cannot read it: {message}. \
+                "the configuration file changed and fairq cannot read it: {message}. \
                  The coordinator keeps the values that it had."
             ));
             state.config_error = Some(message);
@@ -776,7 +776,7 @@ impl State {
     /// coordinator holds a copy in memory. This function makes the copy current.
     ///
     /// Without this function, the coordinator reports `starting` until the
-    /// supervisor stops. The command `qex kill` then has no process id, and it
+    /// supervisor stops. The command `fairq kill` then has no process id, and it
     /// refuses to stop a job that operates.
     ///
     /// Gives `true` if a job changed.
@@ -831,7 +831,7 @@ impl State {
             }
             // The supervisor writes the file, and a supervisor from an
             // earlier program does not know the chain of the submitter. The
-            // copy in memory keeps it, so `qex abort` can still read it.
+            // copy in memory keeps it, so `fairq abort` can still read it.
             let submitter = std::mem::take(&mut job.status.submitter);
             job.status = disk.into();
             if job.status.submitter.is_empty() {
@@ -1006,7 +1006,7 @@ impl State {
     /// for a quiet machine. See the `pause` module.
     pub fn save_pause(&self) {
         if let Err(e) = self.paused.write() {
-            log(&format!("qex could not write the pause record: {e:#}"));
+            log(&format!("fairq could not write the pause record: {e:#}"));
         }
     }
 
@@ -1021,8 +1021,8 @@ impl State {
             None => return None,
         };
         Some(format!(
-            "qex refuses this submission: the id {id} already names {holder}.\n\
-             A job id names one job for ever. Send the work under a new id, as `qex submit` does."
+            "fairq refuses this submission: the id {id} already names {holder}.\n\
+             A job id names one job for ever. Send the work under a new id, as `fairq submit` does."
         ))
     }
 
@@ -1070,7 +1070,7 @@ impl State {
     ///
     /// The index gives the jobs that the text can name, and the rules of
     /// `resolve::targets` decide. The cost is the number of those jobs, and not
-    /// the number of jobs that qex holds.
+    /// the number of jobs that fairq holds.
     ///
     /// This function gives the jobs only. The caller gives them to the rules
     /// AFTER it frees the lock, because a text that names nothing makes the
@@ -1092,8 +1092,8 @@ impl State {
     /// stopped. The caller read those records with no lock held. That test is
     /// the whole safety of this step: from here a request for such a job reads
     /// the disk, so a job whose final record did not reach the disk must stay
-    /// in memory, or `qex wait` would give the record of a job that waits as a
-    /// result. `start_job` has such a case: it fails a job BECAUSE qex could
+    /// in memory, or `fairq wait` would give the record of a job that waits as a
+    /// result. `start_job` has such a case: it fails a job BECAUSE fairq could
     /// not write its record.
     ///
     /// A job is final when it arrives here, and a job moves forward only, so no
@@ -1141,7 +1141,7 @@ impl State {
     }
 }
 
-/// Looks for a newer release of qex, away from the work.
+/// Looks for a newer release of fairq, away from the work.
 ///
 /// The interval of the config file is the time between two ASKS. This thread
 /// wakes more often than that, because a coordinator stops when the queue is
@@ -1253,9 +1253,9 @@ fn start_config(read: ConfigFile) -> Result<(Config, u64)> {
 }
 
 /// Pauses the coordinator before its pid lock, in milliseconds. **This variable
-/// exists for the tests of qex**, and a release build does not read it.
+/// exists for the tests of fairq**, and a release build does not read it.
 #[cfg(debug_assertions)]
-const PAUSE_BEFORE_PID_LOCK: &str = "QEX_TEST_PAUSE_BEFORE_PID_LOCK_MS";
+const PAUSE_BEFORE_PID_LOCK: &str = "FAIRQ_TEST_PAUSE_BEFORE_PID_LOCK_MS";
 
 /// `paths::socket_path`, tried again when a sweep deleted the new directory between
 /// its `mkdir` and its read-back (issue #132); `tries` counts to `PID_LOCK_ATTEMPTS`.
@@ -1291,14 +1291,14 @@ pub fn run() -> Result<()> {
     let mut socket_path = socket_path_after_sweeps(&mut tries)?;
 
     // A test pauses here so a sweep can delete the new directory (issue #132); a
-    // release build has no such switch, as for `QEX_TEST_CRASH_AFTER_ABORT_PLAN`.
+    // release build has no such switch, as for `FAIRQ_TEST_CRASH_AFTER_ABORT_PLAN`.
     #[cfg(debug_assertions)]
     if let Some(ms) = std::env::var(PAUSE_BEFORE_PID_LOCK)
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
     {
         log(&format!(
-            "qex pauses {ms} ms before the pid lock because {PAUSE_BEFORE_PID_LOCK} is set"
+            "fairq pauses {ms} ms before the pid lock because {PAUSE_BEFORE_PID_LOCK} is set"
         ));
         std::thread::sleep(std::time::Duration::from_millis(ms));
     }
@@ -1315,12 +1315,12 @@ pub fn run() -> Result<()> {
     //
     // Two coordinators on one state directory each hold the full budget, and
     // together they start twice the permitted work. That result is the fault
-    // that qex prevents, and it is worse than a start that does not happen. A
+    // that fairq prevents, and it is worse than a start that does not happen. A
     // lock that a different process holds is therefore an END of this process,
     // and never a warning.
     //
     // The spawn lock does not give this promise. A CLI process holds that lock,
-    // and `qex daemon` is a command that a person or a systemd unit starts
+    // and `fairq daemon` is a command that a person or a systemd unit starts
     // directly, with no lock at all.
     let _pid_lock = loop {
         match paths::hold_pid_file(&socket_path, paths::PID_LOCK_PATIENCE) {
@@ -1347,10 +1347,10 @@ pub fn run() -> Result<()> {
     //
     // THIS PROCESS MUST DELETE THAT FILE ONLY WITH THE PROOF THAT NO
     // COORDINATOR USES IT. The lock above is the strong proof, and this test
-    // covers a coordinator that started before qex made a pid file.
+    // covers a coordinator that started before fairq made a pid file.
     // A test of the LINK, and not of the target. A symbolic link with no target
     // occupies the path, and `exists` follows the link and says that the path is
-    // free. `bind` then fails, and qex cannot start at all.
+    // free. `bind` then fails, and fairq cannot start at all.
     if std::fs::symlink_metadata(&socket_path).is_ok() {
         match paths::ask_socket(&socket_path, OWN_SOCKET_ANSWER_LIMIT) {
             paths::SocketAnswer::NobodyListens => {
@@ -1397,11 +1397,11 @@ pub fn run() -> Result<()> {
             } else if e.kind() == std::io::ErrorKind::AddrInUse {
                 // Something that is not a socket of this coordinator holds
                 // this path: a directory, or an entry that arrived after the
-                // test above, or an entry that qex could not test. Name the
-                // path, and do not say what holds it: without a remedy, qex
+                // test above, or an entry that fairq could not test. Name the
+                // path, and do not say what holds it: without a remedy, fairq
                 // cannot start on this machine again, and a reader must look.
                 format!(
-                    "\nSomething that is not a socket of qex holds that path. Look at it, \
+                    "\nSomething that is not a socket of fairq holds that path. Look at it, \
                      and remove it if no coordinator uses it: {}",
                     socket_path.display()
                 )
@@ -1419,7 +1419,7 @@ pub fn run() -> Result<()> {
     // THIS STEP COMES AFTER `bind`, AND IT RUNS ON ITS OWN THREAD. The sweep
     // asks each socket in the temporary directory to answer, and a socket that
     // a stuck process holds is slow. Before the socket of this coordinator
-    // exists, every qex command on the machine waits for that sweep, and each
+    // exists, every fairq command on the machine waits for that sweep, and each
     // command then reports that the coordinator did not start. The sweep
     // touches the directories of other coordinators only, so the start
     // sequence needs no result from it.
@@ -1450,7 +1450,7 @@ pub fn run() -> Result<()> {
         std::thread::spawn(move || idle_watch(coord, path));
     }
 
-    // The thread that looks for a newer release of qex.
+    // The thread that looks for a newer release of fairq.
     //
     // IT IS ITS OWN THREAD, AND IT HOLDS NO LOCK WHILE IT ASKS. A web service
     // that answers slowly, or never, must not hold the state of the queue: a
@@ -1546,7 +1546,7 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
 
     // Read the pause before the jobs.
     //
-    // A coordinator stops when the program file changes, and qex itself tells a
+    // A coordinator stops when the program file changes, and fairq itself tells a
     // user to run `kill <pid>` on it. Without this step, a person who follows
     // that instruction loses the pause in silence, and the machine starts work
     // again while that person believes it is quiet.
@@ -1555,7 +1555,7 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
     // A pause of the queue can reach its `--for` WHILE NO COORDINATOR OPERATES.
     //
     // That is the third place where a pause of the queue ends, beside
-    // `qex resume queue` and `sched::step`, and it is not a corner case: qex
+    // `fairq resume queue` and `sched::step`, and it is not a corner case: fairq
     // itself tells a user to run `kill <pid>` on the coordinator, and a reboot
     // or an out-of-memory kill does the same. Measured before this step
     // existed: a `--for 20s` pause, a `kill -9`, and a job with a
@@ -1573,10 +1573,10 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
     }
     if let Some(record) = state.paused.queue.iter().find(|r| r.fault) {
         // Say this in the log AND keep it in the file. The next command
-        // then reads a record that qex can parse, and the words that a
+        // then reads a record that fairq can parse, and the words that a
         // person needs stay with it.
         log(&format!(
-            "qex could not read its pause record, so it holds the queue: {}",
+            "fairq could not read its pause record, so it holds the queue: {}",
             record.reason.as_deref().unwrap_or("unknown")
         ));
         state.save_pause();
@@ -1613,7 +1613,7 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                 ));
                 continue;
             }
-            // A directory without both files is incomplete. `qex clean` deletes
+            // A directory without both files is incomplete. `fairq clean` deletes
             // it. It must not stop the start of the coordinator.
             _ => continue,
         };
@@ -1639,13 +1639,13 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
             // A pid is not a name, so test the identity of each pid before
             // the life of it. The machine uses each number again; without
             // these tests a recovered record can point at strangers, and the
-            // job then says `running` for ever while qex watches — or signals
+            // job then says `running` for ever while fairq watches — or signals
             // — processes that have no connection with the job.
             //
             // A record from an EARLIER START OF THE MACHINE is dead, whatever
             // its pids say. The submission writes `boot_id`, so every record
             // of this version has one from its birth. A record WITHOUT the
-            // value comes from an earlier version of qex; date it by the time
+            // value comes from an earlier version of fairq; date it by the time
             // of its file instead — a status that was written before this
             // machine started belongs to an earlier start. Without that
             // fallback, a reboot with old records on the disk would take a
@@ -1736,7 +1736,7 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
                 // supervisor stops under a live coordinator. Before this branch
                 // existed, the coordinator kept such a job as `running` and
                 // watched nothing: the record never changed, the job held its
-                // claim and its locks for ever, `qex wait` on it never
+                // claim and its locks for ever, `fairq wait` on it never
                 // returned, and the coordinator never became idle.
                 let mut note = String::from(
                     "the coordinator stopped, and the supervisor of this job did not continue",
@@ -1817,7 +1817,7 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
         recovered += 1;
     }
 
-    // Continue the counter after the highest number that qex read. The order
+    // Continue the counter after the highest number that fairq read. The order
     // of the jobs of a pipeline thus stays correct after a restart.
     state.next_sequence = state
         .jobs
@@ -1852,7 +1852,7 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
     // the next submission starts a second copy of work that already operates.
     // The key comes from `spec.json`, which the CLI wrote at the submission.
     // (`JobStatus` holds the key also, but that copy is for a reader of
-    // `qex status`.)
+    // `fairq status`.)
     //
     // Two jobs can hold one key: the job of yesterday stopped, and the job of
     // today operates. The job that has not stopped wins, and after that the
@@ -1894,9 +1894,9 @@ fn recover(coord: &Arc<Coordinator>) -> Result<()> {
 }
 
 /// Names the variable that makes recovery's signal step fail. **This variable exists for the
-/// tests of qex**, and a release build does not read it.
+/// tests of fairq**, and a release build does not read it.
 #[cfg(debug_assertions)]
-const PANIC_IN_RECOVERY_SIGNAL_STEP: &str = "QEX_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP";
+const PANIC_IN_RECOVERY_SIGNAL_STEP: &str = "FAIRQ_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP";
 
 /// What recovery found of the leader of a job that lost its supervisor.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1922,10 +1922,10 @@ fn stop_lost_job(
         if mode == LostLeader::Runs {
             log(&format!(
                 "job {id} lost its supervisor, and the job process {pid} \
-                 continues; qex stops the job now"
+                 continues; fairq stops the job now"
             ));
         }
-        // A test of qex makes the signal step fail here; a release build has no switch.
+        // A test of fairq makes the signal step fail here; a release build has no switch.
         #[cfg(debug_assertions)]
         if std::env::var_os(PANIC_IN_RECOVERY_SIGNAL_STEP).is_some() {
             panic!("{PANIC_IN_RECOVERY_SIGNAL_STEP} is set: recovery's signal step fails here");
@@ -1934,7 +1934,7 @@ fn stop_lost_job(
         match mode {
             LostLeader::Runs => {
                 crate::supervisor::stop_process_group(id, pid, start, ns);
-                note + "; qex stopped the job process"
+                note + "; fairq stopped the job process"
             }
             LostLeader::Ended => {
                 crate::supervisor::kill_what_the_job_left(id, pid, start, ns);
@@ -1948,7 +1948,7 @@ fn stop_lost_job(
         // the next recovery fails the job and stops what it left.
         Err(_) => {
             crate::supervisor::log_without_panic(&format!(
-                "job {id}: a fault in qex ended recovery's signal step; the coordinator stops \
+                "job {id}: a fault in fairq ended recovery's signal step; the coordinator stops \
                  now, and the next coordinator's recovery fails the job and stops what it left"
             ));
             unsafe { libc::_exit(101) }
@@ -1988,12 +1988,12 @@ fn stop_lost_job(
 /// Tests if a file was written in the current start of the machine.
 ///
 /// Recovery uses this to date a record that has no `boot_id`, which an earlier
-/// version of qex wrote. Without a date, that record would take the process
+/// version of fairq wrote. Without a date, that record would take the process
 /// tests after a reboot, and a boot-time process that reuses a recorded pid
 /// could pass them.
 ///
 /// When the machine gives no boot time, or the file gives no time, the answer
-/// is yes: qex then loses the restart test for that record only, which is the
+/// is yes: fairq then loses the restart test for that record only, which is the
 /// behavior it had before the test existed.
 fn written_this_boot(file: &std::path::Path, boot_time: Option<u64>) -> bool {
     let Some(boot_time) = boot_time else {
@@ -2057,7 +2057,7 @@ fn requeue_unstarted(status: &mut crate::job::JobStatus, supervisor_was_recorded
 /// Holds the jobs that one connection owns, and gives them back when it ends.
 ///
 /// The work happens in `Drop`, so every end of a connection reaches it: a
-/// request that qex cannot read, a write that fails, a socket that closes, and
+/// request that fairq cannot read, a write that fails, a socket that closes, and
 /// a process that a signal stopped. Cleanup that sits after the fallible part
 /// of a function runs only when nothing failed, and that is the moment when it
 /// is least needed.
@@ -2074,7 +2074,7 @@ impl Drop for OwnedJobs {
                 id,
                 Some(String::from(
                     "the command that started this job stopped, so the job did not start. \
-                     Submit it again with `qex submit` for work that must live longer than \
+                     Submit it again with `fairq submit` for work that must live longer than \
                      the command that starts it.",
                 )),
             ) {
@@ -2136,7 +2136,7 @@ fn serve(coord: Arc<Coordinator>, stream: UnixStream) -> Result<()> {
             Ok(request) => handle(&coord, request, peer),
             Err(e) => Response::error(
                 ErrorKind::Internal,
-                format!("qex could not read this request: {e}"),
+                format!("fairq could not read this request: {e}"),
             ),
         };
 
@@ -2156,11 +2156,11 @@ fn handle(coord: &Arc<Coordinator>, request: Request, peer: Option<i32>) -> Resp
         Request::Ping => Response::Ok,
         // `serve` answers this one, because the ownership belongs to a
         // connection and this function has none. A request that arrives here
-        // comes from a caller that qex does not have, so it gets a refusal and
+        // comes from a caller that fairq does not have, so it gets a refusal and
         // never a silent success.
         Request::OwnJob { .. } => Response::error(
             ErrorKind::Internal,
-            String::from("qex handles the ownership of a job on the connection that asks"),
+            String::from("fairq handles the ownership of a job on the connection that asks"),
         ),
         Request::Info => handle_info(coord, peer),
         Request::Capabilities => Response::Capabilities {
@@ -2242,7 +2242,7 @@ fn handle(coord: &Arc<Coordinator>, request: Request, peer: Option<i32>) -> Resp
         // nothing on it.
         Request::Events { .. } => Response::error(
             ErrorKind::Internal,
-            "qex could not open the event stream on this connection. Run `qex events` again.",
+            "fairq could not open the event stream on this connection. Run `fairq events` again.",
         ),
         Request::Wait { id } => handle_wait(coord, id),
         Request::Cancel { id } => handle_cancel(coord, id),
@@ -2285,14 +2285,14 @@ fn handle(coord: &Arc<Coordinator>, request: Request, peer: Option<i32>) -> Resp
     }
 }
 
-/// Tests if the process at the other end of a socket is the qex command.
+/// Tests if the process at the other end of a socket is the fairq command.
 ///
 /// The chain above a process says who asked only when that process IS the
 /// command. A socket relay, a forward of a remote shell, or the proxy of a
 /// container engine that runs in a virtual machine is a different program, and
 /// the chain above it names the relay and not the person.
-fn is_the_qex_command(pid: i32, name: &str) -> bool {
-    if crate::job::safe_name(name) == "qex" {
+fn is_the_fairq_command(pid: i32, name: &str) -> bool {
+    if crate::job::safe_name(name) == "fairq" {
         return true;
     }
     let same_file = |a: &std::path::Path, b: &std::path::Path| {
@@ -2309,7 +2309,7 @@ fn is_the_qex_command(pid: i32, name: &str) -> bool {
 }
 
 /// Gives the chain of processes above the command at the other end of a
-/// socket, from its parent upward, or `None` when qex cannot learn who asked.
+/// socket, from its parent upward, or `None` when fairq cannot learn who asked.
 ///
 /// CALL THIS BEFORE THE ANSWER GOES OUT. The command waits for the answer, so
 /// it is alive and its parent is still its parent. After the answer the
@@ -2318,18 +2318,18 @@ fn is_the_qex_command(pid: i32, name: &str) -> bool {
 ///
 /// `None` is never a refusal: the pause is made, and its issuer is `unknown`.
 /// The cases: the system gave no peer (a pid of 0 is a process that this
-/// machine cannot see), the peer is not the qex command, the chain cannot be
+/// machine cannot see), the peer is not the fairq command, the chain cannot be
 /// read, and the chain runs up through this coordinator or through a job of
 /// this queue, which is a command inside a job: the coordinator lives as long
 /// as the queue, so it says nothing about who asked. See `runs_inside_a_job`.
-/// qex never stores a guess.
+/// fairq never stores a guess.
 ///
 /// This function takes the lock on the state for a moment, so call it BEFORE
 /// you take that lock.
 pub fn issuer_chain(coord: &Coordinator, peer: Option<i32>) -> Option<Vec<crate::job::Ancestor>> {
     let peer = peer?;
     let info = sys::process_info(peer)?;
-    if !is_the_qex_command(peer, &info.name) {
+    if !is_the_fairq_command(peer, &info.name) {
         return None;
     }
     let chain = sys::chain_from(info.ppid);
@@ -2351,10 +2351,10 @@ pub fn issuer_chain(coord: &Coordinator, peer: Option<i32>) -> Option<Vec<crate:
 /// holds the pid and the start time of its supervisor and of its process, and
 /// recovery reads them. `jobs` holds those pairs for each job that is active.
 ///
-/// The name `qex` is not the test. A job of a DIFFERENT qex queue is an
+/// The name `fairq` is not the test. A job of a DIFFERENT fairq queue is an
 /// ordinary session for this coordinator: its processes exist or not, and the
 /// state of that session is a fact that this coordinator can read. The test
-/// suite of qex runs as such a job.
+/// suite of fairq runs as such a job.
 ///
 /// A pair with a start time matches a process with the same pid AND the same
 /// start time, because the machine uses each pid again. A pair with no start
@@ -2406,7 +2406,7 @@ fn resolve_paused_lock(state: &State, word: &str) -> Result<String, String> {
 ///
 /// # Why a second command ADDS a request, and changes nothing
 ///
-/// `qex pause queue` looks like a command that a person can run twice. With one
+/// `fairq pause queue` looks like a command that a person can run twice. With one
 /// record for each queue, a second command had to change the first: a rule
 /// that replaced the record changed a pause of 30 minutes into a pause with no
 /// end, and every rule that merged the two let one session shorten or end
@@ -2431,7 +2431,7 @@ fn handle_pause(
     let (created, id) = match target {
         PauseTarget::Queue => {
             let created = state.paused.add_queue(record);
-            log("a person paused the queue; qex starts no job");
+            log("a person paused the queue; fairq starts no job");
             (created, state.paused.queue.last().map(|r| r.id.clone()))
         }
         PauseTarget::Lock { name } => {
@@ -2471,7 +2471,7 @@ fn handle_pause(
 ///
 /// # Why a resume with no id removes nothing
 ///
-/// qex cannot know which request the caller means. "The session of the
+/// fairq cannot know which request the caller means. "The session of the
 /// caller" is not ownership, because sibling agents share one session, and a
 /// request of a session that is gone can still matter: its reason can be the
 /// standing instruction of the user. A command that removed everything ended
@@ -2499,7 +2499,7 @@ fn handle_resume(
         PauseTarget::Lock { name } => resolve_paused_lock(&state, name).map(Some),
     };
 
-    // An id is unique across the queue and all the locks, so qex knows where
+    // An id is unique across the queue and all the locks, so fairq knows where
     // it stands. An id that stands for a DIFFERENT target must not get the
     // answer "does not stand": the reader would believe that the queue runs,
     // or that the lock is free, while the request holds it with no end.
@@ -2536,12 +2536,12 @@ fn handle_resume(
             }
         };
         lines.push(if views.len() == 1 {
-            "qex resumed nothing: say which request. 1 request stands; the line above gives \
+            "fairq resumed nothing: say which request. 1 request stands; the line above gives \
              its id."
                 .to_string()
         } else {
             format!(
-                "qex resumed nothing: say which request. {} requests stand; each line above \
+                "fairq resumed nothing: say which request. {} requests stand; each line above \
                  gives its id.",
                 views.len()
             )
@@ -2608,7 +2608,7 @@ pub fn retire(coord: &Arc<Coordinator>) {
     let mut state = coord.state.lock().unwrap();
     state.retire_stopped(&verified);
     // A record that is not final on the disk yet gets a new test in the next
-    // turn. A record that `qex clean` deleted in the meantime needs none.
+    // turn. A record that `fairq clean` deleted in the meantime needs none.
     for id in again {
         if state.jobs.contains_key(&id) {
             state.retiring.push(id);
@@ -2627,12 +2627,12 @@ fn stopped_status(id: uuid::Uuid) -> Response {
         Some(status) => Response::Status {
             status: Box::new(status),
         },
-        // Something deleted the directory, and no command of qex did. The
-        // history says what qex knows about the job.
+        // Something deleted the directory, and no command of fairq did. The
+        // history says what fairq knows about the job.
         None => Response::error(
             ErrorKind::NoSuchJob,
             format!(
-                "qex cannot read the record of the job {id}. {}",
+                "fairq cannot read the record of the job {id}. {}",
                 crate::history::describe_missing(id)
             ),
         ),
@@ -2722,7 +2722,7 @@ fn handle_query(coord: &Arc<Coordinator>, filter: &crate::proto::JobFilter) -> R
     }
 
     // The order of submission, and the id for two jobs of one moment. This is
-    // the order that `qex list` always gave.
+    // the order that `fairq list` always gave.
     hits.sort_by_key(Hit::key);
     let over_limit = crate::resolve::apply_limit(&mut hits, filter.limit);
 
@@ -2755,7 +2755,7 @@ fn handle_query(coord: &Arc<Coordinator>, filter: &crate::proto::JobFilter) -> R
 ///
 ///   * A text that named a PIPELINE asks for the whole of it to stop. A stage
 ///     that already stopped needs nothing, and a stage that waits leaves the
-///     queue, also for `qex kill`: a stage that qex left in the queue would
+///     queue, also for `fairq kill`: a stage that fairq left in the queue would
 ///     START after the command said that it stopped everything.
 ///   * A text that named ONE job gets the refusal of that job, with its step.
 ///
@@ -2850,7 +2850,7 @@ fn handle_info(coord: &Arc<Coordinator>, peer: Option<i32>) -> Response {
     // flag beside `paused`. Two parallel fields drift, and a reader that learns
     // the pause but not its cause cannot correct the cause.
     //
-    // `held` then says that qex keeps the capacity for the job at the front and
+    // `held` then says that fairq keeps the capacity for the job at the front and
     // starts nothing. Each other word names the holder of the capacity, so a
     // reader learns at once whether the cause is inside this queue or outside.
     let queue_state = match state.paused.queue.as_slice() {
@@ -3012,7 +3012,7 @@ fn handle_submit(
                     ErrorKind::NoSuchJob,
                     format!(
                         "the job {dep} does not exist, so this job cannot wait for it.\n\
-                         Start that job first, and give the id that `qex submit` wrote."
+                         Start that job first, and give the id that `fairq submit` wrote."
                     ),
                 );
             }
@@ -3053,10 +3053,10 @@ fn handle_submit(
                     warning: Some(format!(
                         "this submission started no job. The dedupe key `{shown}` gives the job \
                          {other}, and that job {doing}.\n\
-                         qex gives you the id of that job, so `qex wait` and `qex status` \
+                         fairq gives you the id of that job, so `fairq wait` and `fairq status` \
                          operate on the work that already exists.\n\
-                         A key names the work, and qex does not compare the command. Run \
-                         `qex status {other}` to see the work that this id names.\n\
+                         A key names the work, and fairq does not compare the command. Run \
+                         `fairq status {other}` to see the work that this id names.\n\
                          To run the work a second time, wait for that job to stop, or use a \
                          different key."
                     )),
@@ -3071,7 +3071,7 @@ fn handle_submit(
             return Response::error(ErrorKind::WrongState, reason);
         }
 
-        // The memory is not the whole truth: `qex clean` or recovery can leave a directory with
+        // The memory is not the whole truth: `fairq clean` or recovery can leave a directory with
         // no job. Tested before the key is held, as the id is; the look does not follow a link.
         let dir = match paths::job_dir(&id) {
             Ok(d) => d,
@@ -3087,9 +3087,9 @@ fn handle_submit(
                 return Response::error(
                     kind,
                     format!(
-                        "qex refuses this submission: {} {what}, and this coordinator \
+                        "fairq refuses this submission: {} {what}, and this coordinator \
                          holds no job for the id {id}.\nSend the work under a new id, as \
-                         `qex submit` does.",
+                         `fairq submit` does.",
                         dir.display()
                     ),
                 );
@@ -3106,7 +3106,7 @@ fn handle_submit(
         if state.paused.queue_paused() {
             pause_reason = Some(crate::pause::queue_reason(&state.paused));
             lines.push(
-                "the queue is paused, so this job waits. Run `qex pause` to read each pause \
+                "the queue is paused, so this job waits. Run `fairq pause` to read each pause \
                  request, who made it and how it ends."
                     .to_string(),
             );
@@ -3122,7 +3122,7 @@ fn handle_submit(
                 // form of it in a sentence that a terminal prints.
                 let shown = crate::job::safe_name(name);
                 lines.push(format!(
-                    "a person holds the lock `{shown}`, so this job waits. Run `qex pause` to \
+                    "a person holds the lock `{shown}`, so this job waits. Run `fairq pause` to \
                      read each request for it, who made it and how it ends."
                 ));
             }
@@ -3162,9 +3162,9 @@ fn handle_submit(
                     OversizedPolicy::RunWhenIdle => {
                         status.blocked_reason = Some(reason.clone());
                         Some(format!(
-                            "{reason}\nqex starts this job alone when no other job operates. \
+                            "{reason}\nfairq starts this job alone when no other job operates. \
                              The job can swap, use every core, or stop with an out-of-memory \
-                             error. Read `qex status {id}` for the result."
+                             error. Read `fairq status {id}` for the result."
                         ))
                     }
                 }
@@ -3187,7 +3187,7 @@ fn handle_submit(
     //
     // `sched::choose` writes the same reason on its next pass, so this line
     // covers the window before that pass — the record is correct from the first
-    // byte that qex writes for this job, and not 500ms later.
+    // byte that fairq writes for this job, and not 500ms later.
     if let Some(reason) = &pause_reason {
         status.blocked_reason = Some(reason.clone());
     }
@@ -3213,8 +3213,8 @@ fn handle_submit(
         // this submission's. It goes before the hold does, or a resend would meet it (#187).
         let kept = match std::fs::remove_dir_all(&dir) {
             Err(r) if r.kind() != std::io::ErrorKind::NotFound => Some(format!(
-                "qex could not remove {} after the failed write: {r}. Delete that directory; \
-                 until it goes, qex refuses the id {id}.",
+                "fairq could not remove {} after the failed write: {r}. Delete that directory; \
+                 until it goes, fairq refuses the id {id}.",
                 dir.display()
             )),
             _ => None,
@@ -3224,7 +3224,7 @@ fn handle_submit(
         // later submission with that key would give an id that answers nothing.
         release_submission(&mut coord.state.lock().unwrap(), id);
         coord.notify();
-        let mut message = format!("qex could not write the job record: {e:#}");
+        let mut message = format!("fairq could not write the job record: {e:#}");
         if let Some(kept) = kept {
             log(&kept);
             message = format!("{message}\n{kept}");
@@ -3312,12 +3312,12 @@ fn handle_wait(coord: &Arc<Coordinator>, id: uuid::Uuid) -> Response {
 /// stopped, keeps its state and gives `false`: a job that operates holds a
 /// claim and does work, and its output stays for a reader that attaches again.
 ///
-/// `reason` says WHY qex cancelled the job, for a cancel that no person asked
+/// `reason` says WHY fairq cancelled the job, for a cancel that no person asked
 /// for. The state stays `cancelled`, so it never reads as a failure of the
 /// work, and the reason separates it from a cancel that a person typed.
 ///
 /// THE REASON REPLACES THE ERROR OF THE JOB, AND `None` CLEARS IT. The error
-/// field of a cancelled job says why QEX cancelled it, and nothing else. A
+/// field of a cancelled job says why FAIRQ cancelled it, and nothing else. A
 /// queued job can carry the error of an earlier attempt: a job with `--retries`
 /// goes back to the queue and keeps the text of the attempt that failed. That
 /// text on a cancelled record tells a reader that the job failed and starts
@@ -3354,7 +3354,7 @@ fn cancel_queued(coord: &Arc<Coordinator>, id: uuid::Uuid, reason: Option<String
 fn handle_cancel(coord: &Arc<Coordinator>, id: uuid::Uuid) -> Response {
     // Try the cancel FIRST, and read the state only to explain a refusal. A job
     // can start between a look and an action, so an answer that comes from a
-    // look can say that qex cancelled a job that now operates.
+    // look can say that fairq cancelled a job that now operates.
     if cancel_queued(coord, id, None) {
         return Response::Ok;
     }
@@ -3372,7 +3372,7 @@ fn handle_cancel(coord: &Arc<Coordinator>, id: uuid::Uuid) -> Response {
 /// Says why a cancel did not happen, for the state that the job holds now.
 ///
 /// Each state gets the step that fits it. A job that went back to the queue
-/// takes the SAME command again, and a message that names `qex kill` for such
+/// takes the SAME command again, and a message that names `fairq kill` for such
 /// a job sends the reader to a command that refuses it.
 ///
 /// This function is separate because the states that reach it need a race, and
@@ -3385,16 +3385,16 @@ fn refusal_for_a_cancel(id: uuid::Uuid, state: JobState) -> Response {
         // command.
         JobState::Queued => Response::error(
             ErrorKind::WrongState,
-            format!("the job {id} went back to the queue. Run `qex cancel {id}` again."),
+            format!("the job {id} went back to the queue. Run `fairq cancel {id}` again."),
         ),
         // The job started in the moment between those two steps.
         JobState::Starting | JobState::Running => Response::error(
             ErrorKind::WrongState,
-            format!("the job {id} operates now. Use `qex kill {id}` to stop it."),
+            format!("the job {id} operates now. Use `fairq kill {id}` to stop it."),
         ),
         other => Response::error(
             ErrorKind::WrongState,
-            format!("the job {id} is in the state `{other}`, so qex cannot cancel it"),
+            format!("the job {id} is in the state `{other}`, so fairq cannot cancel it"),
         ),
     }
 }
@@ -3417,10 +3417,10 @@ fn idle_watch(coord: Arc<Coordinator>, socket: std::path::PathBuf) {
         // Decide and set the flag with one lock only.
         //
         // With two lock operations, a `Submit` request can arrive between them.
-        // qex would accept that job, write its record, give the id to the user,
-        // and then stop. The job would never start, and `qex wait` would block
+        // fairq would accept that job, write its record, give the id to the user,
+        // and then stop. The job would never start, and `fairq wait` would block
         // with no end.
-        // Stop when something replaced the qex program file.
+        // Stop when something replaced the fairq program file.
         //
         // A coordinator can operate for hours. During development, a new build
         // replaces the program file, and this process then holds the old code.
@@ -3441,7 +3441,7 @@ fn idle_watch(coord: Arc<Coordinator>, socket: std::path::PathBuf) {
 
         if should_stop && replaced {
             log(
-                "the qex program file changed; this coordinator stops so that the next \
+                "the fairq program file changed; this coordinator stops so that the next \
                  command starts one with the new program",
             );
         }
@@ -3487,14 +3487,14 @@ mod tests {
         // The coordinator that started the job still operates.
         let fresh = [
             process(30, 20, "sh"),
-            process(20, 10, "qex"),
-            process(10, 1, "qex"),
+            process(20, 10, "fairq"),
+            process(10, 1, "fairq"),
         ];
         assert!(runs_inside_a_job(&fresh, 10, &[]));
 
         // A new coordinator, number 99: the supervisor hangs below pid 1, and
         // the record of the job names it.
-        let after = [process(30, 20, "sh"), process(20, 1, "qex")];
+        let after = [process(30, 20, "sh"), process(20, 1, "fairq")];
         assert!(!runs_inside_a_job(&after, 99, &[]), "the fault");
         assert!(runs_inside_a_job(&after, 99, &[(20, Some(20))]));
         assert!(runs_inside_a_job(&after, 99, &[(20, None)]));
@@ -3625,7 +3625,7 @@ mod tests {
             // The exact text that the supervisor writes for a job that waits
             // again after a failed attempt.
             status.error = Some(String::from(
-                "attempt 1 failed with the exit code 3; qex starts the job again",
+                "attempt 1 failed with the exit code 3; fairq starts the job again",
             ));
             state.jobs.insert(
                 id,
@@ -3656,7 +3656,7 @@ mod tests {
     /// A cancel that did not happen must name the step that fits the state.
     ///
     /// The job that went back to the QUEUE is the case that matters. A message
-    /// that names `qex kill` for such a job sends the reader to a command that
+    /// that names `fairq kill` for such a job sends the reader to a command that
     /// refuses it, and the reader then has no step that works.
     #[test]
     fn a_refused_cancel_names_the_step_for_the_state_of_the_job() {
@@ -3669,25 +3669,25 @@ mod tests {
 
         let queued = message(JobState::Queued);
         assert!(
-            queued.contains("went back to the queue") && queued.contains("qex cancel"),
+            queued.contains("went back to the queue") && queued.contains("fairq cancel"),
             "a job that waits again takes the same command: {queued}"
         );
         assert!(
-            !queued.contains("qex kill"),
-            "a job that waits has no process, so `qex kill` refuses it: {queued}"
+            !queued.contains("fairq kill"),
+            "a job that waits has no process, so `fairq kill` refuses it: {queued}"
         );
 
         for state in [JobState::Starting, JobState::Running] {
             let text = message(state);
             assert!(
-                text.contains("operates now") && text.contains("qex kill"),
-                "a job that operates takes `qex kill`: {text}"
+                text.contains("operates now") && text.contains("fairq kill"),
+                "a job that operates takes `fairq kill`: {text}"
             );
         }
 
         let done = message(JobState::Completed);
         assert!(
-            done.contains("completed") && !done.contains("qex kill"),
+            done.contains("completed") && !done.contains("fairq kill"),
             "a job that stopped names its state and no step: {done}"
         );
     }
@@ -3757,7 +3757,7 @@ mod tests {
         // The user must be able to see why the new values did not arrive.
         assert!(
             state.config_error.is_some(),
-            "qex must say that it waits for a writer"
+            "fairq must say that it waits for a writer"
         );
     }
 
@@ -4588,7 +4588,7 @@ mem = \"1GB\"
         assert_eq!(state.dedupe_holder("gone", 0), Some(id));
     }
 
-    /// `qex clean` of the earlier job while a submission holds the key frees the entry, so a
+    /// `fairq clean` of the earlier job while a submission holds the key frees the entry, so a
     /// submission that then fails leaves no key that names a job with no record (#188).
     #[test]
     fn a_clean_under_a_held_key_leaves_no_entry_when_the_submission_fails() {
@@ -4605,7 +4605,7 @@ mem = \"1GB\"
     }
 
     /// The record and the key go together. A key that named a job with no
-    /// record would give an id that `qex status` cannot answer.
+    /// record would give an id that `fairq status` cannot answer.
     #[test]
     fn the_key_goes_when_the_record_goes() {
         let mut state = empty_state();

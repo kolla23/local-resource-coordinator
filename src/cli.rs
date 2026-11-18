@@ -1,4 +1,4 @@
-//! This module defines the command line of qex.
+//! This module defines the command line of fairq.
 //!
 //! An agent is a frequent reader of this help text. Each description is thus
 //! short, and it says what the option does, not how the option operates.
@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "qex",
+    name = "fairq",
     // Not the number in Cargo.toml: `main` holds `0.0.0-dev` for ever, and
     // `build.rs` calculates the number of this build. See `src/version.rs`.
     version = crate::version::VERSION,
@@ -33,13 +33,13 @@ pub enum Command {
     /// Run a command through the queue, and wait for it here.
     ///
     /// This command writes the output of the job as it arrives, and it exits
-    /// with the exit code of the job. Put `qex run` before any command to give
+    /// with the exit code of the job. Put `fairq run` before any command to give
     /// that command a place in the queue.
     ///
     /// This command OWNS the job until the job starts. When this command stops,
     /// and the job still waits, the coordinator cancels that job. A job that
-    /// already operates continues, and `qex status <id> --follow` reads its
-    /// output again. Use `qex submit` for work that must live longer than the
+    /// already operates continues, and `fairq status <id> --follow` reads its
+    /// output again. Use `fairq submit` for work that must live longer than the
     /// command that starts it.
     Run(RunArgs),
 
@@ -63,16 +63,16 @@ pub enum Command {
 
     /// Stop your jobs and empty your part of the queue.
     ///
-    /// qex pauses the queue first, so no job starts while this command
+    /// fairq pauses the queue first, so no job starts while this command
     /// operates. It then cancels every queued job of the scope, and it sends
     /// TERM to every job of the scope that operates, then KILL after the
-    /// grace time. The records stay, as after `qex cancel`; `qex clean
+    /// grace time. The records stay, as after `fairq cancel`; `fairq clean
     /// cancelled` deletes them. The queue stays paused: the answer gives the
-    /// id of the pause request that this command made, and `qex resume queue
+    /// id of the pause request that this command made, and `fairq resume queue
     /// --pause ID` ends it.
     ///
     /// Without an option, the scope is the jobs of this directory that your
-    /// own process tree submitted. Run `qex help abort` for the rule.
+    /// own process tree submitted. Run `fairq help abort` for the rule.
     Abort(AbortArgs),
 
     /// Remove a job from the queue before it starts.
@@ -87,7 +87,7 @@ pub enum Command {
     /// Collect the old records of every directory.
     Gc(GcArgs),
 
-    /// Show how much disk space qex holds.
+    /// Show how much disk space fairq holds.
     Du(DuArgs),
 
     /// Watch the queue. Shows the claim and the true use of each job.
@@ -107,23 +107,23 @@ pub enum Command {
     /// Show the coordinator: its process id, its budget and its load.
     Info(InfoArgs),
 
-    /// Stop qex from starting work, or take a lock for yourself.
+    /// Stop fairq from starting work, or take a lock for yourself.
     ///
-    /// `qex pause` alone says what is paused now.
+    /// `fairq pause` alone says what is paused now.
     Pause(PauseArgs),
 
     /// Start the queue again, or give a lock back.
     ///
-    /// `qex resume` alone ends nothing: it prints each request and its id.
+    /// `fairq resume` alone ends nothing: it prints each request and its id.
     Resume(ResumeArgs),
 
     /// Show the configuration or its location.
     Config(ConfigArgs),
 
-    /// Write the JSON Schema of a qex format: job, status, pipeline or event.
+    /// Write the JSON Schema of a fairq format: job, status, pipeline or event.
     Schema(SchemaArgs),
 
-    /// Explain a topic. Agents: run `qex help agents` first.
+    /// Explain a topic. Agents: run `fairq help agents` first.
     Help(HelpArgs),
 
     /// Show the version of this command and of the coordinator.
@@ -139,7 +139,7 @@ pub enum Command {
     ///
     /// bash, zsh and fish also offer the jobs, by id and by name.
     ///
-    /// qex SHOWS a safe form of each name, here and in every other output. It
+    /// fairq SHOWS a safe form of each name, here and in every other output. It
     /// holds letters, numbers, `-`, `_` and `.` only, it does not start with
     /// `-`, and it stops at 128 characters. The record on the disk keeps the
     /// name that you gave, and a command finds the job by either form.
@@ -152,11 +152,11 @@ pub enum Command {
     /// start a process.
     ///
     /// It gives the id of each job, and the SAFE form of the name of each job.
-    /// See `qex completions --help`.
+    /// See `fairq completions --help`.
     #[command(name = "__complete", hide = true)]
     Complete(CompleteArgs),
 
-    /// Run the coordinator. qex starts this process for you.
+    /// Run the coordinator. fairq starts this process for you.
     #[command(hide = true)]
     Daemon(DaemonArgs),
 
@@ -177,16 +177,16 @@ pub struct SubmitArgs {
 
     /// Claim N devices from the pool `gpu`.
     ///
-    /// The devices come from `[[pool]]` in the config file. qex says which
+    /// The devices come from `[[pool]]` in the config file. fairq says which
     /// index the job gets, and it writes that index into the environment of the
-    /// job. qex does not read a driver, so this option operates on a machine
+    /// job. fairq does not read a driver, so this option operates on a machine
     /// with no CUDA library.
     #[arg(long, value_name = "N")]
     pub gpu: Option<u64>,
 
     /// Claim SIZE on EACH GPU that this job gets.
     ///
-    /// qex does NOT add the memory of the devices together. A job that needs
+    /// fairq does NOT add the memory of the devices together. A job that needs
     /// 40GB on one device cannot run on two devices of 24GB. With no --vram,
     /// the job takes the whole of each device that it gets.
     #[arg(long, value_name = "SIZE")]
@@ -199,7 +199,7 @@ pub struct SubmitArgs {
     #[arg(long = "claim", value_name = "NAME=N", value_parser = crate::spec::parse_claim_pair)]
     pub claims: Vec<(String, crate::spec::PoolClaim)>,
 
-    /// A name for the job, to show in `qex list`.
+    /// A name for the job, to show in `fairq list`.
     ///
     /// Letters, numbers, `-`, `_` and `.` only. It must not start with `-`.
     /// At most 128 characters.
@@ -227,7 +227,7 @@ pub struct SubmitArgs {
     #[arg(long, conflicts_with = "env_capture")]
     pub no_env_capture: bool,
 
-    /// Add a tag, to select the job in `qex list --tag`.
+    /// Add a tag, to select the job in `fairq list --tag`.
     #[arg(long = "tag", value_name = "TAG")]
     pub tags: Vec<String>,
 
@@ -288,16 +288,16 @@ pub struct SubmitArgs {
     /// wants it, so an editor and a video call stay smooth while the queue
     /// operates. The default comes from `[politeness] nice`, and it is 10.
     ///
-    /// qex can only make a job give way MORE than the coordinator does. It asks
+    /// fairq can only make a job give way MORE than the coordinator does. It asks
     /// the system for the number that you give, and the system refuses a number
-    /// below the one that the coordinator has unless qex has privilege, which
-    /// qex does not ask for. The job then keeps the priority of the
+    /// below the one that the coordinator has unless fairq has privilege, which
+    /// fairq does not ask for. The job then keeps the priority of the
     /// coordinator, and it still runs.
     #[arg(long, allow_negative_numbers = true)]
     pub nice: Option<i32>,
     /// Do not tell the job how large its claim is.
     ///
-    /// With both --cpu and --mem, qex writes the claim into the environment of
+    /// With both --cpu and --mem, fairq writes the claim into the environment of
     /// the job (GOMAXPROCS, OMP_NUM_THREADS and more), so a runtime sizes its
     /// thread pool to the claim and not to the machine. Use this option for a
     /// job that must see the machine as it is, such as a measurement.
@@ -305,7 +305,7 @@ pub struct SubmitArgs {
     pub no_limit_env_hints: bool,
     /// Start no second job when a job with this key already exists.
     ///
-    /// qex gives the id of that job and exits with the code 0. Use it in a
+    /// fairq gives the id of that job and exits with the code 0. Use it in a
     /// script that can run a second time: `--dedupe-key build:$(pwd)`. A key
     /// holds a job while that job waits or operates, and the key is free when
     /// the job stops.
@@ -330,20 +330,20 @@ pub struct SubmitArgs {
 
     /// Wait here until the job stops, and give the exit code of the job.
     ///
-    /// Use this option in place of `qex submit` and then `qex wait`. One
+    /// Use this option in place of `fairq submit` and then `fairq wait`. One
     /// command cannot be forgotten, and the harness of an agent waits for it.
-    /// The output of the job goes to the log file, so read it with `qex logs`
+    /// The output of the job goes to the log file, so read it with `fairq logs`
     /// and take the part that you want.
     ///
     /// The id goes to STDERR before the wait begins, because stdout carries the
     /// record of the job. Use `--id-file` as well, and
-    /// `qex status $(cat FILE) --wait` attaches to the job again.
+    /// `fairq status $(cat FILE) --wait` attaches to the job again.
     #[arg(long)]
     pub wait: bool,
 
     /// Wait here, and write the output of the job as it arrives.
     ///
-    /// `qex run` is the short form of this option, and the two behave in the
+    /// `fairq run` is the short form of this option, and the two behave in the
     /// same way. Ctrl-C stops the job.
     ///
     /// This option OWNS the job until the job starts. When this command stops,
@@ -354,7 +354,7 @@ pub struct SubmitArgs {
 
     /// Write no record when the job stops. Give the exit code of the job.
     ///
-    /// Use it with `--wait`. qex still reports a FAULT of the wait, and those
+    /// Use it with `--wait`. fairq still reports a FAULT of the wait, and those
     /// lines give the id that attaches to the job again.
     #[arg(long, short)]
     pub quiet: bool,
@@ -368,8 +368,8 @@ pub struct SubmitArgs {
     /// Write the id and the result of the dedupe test as JSON.
     ///
     /// Use this option when your script must know if IT started the work.
-    /// Without it, `qex submit` writes the id alone, and
-    /// `ID=$(qex submit ...)` stays correct.
+    /// Without it, `fairq submit` writes the id alone, and
+    /// `ID=$(fairq submit ...)` stays correct.
     #[arg(long)]
     pub json: bool,
 
@@ -378,9 +378,9 @@ pub struct SubmitArgs {
     /// Put `{}` in the command. Each job gets the text of one line in the place
     /// of `{}`. The jobs share one group id, and that id goes to stdout.
     ///
-    /// qex starts no shell, so the line becomes exactly one argument, whatever
+    /// fairq starts no shell, so the line becomes exactly one argument, whatever
     /// characters it holds. An empty line and a line that starts with `#` give
-    /// no job, and qex reports how many it passed over.
+    /// no job, and fairq reports how many it passed over.
     #[arg(long, value_name = "FILE", conflicts_with = "job_file")]
     pub each_line: Option<PathBuf>,
 
@@ -404,7 +404,7 @@ pub struct PipelineArgs {
     /// The file that describes the stages. TOML, YAML or JSON.
     pub file: PathBuf,
 
-    /// A name for this pipeline, to show in `qex list`.
+    /// A name for this pipeline, to show in `fairq list`.
     #[arg(long, value_name = "NAME")]
     pub name: Option<String>,
 
@@ -437,7 +437,7 @@ pub struct ListArgs {
 
     /// Show every job, also the jobs that stopped more than one hour ago.
     ///
-    /// Without an option, qex leaves those jobs out and says how many they
+    /// Without an option, fairq leaves those jobs out and says how many they
     /// are. An option that selects jobs, such as `--state` or `--tag`, shows
     /// every job that it selects, whatever its age.
     #[arg(long)]
@@ -497,7 +497,7 @@ pub struct StatusArgs {
 
     /// Wait until the job stops, and write the output of the job as it arrives.
     ///
-    /// This is the way back to a job of `qex run`, from any session. qex adds
+    /// This is the way back to a job of `fairq run`, from any session. fairq adds
     /// no text of its own to stdout: the output of the job is the output of
     /// this command, and the exit code is the code of the job.
     #[arg(long)]
@@ -508,7 +508,7 @@ pub struct StatusArgs {
     /// Use this option in a script that tests the result. With --wait, this
     /// command blocks first.
     ///
-    /// qex still reports a FAULT of the wait: a job that does not exist, a wait
+    /// fairq still reports a FAULT of the wait: a job that does not exist, a wait
     /// that reached its limit, and a wait that a signal stopped. Those lines
     /// give the id that attaches to the job again.
     #[arg(long, short, conflicts_with_all = ["follow", "json"])]
@@ -540,13 +540,13 @@ pub struct WaitArgs {
     /// order of submission.
     ///
     /// This option gives control back ONE TIME. The jobs that did not stop then
-    /// have no watcher, so wait again for them. qex names them when it returns.
+    /// have no watcher, so wait again for them. fairq names them when it returns.
     #[arg(long)]
     pub next: bool,
 
     /// Write no result for each job. Give the exit code only.
     ///
-    /// qex still reports a FAULT of the wait, and those lines give the id that
+    /// fairq still reports a FAULT of the wait, and those lines give the id that
     /// attaches to the job again.
     #[arg(long, short, conflicts_with = "json")]
     pub quiet: bool,
@@ -571,13 +571,13 @@ pub struct LogsArgs {
     #[arg(long, conflicts_with = "follow")]
     pub json: bool,
 
-    /// Show the output of the stop hook, and the verdict of qex on it.
+    /// Show the output of the stop hook, and the verdict of fairq on it.
     ///
     /// Use this option when a notification did not arrive. See `[hooks]` in
-    /// `qex help config`.
+    /// `fairq help config`.
     ///
     /// This file is not a stream of the job, so `--stdout` and `--stderr` have
-    /// no meaning with it. An option that qex ignores in silence gives the
+    /// no meaning with it. An option that fairq ignores in silence gives the
     /// reader an answer to a question that the reader did not ask.
     #[arg(long, conflicts_with_all = ["follow", "stdout", "stderr"])]
     pub hook: bool,
@@ -596,7 +596,7 @@ pub struct KillArgs {
     #[arg(long, value_name = "SIGNAL", default_value = "TERM")]
     pub signal: String,
 
-    /// The time to wait before qex sends KILL. Example: 10s.
+    /// The time to wait before fairq sends KILL. Example: 10s.
     #[arg(long, value_name = "TIME", default_value = "10s")]
     pub grace: String,
 }
@@ -615,7 +615,7 @@ pub struct AbortArgs {
     pub cwd: bool,
 
     /// Every job of your queue: every directory, and every agent that runs
-    /// as your user. qex stops only the jobs of the user who runs it; it
+    /// as your user. fairq stops only the jobs of the user who runs it; it
     /// cannot reach the jobs of another user.
     #[arg(long)]
     pub all: bool,
@@ -624,7 +624,7 @@ pub struct AbortArgs {
     #[arg(long)]
     pub keep_running: bool,
 
-    /// The time to wait before qex sends KILL. Example: 10s.
+    /// The time to wait before fairq sends KILL. Example: 10s.
     #[arg(long, value_name = "TIME", default_value = "10s")]
     pub grace: String,
 
@@ -656,7 +656,7 @@ pub struct GcArgs {
     /// Delete a record that stopped before this time.
     ///
     /// The default comes from `[gc] keep` in the config file, and that default
-    /// is one day. qex removes no record by itself: that value does nothing
+    /// is one day. fairq removes no record by itself: that value does nothing
     /// until you run this command.
     #[arg(long, value_name = "TIME")]
     pub older_than: Option<String>,
@@ -736,7 +736,7 @@ pub struct TopArgs {
     #[arg(long)]
     pub once: bool,
 
-    /// Write no colour. qex also writes no colour into a file or a pipe.
+    /// Write no colour. fairq also writes no colour into a file or a pipe.
     #[arg(long)]
     pub no_color: bool,
 }
@@ -752,7 +752,7 @@ pub struct EventsArgs {
     /// The default is `start`: every event that the coordinator still holds,
     /// and then the new events. To continue after a stop of your program, give
     /// the `stream_id` of the first line and the last number that you read.
-    /// qex compares the name with this stream, and it reports a gap when the
+    /// fairq compares the name with this stream, and it reports a gap when the
     /// coordinator changed. A number with no name cannot give that comparison.
     #[arg(long, value_name = "STREAM:SEQ|start|now", default_value = "start")]
     pub since: String,
@@ -763,7 +763,7 @@ pub struct EventsArgs {
 
     /// Stop the stream after this time. Example: 30m.
     ///
-    /// The exit code is then 124, as for `qex wait`.
+    /// The exit code is then 124, as for `fairq wait`.
     #[arg(long, value_name = "TIME")]
     pub timeout: Option<String>,
 }
@@ -792,7 +792,7 @@ pub struct PauseArgs {
     #[arg(long)]
     pub json: bool,
 
-    /// Add what qex recorded about the issuer of each request: the chain of
+    /// Add what fairq recorded about the issuer of each request: the chain of
     /// processes, with the numbers of the machine of the coordinator, and the
     /// number that the caller reported for itself, which nobody verified.
     #[arg(long)]
@@ -802,7 +802,7 @@ pub struct PauseArgs {
 /// The things that a person can pause.
 ///
 /// These are subcommands, and not options, so that the words read as what they
-/// do and so that qex can pause more things later.
+/// do and so that fairq can pause more things later.
 #[derive(Debug, Subcommand)]
 pub enum PauseTarget {
     /// Start no new job. The jobs that operate now continue.
@@ -862,13 +862,13 @@ pub struct ResumeArgs {
 /// request with its id.
 #[derive(Debug, Clone, Default, Args)]
 pub struct WhichPause {
-    /// End this pause request only. The answer of `qex pause` gave the id,
-    /// and `qex pause` alone prints the id of each request that stands.
+    /// End this pause request only. The answer of `fairq pause` gave the id,
+    /// and `fairq pause` alone prints the id of each request that stands.
     #[arg(long = "pause", value_name = "ID", global = true)]
     pub pause: Option<String>,
 
     /// End EVERY request, of every session. This is the recovery path for a
-    /// queue that nobody will resume. Read `qex pause` and each reason first.
+    /// queue that nobody will resume. Read `fairq pause` and each reason first.
     #[arg(long, global = true, conflicts_with = "pause")]
     pub all: bool,
 }
@@ -898,14 +898,14 @@ pub struct ConfigArgs {
     #[command(subcommand)]
     pub action: Option<ConfigAction>,
 
-    /// Write the output as JSON. Same as `qex config show --json`.
+    /// Write the output as JSON. Same as `fairq config show --json`.
     #[arg(long)]
     pub json: bool,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigAction {
-    /// Show the configuration that qex uses now.
+    /// Show the configuration that fairq uses now.
     Show {
         /// Write the output as JSON.
         #[arg(long)]
@@ -943,13 +943,13 @@ pub struct WatchersArgs {
 
 #[derive(Debug, Args)]
 pub struct VersionArgs {
-    /// Ask whether a newer release of qex exists.
+    /// Ask whether a newer release of fairq exists.
     ///
     /// This command reads. It never installs anything, and it never changes
     /// the program that you have.
     ///
     /// The exit code is 0 when the answer arrived, whatever the answer says,
-    /// and 1 when qex could not ask. A newer release is information and not a
+    /// and 1 when fairq could not ask. A newer release is information and not a
     /// fault. Read `newer` in `--json` to act on it.
     #[arg(long)]
     pub check: bool,
@@ -967,7 +967,7 @@ pub struct HelpArgs {
 
 #[derive(Debug, Args)]
 pub struct DaemonArgs {
-    /// Stay in the foreground. qex uses this option for the tests.
+    /// Stay in the foreground. fairq uses this option for the tests.
     #[arg(long)]
     pub foreground: bool,
 }
@@ -1031,17 +1031,17 @@ mod tests {
     }
 
     #[test]
-    fn qex_with_no_arguments_is_not_an_error() {
-        // An agent that runs `qex` must get the help text. It must not get a
-        // usage error, because the help text points to `qex help agents`.
-        let cli = Cli::try_parse_from(["qex"]).expect("`qex` alone must parse");
+    fn fairq_with_no_arguments_is_not_an_error() {
+        // An agent that runs `fairq` must get the help text. It must not get a
+        // usage error, because the help text points to `fairq help agents`.
+        let cli = Cli::try_parse_from(["fairq"]).expect("`fairq` alone must parse");
         assert!(cli.command.is_none());
     }
 
     #[test]
     fn submit_takes_the_command_after_two_dashes() {
         let cli = Cli::try_parse_from([
-            "qex", "submit", "--cpu", "2", "--mem", "4GB", "--", "uv", "run", "train.py",
+            "fairq", "submit", "--cpu", "2", "--mem", "4GB", "--", "uv", "run", "train.py",
         ])
         .unwrap();
         let Some(Command::Submit(a)) = cli.command else {
@@ -1058,7 +1058,7 @@ mod tests {
         use crate::claim::Claim;
 
         let cli = Cli::try_parse_from([
-            "qex", "submit", "--cpu", "guess", "--mem", "half", "--", "true",
+            "fairq", "submit", "--cpu", "guess", "--mem", "half", "--", "true",
         ])
         .unwrap();
         let Some(Command::Submit(a)) = cli.command else {
@@ -1068,7 +1068,7 @@ mod tests {
         assert_eq!(a.mem, Some(Claim::Half));
 
         let cli = Cli::try_parse_from([
-            "qex", "submit", "--cpu", "max", "--mem", "full", "--", "true",
+            "fairq", "submit", "--cpu", "max", "--mem", "full", "--", "true",
         ])
         .unwrap();
         let Some(Command::Submit(a)) = cli.command else {
@@ -1079,39 +1079,39 @@ mod tests {
 
         // An unknown word must give an error at the command line, and not a
         // silent claim of an unexpected size.
-        assert!(Cli::try_parse_from(["qex", "submit", "--cpu", "lots", "--", "true"]).is_err());
+        assert!(Cli::try_parse_from(["fairq", "submit", "--cpu", "lots", "--", "true"]).is_err());
     }
 
     #[test]
     fn zero_claims_are_refused_on_the_command_line() {
-        let cpu = Cli::try_parse_from(["qex", "submit", "--cpu", "0", "--", "true"])
+        let cpu = Cli::try_parse_from(["fairq", "submit", "--cpu", "0", "--", "true"])
             .unwrap_err()
             .to_string();
         assert!(cpu.contains("1 core or more"), "got: {cpu}");
 
-        let mem = Cli::try_parse_from(["qex", "submit", "--mem", "0", "--", "true"])
+        let mem = Cli::try_parse_from(["fairq", "submit", "--mem", "0", "--", "true"])
             .unwrap_err()
             .to_string();
         assert!(mem.contains("1 byte or more"), "got: {mem}");
     }
 
-    /// The job command can have options with the same names as the qex options.
-    /// qex must give each of these options to the job.
+    /// The job command can have options with the same names as the fairq options.
+    /// fairq must give each of these options to the job.
     #[test]
     fn options_after_two_dashes_belong_to_the_job() {
         let cli =
-            Cli::try_parse_from(["qex", "submit", "--", "prog", "--cpu", "99", "--json"]).unwrap();
+            Cli::try_parse_from(["fairq", "submit", "--", "prog", "--cpu", "99", "--json"]).unwrap();
         let Some(Command::Submit(a)) = cli.command else {
             panic!("expected a submit command")
         };
-        assert_eq!(a.cpu, None, "qex must not read the option of the job");
+        assert_eq!(a.cpu, None, "fairq must not read the option of the job");
         assert_eq!(a.command, vec!["prog", "--cpu", "99", "--json"]);
     }
 
     #[test]
     fn env_options_repeat_and_parse() {
         let cli = Cli::try_parse_from([
-            "qex", "submit", "--env", "A=1", "--env", "B=x=y", "--", "true",
+            "fairq", "submit", "--env", "A=1", "--env", "B=x=y", "--", "true",
         ])
         .unwrap();
         let Some(Command::Submit(a)) = cli.command else {
@@ -1128,14 +1128,14 @@ mod tests {
 
     #[test]
     fn an_incorrect_env_option_is_refused() {
-        assert!(Cli::try_parse_from(["qex", "submit", "--env", "novalue", "--", "true"]).is_err());
+        assert!(Cli::try_parse_from(["fairq", "submit", "--env", "novalue", "--", "true"]).is_err());
     }
 
     #[test]
     fn the_two_environment_options_conflict() {
         // Two options that set the same value must not appear together.
         assert!(Cli::try_parse_from([
-            "qex",
+            "fairq",
             "submit",
             "--no-env-capture",
             "--env-capture",
@@ -1148,7 +1148,7 @@ mod tests {
 
     #[test]
     fn a_negative_priority_parses() {
-        let cli = Cli::try_parse_from(["qex", "submit", "--priority", "-5", "--", "true"]).unwrap();
+        let cli = Cli::try_parse_from(["fairq", "submit", "--priority", "-5", "--", "true"]).unwrap();
         let Some(Command::Submit(a)) = cli.command else {
             panic!("expected a submit command")
         };
@@ -1164,7 +1164,7 @@ mod tests {
         }
     }
 
-    /// The user asked for `qex help agents`. The name `agent` must also operate,
+    /// The user asked for `fairq help agents`. The name `agent` must also operate,
     /// because an agent can write either name.
     #[test]
     fn the_agents_topic_has_two_names() {
@@ -1176,7 +1176,7 @@ mod tests {
     /// the banner.
     #[test]
     fn the_banner_points_to_the_agents_topic() {
-        assert!(crate::help::banner().contains("qex help agents"));
+        assert!(crate::help::banner().contains("fairq help agents"));
         // The banner must give the length of the page, so a reader opens it one
         // time only.
         assert!(
@@ -1196,7 +1196,7 @@ mod tests {
             "the topic must name the pgrep fault"
         );
         assert!(
-            text.contains("qex wait"),
+            text.contains("fairq wait"),
             "the topic must give the solution"
         );
     }
@@ -1225,12 +1225,12 @@ mod tests {
     }
 
     /// `subcommand_word` in main.rs reads the first argument that does not
-    /// start with a dash. That is the subcommand ONLY while `qex` itself takes
-    /// no option with a value: `qex --config FILE submit` would otherwise give
+    /// start with a dash. That is the subcommand ONLY while `fairq` itself takes
+    /// no option with a value: `fairq --config FILE submit` would otherwise give
     /// the word `FILE`, and the exit code for a usage error would then follow
     /// the wrong rule.
     #[test]
-    fn qex_takes_no_global_option_with_a_value() {
+    fn fairq_takes_no_global_option_with_a_value() {
         let command = crate::cli::Cli::command();
         for arg in command.get_arguments() {
             assert!(
@@ -1252,7 +1252,7 @@ mod tests {
 
     /// The topic must steer staged work away from a shell script.
     ///
-    /// Two measured faults lived in a script that chained `qex submit --wait`
+    /// Two measured faults lived in a script that chained `fairq submit --wait`
     /// calls, and not in a job: a merge stage ran on the files of an earlier
     /// run, because the script did not test the exit code of a wait, and a
     /// change to the script stopped five chains that a shell still read.
@@ -1267,12 +1267,12 @@ mod tests {
             "the topic must say what not to do"
         );
         assert!(
-            text.contains("run `qex pipeline ci.toml`"),
+            text.contains("run `fairq pipeline ci.toml`"),
             "the topic must name the command to use"
         );
         assert!(
             text.contains("becomes `skipped`, with the code 126"),
-            "the topic must say what qex does when a stage fails"
+            "the topic must say what fairq does when a stage fails"
         );
     }
 
@@ -1293,17 +1293,17 @@ mod tests {
             "`--max-queue-time` COUNTS THE TIME THAT THE MACHINE WAS OFF",
             "the record on the disk still says `running`",
             // The command that makes the correction happen.
-            "run `qex list`. It starts a coordinator",
+            "run `fairq list`. It starts a coordinator",
         ] {
             assert!(text.contains(words), "the topic must say: {words}");
         }
     }
 
-    /// Each help page that names `[gc] keep` must say that qex deletes nothing
+    /// Each help page that names `[gc] keep` must say that fairq deletes nothing
     /// by itself. The word `keep` in a config file reads as a rule that
     /// something applies, and the first sign of the truth was a full disk.
     #[test]
-    fn the_help_says_that_qex_removes_no_record_by_itself() {
+    fn the_help_says_that_fairq_removes_no_record_by_itself() {
         for (name, page) in [
             ("config", crate::help::CONFIG),
             ("output", crate::help::OUTPUT),
@@ -1319,27 +1319,27 @@ mod tests {
                 "this test reads the pages that name `[gc] keep`, and `{name}` does not"
             );
             assert!(
-                text.contains("qex removes no record by itself"),
-                "the topic `{name}` names `[gc] keep`, so it must say that qex removes no \
+                text.contains("fairq removes no record by itself"),
+                "the topic `{name}` names `[gc] keep`, so it must say that fairq removes no \
                  record by itself"
             );
         }
         assert!(
-            crate::help::OUTPUT.contains("qex du"),
+            crate::help::OUTPUT.contains("fairq du"),
             "the topic must give the command that shows the size"
         );
     }
 
     /// The topic must show the pattern that operates inside a harness.
     ///
-    /// `qex wait` blocks, and the harness of an agent reports the end of a
+    /// `fairq wait` blocks, and the harness of an agent reports the end of a
     /// background command. The two together need no timer.
     #[test]
     fn the_agents_topic_gives_the_pattern_for_a_harness() {
         let text = crate::help::AGENTS;
         assert!(
             text.contains("--wait"),
-            "the topic must name `qex status --wait`"
+            "the topic must name `fairq status --wait`"
         );
         assert!(
             text.contains("background"),

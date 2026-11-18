@@ -12,7 +12,7 @@
 //! with the claim `half` operate together, and a third job waits. A job with
 //! the claim `full` operates alone, and every other job waits for it.
 //!
-//! qex measures the true use of each job. Read `qex status <id>` after the job,
+//! fairq measures the true use of each job. Read `fairq status <id>` after the job,
 //! then give an accurate claim the next time.
 
 use crate::config::Config;
@@ -25,7 +25,7 @@ enum RawClaim {
     Text(String),
 }
 
-/// The size of a claim, before qex calculates the value.
+/// The size of a claim, before fairq calculates the value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Claim {
@@ -65,8 +65,8 @@ impl Claim {
     }
 
     pub(crate) fn exact(n: u64, is_size: bool) -> Result<Self, String> {
-        // A zero claim lets qex start an unlimited number of jobs together,
-        // which is the fault that qex prevents. Do not silently raise it: the
+        // A zero claim lets fairq start an unlimited number of jobs together,
+        // which is the fault that fairq prevents. Do not silently raise it: the
         // value is a decision made by the author of the command or job file.
         if n == 0 {
             let message = if is_size {
@@ -86,7 +86,7 @@ impl Claim {
             // Two jobs of this size operate together, and a third job waits.
             Self::Half => (cfg.budget_cpu().unwrap_or(2) / 2).max(1),
             // A job of this size operates alone. It fills the budget exactly,
-            // so qex starts it by the usual rule and does not force it.
+            // so fairq starts it by the usual rule and does not force it.
             Self::Full => cfg.budget_cpu().unwrap_or(1).max(1),
         }
     }
@@ -218,7 +218,7 @@ mod tests {
     }
 
     /// A job with the claim `full` must fit the budget exactly. If it were one
-    /// byte larger, qex would treat it as a job that is too large, and it would
+    /// byte larger, fairq would treat it as a job that is too large, and it would
     /// force the job and give a warning. A job that asks for the budget is a
     /// normal job, so it must start by the usual rule.
     #[test]
@@ -238,8 +238,8 @@ mod tests {
         assert!(used_mem + 1 > cfg.budget_mem().unwrap());
     }
 
-    /// A claim must never be zero. A zero claim lets qex start an unlimited
-    /// number of jobs together, which is the fault that qex prevents.
+    /// A claim must never be zero. A zero claim lets fairq start an unlimited
+    /// number of jobs together, which is the fault that fairq prevents.
     #[test]
     fn a_half_claim_is_never_zero() {
         let small: Config = toml::from_str("[budget]\ncpu = \"1\"\nmem = \"1MB\"\n").unwrap();

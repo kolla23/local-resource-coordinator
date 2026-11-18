@@ -1,6 +1,6 @@
 //! This module selects the part of a log file that a command shows.
 //!
-//! `qex logs` and `qex status` share these options, so the two commands always
+//! `fairq logs` and `fairq status` share these options, so the two commands always
 //! behave in the same way.
 //!
 //! The reader is frequently an agent with a limited context. A job can write
@@ -25,7 +25,7 @@ pub const DEFAULT_MATCHES: usize = 100;
 /// this limit, `--follow` would write that whole file first.
 pub const FOLLOW_LEAD_LINES: usize = 20;
 
-/// The number of lines that `qex status` shows for a job that failed.
+/// The number of lines that `fairq status` shows for a job that failed.
 ///
 /// This value is small on purpose. The command shows these lines with no option
 /// at all, and the usual reader has a limited context.
@@ -71,12 +71,12 @@ pub struct LogSelect {
 
     /// The maximum number of matches of --grep to show. The default is 100.
     ///
-    /// qex reports the number of matches that it did not show. This option has
+    /// fairq reports the number of matches that it did not show. This option has
     /// no meaning with --follow, which reads a stream and has no total.
     #[arg(long, value_name = "N", help_heading = "Log selection")]
     pub max_matches: Option<usize>,
 
-    /// Show every line. Without this option, qex shows the last 500 lines.
+    /// Show every line. Without this option, fairq shows the last 500 lines.
     #[arg(long, help_heading = "Log selection")]
     pub all: bool,
 }
@@ -117,7 +117,7 @@ impl Selected {
             // The singular and the plural are separate texts: `1 line matches`
             // and `2 lines match`. ASD-STE100 does not accept `line(s)`.
             (Some(found), _) if found > self.matches_shown => Some(format!(
-                "... {}, and qex shows the first {}. \
+                "... {}, and fairq shows the first {}. \
                  Use `--max-matches N`, `--all`, or a narrower pattern.",
                 lines_match(found),
                 self.matches_shown
@@ -145,7 +145,7 @@ impl LogSelect {
     pub fn check_with_follow(&self) -> Result<(), String> {
         if self.max_matches.is_some() {
             return Err(
-                "--max-matches has no meaning with --follow. A stream has no total, so qex \
+                "--max-matches has no meaning with --follow. A stream has no total, so fairq \
                  cannot say how many matches come after a limit. Use --grep alone to filter \
                  the stream."
                     .to_string(),
@@ -326,7 +326,7 @@ fn parse_range(s: &str) -> Result<(usize, usize), String> {
 
 /// Tests one line against a pattern.
 ///
-/// qex has no regular expression library, so this type reads a small language:
+/// fairq has no regular expression library, so this type reads a small language:
 /// `.`, `*`, `+`, `?`, `[abc]`, `^`, `$` and `|`. A pattern that uses more than
 /// this gives a clear error, and `--fixed` accepts any text.
 struct Matcher {

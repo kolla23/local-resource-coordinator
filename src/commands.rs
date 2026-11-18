@@ -20,31 +20,31 @@ use crate::units::{count_of, format_duration, format_size, parse_duration, plura
 use anyhow::{bail, Context, Result};
 use std::time::{Duration, Instant};
 
-/// The lowest exit code that qex keeps for itself.
+/// The lowest exit code that fairq keeps for itself.
 ///
-/// A job can exit with any code from 0 to 255, so every code that qex gives
+/// A job can exit with any code from 0 to 255, so every code that fairq gives
 /// itself is a code that a job can give as well. A reserved BAND with a
 /// sentinel removes that collision, and one free number cannot:
 ///
 /// - a code from 0 to 96 comes from the job, and nothing else gives one;
-/// - a code from 97 to 255 comes from qex, and it describes the queue, the
-///   wait, or qex itself;
+/// - a code from 97 to 255 comes from fairq, and it describes the queue, the
+///   wait, or fairq itself;
 /// - the sentinel 97 says that the job gave a code in the reserved band. The
 ///   record then holds the true code of the job.
 ///
 /// See `EXIT_CODES` in `help.rs` for the table that a reader sees.
 pub const EXIT_BAND_FLOOR: i32 = 97;
-/// The exit code when the job gave a code that qex keeps for itself.
+/// The exit code when the job gave a code that fairq keeps for itself.
 ///
-/// Read `qex status` for the code of the job. Without this sentinel, a job that
+/// Read `fairq status` for the code of the job. Without this sentinel, a job that
 /// exits 124 of its own accord looks the same as a wait that reached its time
 /// limit.
 pub const EXIT_JOB_RESERVED: i32 = 97;
-/// The exit code when a signal stopped the job, and qex did not send it.
+/// The exit code when a signal stopped the job, and fairq did not send it.
 ///
 /// The usual form is `128 + N`, and it collides with the band: a job that the
 /// out-of-memory killer stops gives 137, and a WAIT that the out-of-memory
-/// killer stops gives 137 also. The two need different actions, so qex gives
+/// killer stops gives 137 also. The two need different actions, so fairq gives
 /// the job its own code and puts the name of the signal in the record.
 pub const EXIT_JOB_SIGNAL: i32 = 98;
 /// The exit code when the kernel stopped the job because the machine ran out of
@@ -57,36 +57,36 @@ pub const EXIT_JOB_SIGNAL: i32 = 98;
 pub const EXIT_OOM: i32 = 99;
 /// The exit code when the job has not stopped, so there is no result.
 ///
-/// `qex status --quiet` with no wait gives it. This code is not 122: 122 says
+/// `fairq status --quiet` with no wait gives it. This code is not 122: 122 says
 /// that a WAIT stopped, and this reader never waited. The two need different
 /// words, because a code with two meanings is the fault that the band removes.
 pub const EXIT_NO_RESULT: i32 = 100;
-/// The exit code when qex could not do what the command line asked.
+/// The exit code when fairq could not do what the command line asked.
 ///
 /// A command that gives the exit code of a job must not report a fault of its
 /// own with a code from the job band. The code 1 is the most common code of a
-/// program that failed, so `qex run` that could not start would otherwise look
+/// program that failed, so `fairq run` that could not start would otherwise look
 /// exactly like a job that failed.
-pub const EXIT_QEX_FAILED: i32 = 121;
+pub const EXIT_FAIRQ_FAILED: i32 = 121;
 /// The exit code when the wait stopped and the job did not.
 ///
 /// The job continues, and the caller must attach to it again. This code is not
 /// 124: 124 says that the READER set a time limit and the limit passed, and
 /// this code says that the reader lost the wait with no decision of its own.
 pub const EXIT_WAIT_BROKEN: i32 = 122;
-/// The exit code of `qex wait` when the job never started.
+/// The exit code of `fairq wait` when the job never started.
 ///
 /// The job waited more time than its `--max-queue-time` value. This code is not
 /// 125: a job that ran too long wrote output and used the machine, and this job
 /// did neither. A script must be able to separate "the work is too slow" from
 /// "the machine had no capacity", because the two need different corrections.
 pub const EXIT_EXPIRED: i32 = 123;
-/// The exit code of `qex wait` when the wait reached its time limit.
+/// The exit code of `fairq wait` when the wait reached its time limit.
 /// The command `timeout` uses the same code.
 pub const EXIT_TIMEOUT: i32 = 124;
-/// The exit code of `qex wait` when something stopped the job.
+/// The exit code of `fairq wait` when something stopped the job.
 pub const EXIT_KILLED: i32 = 125;
-/// The exit code of `qex wait` when the job did not run.
+/// The exit code of `fairq wait` when the job did not run.
 ///
 /// A job that this job needed did not succeed. The fault is in that job, and
 /// not in this one, so this code is separate.
@@ -96,7 +96,7 @@ pub const EXIT_NO_SUCH_JOB: i32 = 127;
 
 /// Gives the code for an error that a resolver of ids reported.
 ///
-/// A TIMEOUT IS NEVER "NO SUCH JOB". The code 127 says that qex holds no job
+/// A TIMEOUT IS NEVER "NO SUCH JOB". The code 127 says that fairq holds no job
 /// with that id, and a coordinator that did not answer proves nothing of the
 /// kind. To answer 127 for a job that OPERATES tells the caller that its work
 /// does not exist, and the caller then stops watching a job that continues.
@@ -108,7 +108,7 @@ fn code_for_a_resolver_error(error: &anyhow::Error) -> i32 {
     }
 }
 
-/// The age of a record that `qex clean --auto` deletes.
+/// The age of a record that `fairq clean --auto` deletes.
 ///
 /// A job that stopped in the last hour is frequently the job that a user reads
 /// now. A job that stopped before that is history.
@@ -117,17 +117,17 @@ const AUTO_CLEAN_AGE: u64 = 3600;
 pub fn submit(args: cli::SubmitArgs) -> Result<i32> {
     // `--quiet` describes the end of a wait, so it needs a wait. Say so here,
     // and not through a required-argument error of the command line reader:
-    // `qex run -q` gave "the argument --wait was not provided" for a command
+    // `fairq run -q` gave "the argument --wait was not provided" for a command
     // that refuses `--wait`.
     if args.quiet && !args.wait && !args.follow {
         bail!(
-            "`--quiet` needs `--wait`. It says that qex writes no record when the job \
+            "`--quiet` needs `--wait`. It says that fairq writes no record when the job \
              stops.\n\n\
-             \x20   qex submit --wait --quiet -- COMMAND"
+             \x20   fairq submit --wait --quiet -- COMMAND"
         );
     }
 
-    // `--follow` is `qex run` in a longer form, so it IS `qex run`. One
+    // `--follow` is `fairq run` in a longer form, so it IS `fairq run`. One
     // behaviour has one implementation.
     if args.follow {
         return run(cli::RunArgs { submit: args });
@@ -139,11 +139,11 @@ pub fn submit(args: cli::SubmitArgs) -> Result<i32> {
         // pair and give the two commands that do it.
         if args.wait {
             bail!(
-                "`qex submit --each-line` does not accept `--wait`, because it makes many jobs \
+                "`fairq submit --each-line` does not accept `--wait`, because it makes many jobs \
                  and one exit code cannot describe them all.\n\n\
                  Submit them, then wait for the group:\n\
-                 \x20   GROUP=$(qex submit --each-line inputs.txt -- ./process {{}})\n\
-                 \x20   qex wait $GROUP"
+                 \x20   GROUP=$(fairq submit --each-line inputs.txt -- ./process {{}})\n\
+                 \x20   fairq wait $GROUP"
             );
         }
         return submit_each_line(args);
@@ -212,18 +212,18 @@ pub fn submit(args: cli::SubmitArgs) -> Result<i32> {
             deduplicated,
         } => {
             // The warning goes to stderr. The id stays alone on stdout, so the
-            // command `ID=$(qex submit ...)` continues to operate.
+            // command `ID=$(fairq submit ...)` continues to operate.
             //
             // A submission that a dedupe key answered writes its message here
             // also. The exit code stays 0 and the id stays alone on stdout,
             // because a script that captures the id must operate in the same
             // way in both cases. The difference belongs on the other stream.
             if let Some(text) = warning {
-                eprintln!("qex: {text}");
+                eprintln!("fairq: {text}");
             }
             // With `--wait`, stdout carries the RESULT of the job, so the id
             // goes to stderr. Two answers on one stream would give
-            // `ID=$(qex submit --wait ...)` the whole record. Use `--id-file`
+            // `ID=$(fairq submit --wait ...)` the whole record. Use `--id-file`
             // to keep the id, which also survives an interruption.
             //
             // The file reaches the disk BEFORE the wait, and it is closed, so
@@ -274,19 +274,19 @@ pub fn submit(args: cli::SubmitArgs) -> Result<i32> {
 /// The failure is still loud, because the caller asked for that file and a
 /// later command will read it.
 fn say_the_id_and_write_the_file(id: uuid::Uuid, path: Option<&std::path::PathBuf>) {
-    eprintln!("qex: job {id}");
+    eprintln!("fairq: job {id}");
     if let Some(path) = path {
         if let Err(e) = write_id_file(path, &format!("{id}\n")) {
             eprintln!(
-                "qex: the id file did not reach the disk: {e:#}\n\
-                 qex: the job {id} still operates. Keep the id from the line above, or read \
-                 `qex list --cwd .`"
+                "fairq: the id file did not reach the disk: {e:#}\n\
+                 fairq: the job {id} still operates. Keep the id from the line above, or read \
+                 `fairq list --cwd .`"
             );
         }
     }
 }
 
-/// Writes the record of one job, in the form of `qex status`.
+/// Writes the record of one job, in the form of `fairq status`.
 ///
 /// Every command that waits for ONE job ends with this, so a caller needs no
 /// second command to learn the state, the exit code and the last lines of the
@@ -305,14 +305,14 @@ fn report_the_record(id: &str, json: bool) {
         select: crate::logsel::LogSelect::default(),
     };
     // The exit code comes from the wait, and not from this report. A record
-    // that qex cannot read does not change the result of the job, so the
+    // that fairq cannot read does not change the result of the job, so the
     // message goes to stderr and the caller keeps its code.
     if let Err(e) = status(args) {
-        eprintln!("qex: qex could not read the record of the job {id}: {e:#}");
+        eprintln!("fairq: fairq could not read the record of the job {id}: {e:#}");
     }
 }
 
-/// Waits for the job that `qex submit --wait` started.
+/// Waits for the job that `fairq submit --wait` started.
 ///
 /// # Why this option exists
 ///
@@ -320,20 +320,20 @@ fn report_the_record(id: &str, json: bool) {
 /// and an agent that forgets it never learns that the job stopped: the job
 /// succeeds and nobody reads the result (issue #47).
 ///
-/// `qex run` also waits, and it writes the output of the job to the terminal,
-/// so a long job fills the context of an agent. `qex submit --wait` gives both
+/// `fairq run` also waits, and it writes the output of the job to the terminal,
+/// so a long job fills the context of an agent. `fairq submit --wait` gives both
 /// properties: the harness of the agent waits, and the output stays in the log
 /// file.
 ///
 /// One command also closes a race. Between a submission and a wait a short job
-/// can stop, and a `qex clean` in that window deletes the record.
+/// can stop, and a `fairq clean` in that window deletes the record.
 fn wait_after_submit(raw_id: &str, timeout: Option<&str>, json: bool, quiet: bool) -> Result<i32> {
     let deadline = match timeout {
         Some(t) => parse_duration(t)
             .map_err(|e| anyhow::anyhow!("--wait-timeout: {e}"))?
             .map(|d| {
                 // THE NUMBER OF THE READER BOUNDS THE WHOLE COMMAND. A reader
-                // who says five seconds must not wait longer while qex reaches
+                // who says five seconds must not wait longer while fairq reaches
                 // the coordinator: the connect, the lock and the read share
                 // this limit with the wait for the job.
                 crate::client::take_the_limit_of_the_reader(d);
@@ -346,7 +346,7 @@ fn wait_after_submit(raw_id: &str, timeout: Option<&str>, json: bool, quiet: boo
     // `--quiet` silences the REPORT and the narration of the queue. It does not
     // silence a fault of the wait: those lines name the fault and give the id
     // that attaches to the job again, and a caller that loses them holds
-    // nothing. See `qex help exit-codes`.
+    // nothing. See `fairq help exit-codes`.
     let mut reporter = ReasonReporter::new(json || quiet);
     let ids = [raw_id.to_string()];
 
@@ -374,7 +374,7 @@ fn wait_after_submit(raw_id: &str, timeout: Option<&str>, json: bool, quiet: boo
             Ok(EXIT_TIMEOUT)
         }
         WaitOutcome::NoSuchJob => {
-            eprintln!("qex: there is no job with the id {raw_id}");
+            eprintln!("fairq: there is no job with the id {raw_id}");
             Ok(EXIT_NO_SUCH_JOB)
         }
         WaitOutcome::Interrupted => Ok(report_broken_wait(&ids, false)),
@@ -383,12 +383,12 @@ fn wait_after_submit(raw_id: &str, timeout: Option<&str>, json: bool, quiet: boo
 
 /// Submits one job for each line of a file, and gives the jobs one group id.
 ///
-/// # Why qex reads the whole input before it submits anything
+/// # Why fairq reads the whole input before it submits anything
 ///
-/// `qex pipeline` does the same, and for the same reason. A fan-out that stops
+/// `fairq pipeline` does the same, and for the same reason. A fan-out that stops
 /// in the middle leaves a part of the work in the queue and a part of the work
 /// with no job. The user then holds a group that is not the file, and the only
-/// correction is to find and cancel each job by hand. qex therefore reads the
+/// correction is to find and cancel each job by hand. fairq therefore reads the
 /// input, tests the command, tests the count and makes every specification
 /// first.
 ///
@@ -397,11 +397,11 @@ fn wait_after_submit(raw_id: &str, timeout: Option<&str>, json: bool, quiet: boo
 /// holds up to 1000 jobs, so that window is much wider than the window of a
 /// pipeline. EVERY message for such a fault names the group and the command
 /// that finds the jobs: a user who never learns the group id cannot reach the
-/// jobs that qex already made.
+/// jobs that fairq already made.
 ///
 /// # Why one claim covers every job
 ///
-/// qex resolves the claim one time, from the command of the FIRST line, and
+/// fairq resolves the claim one time, from the command of the FIRST line, and
 /// gives it to every job. The lines of a fan-out are the same kind of work, so
 /// one claim is correct for them. A claim for each line separately would come
 /// from a different measurement for each line, and the order of the queue would
@@ -411,7 +411,7 @@ fn wait_after_submit(raw_id: &str, timeout: Option<&str>, json: bool, quiet: boo
 /// line. `JobSpec::learn_key` holds the reason. The claim of the first line is
 /// thus the claim of the whole fan-out of the last run.
 ///
-/// `qex status` says `fan-out` for such a claim, and not `learned`. The word
+/// `fairq status` says `fan-out` for such a claim, and not `learned`. The word
 /// `learned` means "from the earlier jobs of this command", and the command of
 /// one line can have no measurement at all.
 fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
@@ -430,29 +430,29 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
     // this project exists to prevent.
     if args.dedupe_key.is_some() || args.dedupe_window.is_some() {
         bail!(
-            "`qex submit --each-line` does not accept `--dedupe-key` or `--dedupe-window`.\n\n\
-             A key holds one job. Every job of a fan-out would carry the same key, so qex \
+            "`fairq submit --each-line` does not accept `--dedupe-key` or `--dedupe-window`.\n\n\
+             A key holds one job. Every job of a fan-out would carry the same key, so fairq \
              would start the first line only and give you the id of that job for every \
              other line.\n\n\
              To run a fan-out one time only, put the key on a job that guards it:\n\n\
-             \x20   qex submit --dedupe-key nightly -- ./fan-out.sh"
+             \x20   fairq submit --dedupe-key nightly -- ./fan-out.sh"
         );
     }
 
-    // `qex submit` writes one id to stdout, and `--json` writes that id as an
+    // `fairq submit` writes one id to stdout, and `--json` writes that id as an
     // object. A fan-out writes a group id and N job ids, which is a different
     // shape, and `--id-file NAME.json` already gives it.
     if args.json {
         bail!(
-            "`qex submit --each-line` does not accept `--json`.\n\n\
+            "`fairq submit --each-line` does not accept `--json`.\n\n\
              That option writes the id of ONE job, and a fan-out makes a group and one job \
              for each line.\n\n\
              Use an id file with the name `.json`. It holds the group and every job:\n\n\
-             \x20   qex submit --each-line inputs.txt --id-file jobs.json -- ./process {{}}"
+             \x20   fairq submit --each-line inputs.txt --id-file jobs.json -- ./process {{}}"
         );
     }
 
-    // Test the command before qex reads the file. A command with no `{}` is a
+    // Test the command before fairq reads the file. A command with no `{}` is a
     // fault of the command line, and the user must see that fault first.
     let template = args.command.clone();
     crate::fanout::check_command(&template)?;
@@ -462,8 +462,8 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
     crate::fanout::check_count(input.lines.len(), max)?;
     let count = input.lines.len();
 
-    // Say what qex passed over. A line that a user expected to run, and that
-    // qex passed over in silence, is a quiet wrong answer.
+    // Say what fairq passed over. A line that a user expected to run, and that
+    // fairq passed over in silence, is a quiet wrong answer.
     if input.skipped() > 0 {
         let mut passed: Vec<String> = Vec::new();
         if input.blank > 0 {
@@ -473,7 +473,7 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
             passed.push(count_of(input.comments, "comment line"));
         }
         eprintln!(
-            "qex: this input gives {}. qex passed over {}.",
+            "fairq: this input gives {}. fairq passed over {}.",
             count_of(count, "job"),
             passed.join(" and ")
         );
@@ -549,7 +549,7 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
     let mut client = Client::connect()?;
     warn_if_version_differs(&mut client);
 
-    // Every job of the fan-out waits for the same jobs, so qex changes each
+    // Every job of the fan-out waits for the same jobs, so fairq changes each
     // name into an id one time.
     let needs = resolve_dependencies(&mut client, &deps.needs, "--needs")?;
     let after = resolve_dependencies(&mut client, &deps.after, "--after")?;
@@ -586,7 +586,7 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
         // Take the answer in two steps. A transport fault gives an `Err` here,
         // and the `?` of the first form would carry that fault out of this
         // function with the group id still in this frame only. The jobs that
-        // qex already submitted are on the disk, and a user who never saw the
+        // fairq already submitted are on the disk, and a user who never saw the
         // group id has no way to reach them.
         let answer = match client.call(&Request::Submit {
             spec: Box::new(spec),
@@ -595,7 +595,7 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
             Ok(answer) => answer,
             Err(e) => {
                 partial_fan_out(
-                    &format!("qex lost the coordinator at the job `{name}`"),
+                    &format!("fairq lost the coordinator at the job `{name}`"),
                     group,
                     &submitted,
                 );
@@ -617,7 +617,7 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
                     if warned.as_deref() == Some(head.as_str()) {
                         warned_again += 1;
                     } else {
-                        eprintln!("qex: {name}: {text}");
+                        eprintln!("fairq: {name}: {text}");
                         warned = Some(head);
                     }
                 }
@@ -636,8 +636,8 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
 
     if warned_again > 0 {
         eprintln!(
-            "qex: the same warning applies to {} of this fan-out. \
-             Run `qex list --group {group}` to see them all.",
+            "fairq: the same warning applies to {} of this fan-out. \
+             Run `fairq list --group {group}` to see them all.",
             count_of(warned_again, "more job")
         );
     }
@@ -648,7 +648,7 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
     }
 
     // The detail goes to stderr and the group id goes to stdout alone, so
-    // `GROUP=$(qex submit --each-line ...)` operates.
+    // `GROUP=$(fairq submit --each-line ...)` operates.
     // The SAFE forms: these lines go to a terminal. `job_name` already cleans
     // the name of a job, and the group name comes from `--name` or from the
     // path of the input file, which a user can write with any byte at all.
@@ -658,7 +658,7 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
         eprintln!("{}: {id}", crate::job::safe_name(name));
     }
     eprintln!(
-        "qex: {} in the group `{}`",
+        "fairq: {} in the group `{}`",
         count_of(count, "job"),
         crate::job::safe_name(&group_name)
     );
@@ -669,33 +669,33 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
 /// Reports a fan-out that stopped in the middle.
 ///
 /// This function exists because of the ONE thing that a user must not lose: the
-/// group id. The jobs that qex already submitted are on the disk and they
+/// group id. The jobs that fairq already submitted are on the disk and they
 /// operate, and the group id is the only short handle to all of them. A message
 /// that gives the fault and no group id leaves the user with jobs that they
 /// cannot find.
 ///
-/// The ids come as well. `qex list --group` needs a coordinator, and this
-/// function frequently reports that qex just lost the coordinator.
+/// The ids come as well. `fairq list --group` needs a coordinator, and this
+/// function frequently reports that fairq just lost the coordinator.
 fn partial_fan_out(what: &str, group: uuid::Uuid, submitted: &[(String, uuid::Uuid)]) {
     eprintln!(
-        "qex: {what}. {} of this fan-out {} in the queue.",
+        "fairq: {what}. {} of this fan-out {} in the queue.",
         count_of(submitted.len(), "job"),
         if submitted.len() == 1 { "is" } else { "are" }
     );
     if submitted.is_empty() {
         return;
     }
-    eprintln!("qex: the group of those jobs is {group}. They are:");
+    eprintln!("fairq: the group of those jobs is {group}. They are:");
     for (name, id) in submitted {
         eprintln!("{}: {id}", crate::job::safe_name(name));
     }
     eprintln!(
-        "qex: Run `qex list --group {group}` to see them, and `qex cancel <id>` or \
-         `qex kill <id>` to stop them."
+        "fairq: Run `fairq list --group {group}` to see them, and `fairq cancel <id>` or \
+         `fairq kill <id>` to stop them."
     );
 }
 
-/// The age of a job that stopped, above which `qex list` with no option leaves
+/// The age of a job that stopped, above which `fairq list` with no option leaves
 /// it out.
 ///
 /// The number is the number of `AUTO_CLEAN_AGE`, for the same reason: a job of
@@ -819,7 +819,7 @@ pub fn list(args: cli::ListArgs) -> Result<i32> {
         runs.dedup();
         if runs.len() > 1 && !args.json {
             eprintln!(
-                "qex: `{group}` names {} pipelines, and this table holds all of them. \
+                "fairq: `{group}` names {} pipelines, and this table holds all of them. \
                  A pipeline takes its name from its file, so a second run of that file \
                  has the same name. Use a group id for one run: {}",
                 runs.len(),
@@ -835,7 +835,7 @@ pub fn list(args: cli::ListArgs) -> Result<i32> {
     // queue for the whole of it. The text goes to stderr, as the pause does.
     if older > 0 {
         eprintln!(
-            "qex: this list leaves out {} that stopped more than {} ago. Run `qex list --all` \
+            "fairq: this list leaves out {} that stopped more than {} ago. Run `fairq list --all` \
              to see every job, or select jobs with an option such as `--state done`.",
             count_of(older, "job"),
             format_duration(Duration::from_secs(LIST_RECENT_AGE))
@@ -843,7 +843,7 @@ pub fn list(args: cli::ListArgs) -> Result<i32> {
     }
     if over_limit > 0 {
         eprintln!(
-            "qex: `--limit` leaves out {} that qex submitted before the jobs of this list.",
+            "fairq: `--limit` leaves out {} that fairq submitted before the jobs of this list.",
             count_of(over_limit, "job")
         );
     }
@@ -854,7 +854,7 @@ pub fn list(args: cli::ListArgs) -> Result<i32> {
     // Say the pause before the jobs, and say it every time.
     //
     // A queue that does nothing and does not say why is the fault that this
-    // tool exists to remove. The text goes to stderr, so `qex list --json`
+    // tool exists to remove. The text goes to stderr, so `fairq list --json`
     // still writes JSON alone on stdout.
     warn_if_paused(&mut client);
 
@@ -929,7 +929,7 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
     let found = match resolve_targets(&mut client, &args.id) {
         Ok(found) => found,
         Err(e) => {
-            eprintln!("qex: {e}");
+            eprintln!("fairq: {e}");
             return Ok(code_for_a_resolver_error(&e));
         }
     };
@@ -940,8 +940,8 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
         bail!(
             "`--timeout` limits a WAIT, and this command does not wait. Add `--wait` or \
              `--follow`.\n\n\
-             \x20   qex status <id> --wait --timeout 30m\n\n\
-             Use `qex submit --timeout` to limit the JOB."
+             \x20   fairq status <id> --wait --timeout 30m\n\n\
+             Use `fairq submit --timeout` to limit the JOB."
         );
     }
 
@@ -951,7 +951,7 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
             .map_err(|e| anyhow::anyhow!("--timeout: {e}"))?
             .map(|d| {
                 // THE NUMBER OF THE READER BOUNDS THE WHOLE COMMAND. A reader
-                // who says five seconds must not wait longer while qex reaches
+                // who says five seconds must not wait longer while fairq reaches
                 // the coordinator: the connect, the lock and the read share
                 // this limit with the wait for the job.
                 crate::client::take_the_limit_of_the_reader(d);
@@ -960,7 +960,7 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
         None => None,
     };
 
-    // `--follow` is the way back to a job of `qex run`, from any session.
+    // `--follow` is the way back to a job of `fairq run`, from any session.
     //
     // It writes the output of the job and no text of its own on stdout, and it
     // gives the exit code of the job. This command did not start the job, so a
@@ -968,12 +968,12 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
     if args.follow {
         // This command writes the output of the job on stdout. A JSON object
         // there would mix with that output, and neither part could be read.
-        // `qex run` refuses `--json` for the same reason.
+        // `fairq run` refuses `--json` for the same reason.
         if args.json {
             bail!(
-                "`qex status --follow` does not accept --json, because it writes the output \
+                "`fairq status --follow` does not accept --json, because it writes the output \
                  of the job to stdout.\n\n\
-                 Use `qex status <id> --wait --json` for the record, or `qex logs <id> --json` \
+                 Use `fairq status <id> --wait --json` for the record, or `fairq logs <id> --json` \
                  for the output."
             );
         }
@@ -1020,7 +1020,7 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
             match wait_one(&id.to_string(), deadline, &mut reporter)? {
                 WaitOutcome::Finished(s) => {
                     waited += 1;
-                    // Report the FIRST fault. A later stage that qex skipped
+                    // Report the FIRST fault. A later stage that fairq skipped
                     // would otherwise hide the stage that failed.
                     let code = exit_code_for(&s);
                     if code != 0 && wait_code == 0 {
@@ -1038,7 +1038,7 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
                     break;
                 }
                 WaitOutcome::NoSuchJob => {
-                    eprintln!("qex: there is no job with the id {id}");
+                    eprintln!("fairq: there is no job with the id {id}");
                     return Ok(EXIT_NO_SUCH_JOB);
                 }
                 // Give the code of a wait that stopped, and NOT `128 + N`. The
@@ -1110,7 +1110,7 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
         if args.json {
             let mut value = serde_json::to_value(&*status)?;
             if args.show_env {
-                // The environment can hold secrets, so qex adds it only when
+                // The environment can hold secrets, so fairq adds it only when
                 // the user asks for it. A value can hold any byte: show it
                 // in the form that a person can read. See `job::visible`.
                 if let Ok(spec) = crate::job::read_spec(&paths::job_dir(&id)?) {
@@ -1183,12 +1183,12 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
     if args.json {
         // One job gives an object, as before. A pipeline gives an array. A
         // script that reads one job must not become a script that reads an
-        // array because qex learned about pipelines.
+        // array because fairq learned about pipelines.
         //
         // The shape comes from what the user NAMED, and not from the number of
         // jobs. A pipeline of one stage must still give an array, or a script
         // that reads `.[0]` of a group breaks on the day a pipeline has one
-        // stage, or on the day `qex clean` removes all the stages but one.
+        // stage, or on the day `fairq clean` removes all the stages but one.
         if is_pipeline {
             println!("{}", serde_json::to_string_pretty(&values)?);
         } else {
@@ -1285,7 +1285,7 @@ fn dropped_notice(status: &JobStatus, stream: &str) -> Option<String> {
 
     let mut text = match dropped.of(stream) {
         Some((bytes, lines)) => format!(
-            "... qex removed {} and {} from the middle of this stream.{limit} \
+            "... fairq removed {} and {} from the middle of this stream.{limit} \
              The first part and the last part are here. To keep more, make max_bytes larger \
              in the configuration file.",
             format_size(bytes),
@@ -1318,23 +1318,23 @@ fn read_log(dir: &std::path::Path, file: &str) -> String {
     }
 }
 
-/// Writes the claim of a job, with a note beside each value that qex chose.
+/// Writes the claim of a job, with a note beside each value that fairq chose.
 ///
 /// A note at the end of the line covers the whole line. A person who gave
-/// `--cpu 10` then read that qex learned the 10 cores also, and could not see
+/// `--cpu 10` then read that fairq learned the 10 cores also, and could not see
 /// which option changes which value. The note thus goes beside the value that
 /// it describes, and a value that the person gave has no note.
 fn claim_text(s: &JobStatus) -> String {
     let cores = count_of(s.cpu as usize, "core");
     let mem = format_size(s.mem);
 
-    // A record of an earlier qex has one source for the whole claim, and that
-    // source says `learned` when qex learned ONE value. qex cannot say which
+    // A record of an earlier fairq has one source for the whole claim, and that
+    // source says `learned` when fairq learned ONE value. fairq cannot say which
     // one, so the note does not say it.
     if s.cpu_source.is_empty() || s.mem_source.is_empty() {
         let note = match s.claim_source.as_str() {
-            "learned" => " (qex learned one value or both from the earlier jobs of this command)",
-            "fan-out" => " (qex learned one value or both from the earlier jobs of this fan-out)",
+            "learned" => " (fairq learned one value or both from the earlier jobs of this command)",
+            "fan-out" => " (fairq learned one value or both from the earlier jobs of this fan-out)",
             "default" => " (the default; give --cpu and --mem to change it)",
             _ => "",
         };
@@ -1390,20 +1390,20 @@ fn print_status(s: &JobStatus, show_env: bool) -> Result<()> {
     println!("claim:     {}", claim_text(s));
 
     // The chain of the submitter, with the point where the session ends.
-    // `qex abort` acts on the part below that point; see the `context`
+    // `fairq abort` acts on the part below that point; see the `context`
     // module. A reader can then see why a job was, or was not, in scope.
     if !s.submitter.is_empty() {
         let boundary = crate::context::boundary_index(&s.submitter);
         // A restart of the machine ends every process of the chain, and the
-        // start times count from the restart, so `qex abort` refuses such a
+        // start times count from the restart, so `fairq abort` refuses such a
         // record. Say it here, or the reader cannot see why.
         if s.boot_id.as_deref() != Some(crate::sys::boot_id().as_str()) {
             println!(
                 "submitter: the machine restarted after this submission, so every process below \
-                 is gone and `qex abort` does not match this job"
+                 is gone and `fairq abort` does not match this job"
             );
         } else {
-            println!("submitter: the processes above `qex submit`, nearest first");
+            println!("submitter: the processes above `fairq submit`, nearest first");
         }
         for (index, a) in s.submitter.iter().enumerate() {
             let mark = match boundary {
@@ -1424,7 +1424,7 @@ fn print_status(s: &JobStatus, show_env: bool) -> Result<()> {
         }
         if boundary.is_none() {
             println!(
-                "           (no end of the session found: `qex abort` does not match this job)"
+                "           (no end of the session found: `fairq abort` does not match this job)"
             );
         }
     }
@@ -1456,7 +1456,7 @@ fn print_status(s: &JobStatus, show_env: bool) -> Result<()> {
         println!("waits for: {r}");
     }
     if let Some(e) = &s.error {
-        // A job that succeeded can also hold a text here. qex writes the story
+        // A job that succeeded can also hold a text here. fairq writes the story
         // of an out-of-memory kill in this field, and that story stays in the
         // record after a later attempt succeeded. The word `error` would then
         // contradict the state, so this line uses the word `note`.
@@ -1486,9 +1486,9 @@ fn print_status(s: &JobStatus, show_env: bool) -> Result<()> {
             ));
         }
         if !parts.is_empty() {
-            println!("output:    qex removed {}", parts.join(", and "));
+            println!("output:    fairq removed {}", parts.join(", and "));
             println!(
-                "           The job wrote more than `[logs] max_bytes`{}. qex kept the \
+                "           The job wrote more than `[logs] max_bytes`{}. fairq kept the \
                  first part and the last part of each file.",
                 if d.limit > 0 {
                     format!(" ({})", format_size(d.limit))
@@ -1500,7 +1500,7 @@ fn print_status(s: &JobStatus, show_env: bool) -> Result<()> {
         if d.incomplete {
             println!("output:    a log file of this job is not complete.");
             println!(
-                "           The output did not close after the job stopped, so qex could \
+                "           The output did not close after the job stopped, so fairq could \
                  not count what went. Start the job again if you need the full output."
             );
         }
@@ -1595,7 +1595,7 @@ pub fn wait(args: cli::WaitArgs) -> Result<i32> {
             .map_err(|e| anyhow::anyhow!("--timeout: {e}"))?
             .map(|d| {
                 // THE NUMBER OF THE READER BOUNDS THE WHOLE COMMAND. A reader
-                // who says five seconds must not wait longer while qex reaches
+                // who says five seconds must not wait longer while fairq reaches
                 // the coordinator: the connect, the lock and the read share
                 // this limit with the wait for the job.
                 crate::client::take_the_limit_of_the_reader(d);
@@ -1604,8 +1604,8 @@ pub fn wait(args: cli::WaitArgs) -> Result<i32> {
         None => None,
     };
 
-    // A pipeline gives every one of its stages. `qex wait $GROUP` thus waits
-    // for the whole pipeline, and the group id that `qex pipeline` writes is a
+    // A pipeline gives every one of its stages. `fairq wait $GROUP` thus waits
+    // for the whole pipeline, and the group id that `fairq pipeline` writes is a
     // handle that works.
     //
     // A value that the resolver refuses gives its own message here, with the
@@ -1617,14 +1617,14 @@ pub fn wait(args: cli::WaitArgs) -> Result<i32> {
         Err(e) => {
             // A fault, and not a report. `--quiet` keeps it: the reader has no
             // result and no id, so silence would leave it with a number only.
-            eprintln!("qex: {e}");
+            eprintln!("fairq: {e}");
             return Ok(EXIT_NO_SUCH_JOB);
         }
     };
 
     // Say the pause BEFORE the wait begins.
     //
-    // Issue #28: `qex wait` gives no word where `qex run` explains itself. A
+    // Issue #28: `fairq wait` gives no word where `fairq run` explains itself. A
     // pause makes that silence unbounded — a wait with no `--timeout`, behind a
     // pause with no end, never returns and never says why. One line on stderr
     // is the whole remedy, and stdout keeps the result alone.
@@ -1671,7 +1671,7 @@ pub fn wait(args: cli::WaitArgs) -> Result<i32> {
             }
             WaitOutcome::NoSuchJob => {
                 eprintln!(
-                    "qex: there is no job with the id {raw_id}. A `qex clean` deletes the \
+                    "fairq: there is no job with the id {raw_id}. A `fairq clean` deletes the \
                      record of a job that stopped, so a job that succeeded a moment ago can \
                      give this answer."
                 );
@@ -1703,7 +1703,7 @@ pub fn wait(args: cli::WaitArgs) -> Result<i32> {
         println!("{}", serde_json::to_string_pretty(&results)?);
     } else {
         // ONE LINE for each job. This command takes many jobs, so it gives a
-        // short report of each. Use `qex status $ID --wait` for the record of
+        // short report of each. Use `fairq status $ID --wait` for the record of
         // one job: the state, the exit code, the cause and the last lines of
         // the error output.
         for s in &results {
@@ -1719,7 +1719,7 @@ pub fn wait(args: cli::WaitArgs) -> Result<i32> {
 /// Waits until the first job of a set stops.
 ///
 /// This function tests each job in turn with a short limit, so no job holds the
-/// wait while a different job is ready. It is the one place where qex polls,
+/// wait while a different job is ready. It is the one place where fairq polls,
 /// and it polls its own records, which always answer.
 ///
 /// This wait gives control back ONE time. The jobs that did not stop then have
@@ -1766,7 +1766,7 @@ fn wait_for_the_next(
             };
 
             let Some(status) = status else {
-                eprintln!("qex: there is no job with the id {raw}");
+                eprintln!("fairq: there is no job with the id {raw}");
                 return Ok(EXIT_NO_SUCH_JOB);
             };
 
@@ -1794,9 +1794,9 @@ fn wait_for_the_next(
 
         if let Some(d) = deadline {
             if Instant::now() >= d {
-                eprintln!("qex: no job stopped before the time limit. They continue.");
+                eprintln!("fairq: no job stopped before the time limit. They continue.");
                 eprintln!(
-                    "qex: wait again:  qex wait --next {}{}",
+                    "fairq: wait again:  fairq wait --next {}{}",
                     ids.join(" "),
                     the_same_limit(args.timeout.as_deref())
                 );
@@ -1828,11 +1828,11 @@ fn warn_about_the_jobs_that_stay(args: &cli::WaitArgs, ids: &[String], done: &st
     }
     let names = rest.join(" ");
     eprintln!(
-        "qex: {} did not stop, and no command watches {} now. Wait again:",
+        "fairq: {} did not stop, and no command watches {} now. Wait again:",
         count_of(rest.len(), "job"),
         if rest.len() == 1 { "it" } else { "them" }
     );
-    eprintln!("qex:   qex wait --next {names}");
+    eprintln!("fairq:   fairq wait --next {names}");
 }
 
 enum WaitOutcome {
@@ -1870,7 +1870,7 @@ extern "C" fn on_wait_signal(_signal: libc::c_int) {
 /// alive can say which of the two happened.
 ///
 /// This function is for a command that WATCHES a job and does not own it.
-/// `qex run` owns its job, so it uses its own handler and it stops the job.
+/// `fairq run` owns its job, so it uses its own handler and it stops the job.
 fn catch_signals_while_waiting() {
     // `sigaction` and not `signal`: `signal` gives different rules on
     // different systems, and this code needs two of them exactly.
@@ -1912,22 +1912,22 @@ fn say_that_the_wait_reached_its_limit(ids: &[String], limit: Option<&str>) {
     crate::client::give_the_record_its_own_time();
     let again = attach_again(ids, limit);
     if let [one] = ids {
-        eprintln!("qex: the wait for {one} reached its time limit. The job continues.");
-        eprintln!("qex: attach to it again:  {again}");
+        eprintln!("fairq: the wait for {one} reached its time limit. The job continues.");
+        eprintln!("fairq: attach to it again:  {again}");
     } else {
-        eprintln!("qex: the wait reached its time limit. The jobs that did not stop continue.");
-        eprintln!("qex: attach to them again:  {again}");
+        eprintln!("fairq: the wait reached its time limit. The jobs that did not stop continue.");
+        eprintln!("fairq: attach to them again:  {again}");
     }
 }
 
 /// Gives the command that attaches to the jobs again, with the same limit.
 ///
 /// ONE job gives the command that also gives the record. MANY jobs give
-/// `qex wait`, which is the command that takes many.
+/// `fairq wait`, which is the command that takes many.
 fn attach_again(ids: &[String], limit: Option<&str>) -> String {
     let mut command = match ids {
-        [one] => format!("qex status {one} --wait"),
-        many => format!("qex wait {}", many.join(" ")),
+        [one] => format!("fairq status {one} --wait"),
+        many => format!("fairq wait {}", many.join(" ")),
     };
     command.push_str(&the_same_limit(limit));
     command
@@ -1955,14 +1955,14 @@ fn the_same_limit(limit: Option<&str>) -> String {
 /// attaches to it again.
 fn report_broken_wait(ids: &[String], quiet: bool) -> i32 {
     if !quiet {
-        eprintln!("qex: your wait stopped. The job continues.");
+        eprintln!("fairq: your wait stopped. The job continues.");
         // ONE job gives the command that also gives the record, because that is
-        // what the reader wanted. MANY jobs give `qex wait`, which is the
+        // what the reader wanted. MANY jobs give `fairq wait`, which is the
         // command that takes many.
         if let [one] = ids {
-            eprintln!("qex: attach to it again:  qex status {one} --wait");
+            eprintln!("fairq: attach to it again:  fairq status {one} --wait");
         } else {
-            eprintln!("qex: attach to them again:  qex wait {}", ids.join(" "));
+            eprintln!("fairq: attach to them again:  fairq wait {}", ids.join(" "));
         }
     }
     EXIT_WAIT_BROKEN
@@ -2053,7 +2053,7 @@ impl ReasonReporter {
         if self.last.as_deref() == Some(reason.as_str()) {
             return;
         }
-        eprintln!("qex: {}", crate::job::printable(reason));
+        eprintln!("fairq: {}", crate::job::printable(reason));
         self.last = Some(reason.clone());
     }
 }
@@ -2115,7 +2115,7 @@ fn wait_one_until(
     loop {
         // THE LIMIT CAN PASS BEFORE THIS WAIT BEGINS. It spans the command, so
         // the wait for an earlier job, or a slow connect, can use all of it.
-        // qex then reaches no coordinator, because every operation refuses to
+        // fairq then reaches no coordinator, because every operation refuses to
         // start after the limit. That is not a coordinator that stopped, and
         // the lines below must not say that it is.
         //
@@ -2150,7 +2150,7 @@ fn wait_one_until(
 
                 if !reporter.quiet {
                     eprintln!(
-                        "qex: the coordinator stopped. The job continues, and this wait \
+                        "fairq: the coordinator stopped. The job continues, and this wait \
                          continues with it."
                     );
                 }
@@ -2182,7 +2182,7 @@ enum Reconnect {
     None,
     TimedOut,
     Interrupted,
-    /// The job stopped while qex looked for a coordinator.
+    /// The job stopped while fairq looked for a coordinator.
     Finished(Box<JobStatus>),
 }
 
@@ -2260,7 +2260,7 @@ fn wait_through_coordinator(
     //
     // `wait_readable` holds the deadline of the user, and the reads around it
     // do not. A coordinator that accepts the connection and then says nothing
-    // would hold `qex wait --timeout 30m` for ever, and the first Ctrl-C would
+    // would hold `fairq wait --timeout 30m` for ever, and the first Ctrl-C would
     // not reach the test above.
     client
         .set_read_timeout(Some(WAIT_SLICE.max(REASON_INTERVAL)))
@@ -2325,7 +2325,7 @@ fn wait_through_coordinator(
         // One message for one fault. `report_for_a_job` writes the message of
         // the coordinator, and a second line here would say the same thing
         // twice in different words.
-        Ok(other) => bail!("the coordinator gave an answer that qex did not expect: {other:?}"),
+        Ok(other) => bail!("the coordinator gave an answer that fairq did not expect: {other:?}"),
         // The coordinator closed the connection, or the read failed. Both mean
         // that the coordinator stopped: the deadline above ends a wait that
         // reached its time limit, so a fault here is not a time limit.
@@ -2339,7 +2339,7 @@ fn wait_through_coordinator(
 /// The coordinator then holds the earlier code. That difference caused a fault
 /// that named no cause: every job failed with "No such file or directory".
 ///
-/// qex now starts the program that is on the disk, so a job runs. The two
+/// fairq now starts the program that is on the disk, so a job runs. The two
 /// versions can still behave differently, so the user must know.
 fn warn_if_version_differs(client: &mut Client) {
     let mine = crate::version::VERSION;
@@ -2363,16 +2363,16 @@ fn warn_if_version_differs(client: &mut Client) {
             //
             // It stays quiet while the coordinator reports the SAME version as
             // this command: the two are then one build, the user made it, and
-            // there is nothing that they do not know already. A build of qex
-            // that runs the tests of qex would otherwise write this line for
+            // there is nothing that they do not know already. A build of fairq
+            // that runs the tests of fairq would otherwise write this line for
             // every command.
             crate::capabilities::Floor::Development(message) if version != mine => {
-                eprintln!("qex: {message}");
+                eprintln!("fairq: {message}");
             }
 
             _ if version != mine => {
                 eprintln!(
-                    "qex: the coordinator (pid {pid}) is version {version}, and this command is \
+                    "fairq: the coordinator (pid {pid}) is version {version}, and this command is \
                      version {mine}. The coordinator stops when no job operates, and the next \
                      command starts one with this version. Stop it now with `kill {pid}` if you \
                      need this version immediately."
@@ -2381,7 +2381,7 @@ fn warn_if_version_differs(client: &mut Client) {
 
             _ if program_replaced => {
                 eprintln!(
-                    "qex: something replaced the qex program after the coordinator (pid {pid}) \
+                    "fairq: something replaced the fairq program after the coordinator (pid {pid}) \
                      started. The coordinator stops when no job operates."
                 );
             }
@@ -2461,10 +2461,10 @@ fn pipeline_dependency(
                  stage already stopped.\n\n\
                  A name can give a pipeline of an earlier run. Did you forget to start a \
                  new `{name}` pipeline?\n\n\
-                 Use the group id that `qex pipeline` wrote for this run:\n\
-                 \x20   GROUP=$(qex pipeline your-file)\n\
-                 \x20   qex submit {option} $GROUP -- ...\n\n\
-                 A group id always names one run, so qex accepts it whatever its state.",
+                 Use the group id that `fairq pipeline` wrote for this run:\n\
+                 \x20   GROUP=$(fairq pipeline your-file)\n\
+                 \x20   fairq submit {option} $GROUP -- ...\n\n\
+                 A group id always names one run, so fairq accepts it whatever its state.",
                 count_of(stages.len(), "stage")
             );
         }
@@ -2495,7 +2495,7 @@ fn resolve_one_dependency(
     // success although the order was wrong.
     //
     // An id does not have that risk. An id names one job for ever, and the
-    // agent read it from the `qex submit` of this run. An id thus needs the
+    // agent read it from the `fairq submit` of this run. An id thus needs the
     // existence test only, which the resolver already made.
     //
     // This difference also keeps a pipeline script correct. A script that keeps
@@ -2510,10 +2510,10 @@ fn resolve_one_dependency(
                      Its state is `{}`.\n\n\
                      A name can give a job of an earlier run. Did you forget to start a \
                      new `{name}` job?\n\n\
-                     Use the id that `qex submit` wrote for this run:\n\
-                     \x20   ID=$(qex submit --name {name} -- ...)\n\
-                     \x20   qex submit {option} $ID -- ...\n\n\
-                     An id always names one job, so qex accepts an id whatever its state.",
+                     Use the id that `fairq submit` wrote for this run:\n\
+                     \x20   ID=$(fairq submit --name {name} -- ...)\n\
+                     \x20   fairq submit {option} $ID -- ...\n\n\
+                     An id always names one job, so fairq accepts an id whatever its state.",
                     &id.to_string()[..8],
                     status.state
                 );
@@ -2592,14 +2592,14 @@ pub fn logs(args: cli::LogsArgs) -> Result<i32> {
         Some(mut c) => match resolve_id(&mut c, &args.id) {
             Ok(id) => id,
             Err(e) => {
-                eprintln!("qex: {e}");
+                eprintln!("fairq: {e}");
                 return Ok(code_for_a_resolver_error(&e));
             }
         },
         None => match find_id_on_disk(&args.id)? {
             Some(id) => id,
             None => {
-                eprintln!("qex: there is no job with the id {}", args.id);
+                eprintln!("fairq: there is no job with the id {}", args.id);
                 return Ok(EXIT_NO_SUCH_JOB);
             }
         },
@@ -2629,8 +2629,8 @@ pub fn logs(args: cli::LogsArgs) -> Result<i32> {
         // answer gives that reader an error from its parser, and not an answer.
         if !dir.join("hook.log").exists() {
             eprintln!(
-                "qex: qex ran no stop hook for this job, so there is no log. \
-                 Read `qex config show` to see the hook and the states that it runs on."
+                "fairq: fairq ran no stop hook for this job, so there is no log. \
+                 Read `fairq config show` to see the hook and the states that it runs on."
             );
             if !args.json {
                 return Ok(0);
@@ -2687,12 +2687,12 @@ pub fn logs(args: cli::LogsArgs) -> Result<i32> {
             println!("==> {name} <==");
         }
         // The notice goes to stderr, so stdout holds the log lines only.
-        // A command such as `qex logs $ID > file` must give a clean file, and a
+        // A command such as `fairq logs $ID > file` must give a clean file, and a
         // reader that parses the output must not meet a sentence in it.
         //
         // `logs_dropped` counts the output of the JOB, so it says nothing about
         // the log of the hook. Without this test, a job whose output did not
-        // close made `qex logs --hook` print "the output of this job did not
+        // close made `fairq logs --hook` print "the output of this job did not
         // close" above the hook log, which sends the reader to the wrong file.
         // The hook has its own limit, and its own verdict inside `hook.log`.
         if !args.hook {
@@ -2835,13 +2835,13 @@ fn follow(dir: &std::path::Path, select: &crate::logsel::LogSelect) -> Result<i3
             // file, and every later line goes to nobody: the reader sees the
             // output stop, with no word, and this command exits with the code 0.
             //
-            // qex therefore watches the length. A file that became shorter gets
+            // fairq therefore watches the length. A file that became shorter gets
             // a notice and a new position at its end.
             let len = h.file.metadata().map(|m| m.len()).unwrap_or(h.high_water);
             if len < h.high_water {
                 if !h.said {
                     eprintln!(
-                        "... qex reached the limit `[logs] max_bytes` and removed the middle \
+                        "... fairq reached the limit `[logs] max_bytes` and removed the middle \
                          of this file. This command continues at the new end of the file. \
                          Read the file again when the job stops."
                     );
@@ -2904,7 +2904,7 @@ fn follow(dir: &std::path::Path, select: &crate::logsel::LogSelect) -> Result<i3
                 }
             }
             Err(_) => {
-                // The record is gone, so `qex clean` deleted the job.
+                // The record is gone, so `fairq clean` deleted the job.
                 if !moved {
                     return Ok(0);
                 }
@@ -2915,7 +2915,7 @@ fn follow(dir: &std::path::Path, select: &crate::logsel::LogSelect) -> Result<i3
     }
 }
 
-/// One stream that `qex logs --follow` reads.
+/// One stream that `fairq logs --follow` reads.
 struct Followed {
     name: String,
     file: std::fs::File,
@@ -2924,7 +2924,7 @@ struct Followed {
     /// The largest length that this command saw.
     ///
     /// The log file of a job becomes shorter when the output passes the limit,
-    /// so a position alone does not show that qex removed something.
+    /// so a position alone does not show that fairq removed something.
     high_water: u64,
     /// True after this command said that the output is not complete.
     said: bool,
@@ -2968,7 +2968,7 @@ pub fn kill(args: cli::KillArgs) -> Result<i32> {
         let (found, states) = match resolve_with_states(&mut client, raw) {
             Ok(pair) => pair,
             Err(e) => {
-                eprintln!("qex: {e}");
+                eprintln!("fairq: {e}");
                 worst = code_for_a_resolver_error(&e);
                 continue;
             }
@@ -2986,13 +2986,13 @@ pub fn kill(args: cli::KillArgs) -> Result<i32> {
                 continue;
             }
 
-            // `qex kill $GROUP` says "stop every stage", so a stage that waits
+            // `fairq kill $GROUP` says "stop every stage", so a stage that waits
             // in the queue leaves the queue.
             //
             // A user who names ONE job that waits gets the fault and the
-            // instruction to use `qex cancel`, because that user asked about
+            // instruction to use `fairq cancel`, because that user asked about
             // that one job. A user who named the pipeline asked for the whole
-            // of it to stop, and a stage that qex left in the queue would
+            // of it to stop, and a stage that fairq left in the queue would
             // START after the command said that it stopped everything.
             let waiting = matches!(states.get(&id), Some(JobState::Queued));
             let answer = if whole_pipeline && waiting {
@@ -3029,7 +3029,7 @@ pub fn kill(args: cli::KillArgs) -> Result<i32> {
     Ok(worst)
 }
 
-/// Why a refused `qex abort` matters.
+/// Why a refused `fairq abort` matters.
 const ABORT_DANGER: &str = "That coordinator would refuse the request and change nothing, so the \
      queue would keep its jobs and start them.";
 
@@ -3049,7 +3049,7 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
     // submission, so this value must be resolved in the same way.
     let here = std::env::current_dir()
         .and_then(|d| d.canonicalize())
-        .context("qex cannot read the current directory")?;
+        .context("fairq cannot read the current directory")?;
     let scope = crate::proto::AbortScope {
         cwd: (!args.all).then(|| here.to_string_lossy().into_owned()),
         submitter: (!args.all && !args.cwd).then(crate::sys::submitter_chain),
@@ -3057,7 +3057,7 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
     };
 
     let mut client = Client::connect()?;
-    require_command(&mut client, "abort", "qex abort", ABORT_DANGER)?;
+    require_command(&mut client, "abort", "fairq abort", ABORT_DANGER)?;
 
     let response = client
         .call(&Request::Abort {
@@ -3068,8 +3068,8 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
         })
         .context(
             "the connection to the coordinator ended during the abort.\n\
-             The pause and every cancel that qex made are on the disk, so no job starts \
-             and no cancelled job comes back. Run `qex abort` again for the rest.",
+             The pause and every cancel that fairq made are on the disk, so no job starts \
+             and no cancelled job comes back. Run `fairq abort` again for the rest.",
         )?;
     let Response::Aborted {
         cancelled,
@@ -3085,19 +3085,19 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
         return report(response);
     };
     // A coordinator of an earlier version gives no receipt. Its pause has no
-    // id, and `qex pause` says what stands.
+    // id, and `fairq pause` says what stands.
     let next = match &pause {
         Some(receipt) => {
             crate::pause::guarded_command(crate::pause::Target::Queue, &receipt.pause_id)
         }
-        None => String::from("qex pause"),
+        None => String::from("fairq pause"),
     };
     let others: Vec<&crate::pause::PauseView> = pauses
         .iter()
         .filter(|v| Some(&v.pause_id) != pause.as_ref().map(|r| &r.pause_id))
         .collect();
 
-    // A job that qex could not stop, or could not cancel, is work that can
+    // A job that fairq could not stop, or could not cancel, is work that can
     // still happen, so the code says that the reader must act.
     let code = if not_stopped.is_empty() && not_cancelled.is_empty() {
         0
@@ -3128,13 +3128,13 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
                     .map(|v| crate::pause::view_json(v, crate::pause::Target::Queue, false))
                     .collect::<Vec<_>>(),
                 "next": next,
-                "clean": "qex clean cancelled",
+                "clean": "fairq clean cancelled",
             }))?
         );
         return Ok(code);
     }
 
-    // Say the scope first. A reader who asked for a wider scope than qex
+    // Say the scope first. A reader who asked for a wider scope than fairq
     // has learns here that the queue holds the jobs of one user.
     let tags = if args.tag.is_empty() {
         String::new()
@@ -3150,7 +3150,7 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
     };
     if args.all {
         println!(
-            "scope:     every job of your queue{tags}. qex cannot reach the jobs of another user."
+            "scope:     every job of your queue{tags}. fairq cannot reach the jobs of another user."
         );
     } else if args.cwd {
         println!(
@@ -3161,7 +3161,7 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
         let context = crate::context::below_boundary(scope.submitter.as_deref().unwrap_or(&[]));
         if context.is_empty() {
             println!(
-                "scope:     the jobs of {}{tags} from your process tree, and qex could read no \
+                "scope:     the jobs of {}{tags} from your process tree, and fairq could read no \
                  process above this command, so that is no job. Use `--cwd` for every job of \
                  this directory.",
                 here.display()
@@ -3180,7 +3180,7 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
     }
 
     // A count of zero says what did not happen, so it gets no sentence
-    // about what qex did with it.
+    // about what fairq did with it.
     if cancelled == 0 {
         println!("cancelled: no job waited in the scope");
     } else {
@@ -3192,8 +3192,8 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
 
     if !not_cancelled.is_empty() {
         println!(
-            "not cancelled: {}; qex could not write the record, so each one stays in the \
-             queue. Correct the directory, then run `qex abort` again.",
+            "not cancelled: {}; fairq could not write the record, so each one stays in the \
+             queue. Correct the directory, then run `fairq abort` again.",
             count_of(not_cancelled.len(), "queued job")
         );
         for n in &not_cancelled {
@@ -3214,14 +3214,14 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
         println!("signalled: no job of the scope operated");
     } else {
         println!(
-            "signalled: {} received TERM; qex sends KILL after {}s to each one that continues",
+            "signalled: {} received TERM; fairq sends KILL after {}s to each one that continues",
             count_of(signalled.len(), "job"),
             grace
         );
     }
     if !not_stopped.is_empty() {
         println!(
-            "not stopped: {}. Use `qex kill <id>` when it operates.",
+            "not stopped: {}. Use `fairq kill <id>` when it operates.",
             count_of(not_stopped.len(), "job")
         );
         for n in &not_stopped {
@@ -3232,11 +3232,11 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
         let wider = if args.all {
             "Give no `--tag` to reach them."
         } else if args.cwd {
-            "`qex abort --all` reaches every job of your queue."
+            "`fairq abort --all` reaches every job of your queue."
         } else {
-            "`qex abort --cwd` reaches the jobs of this directory from every process. A \
-             job of another directory needs `qex abort` from that directory, or \
-             `qex abort --all`."
+            "`fairq abort --cwd` reaches the jobs of this directory from every process. A \
+             job of another directory needs `fairq abort` from that directory, or \
+             `fairq abort --all`."
         };
         println!(
             "outside:   {} outside this scope wait or operate; this command did not touch them. {wider}",
@@ -3246,7 +3246,7 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
     let clean = if cancelled == 0 {
         ""
     } else {
-        " Run `qex clean cancelled` to delete the cancelled records."
+        " Run `fairq clean cancelled` to delete the cancelled records."
     };
     match &pause {
         Some(receipt) => println!(
@@ -3255,7 +3255,7 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
             receipt.pause_id
         ),
         None => println!(
-            "The queue is paused. Run `qex pause` to read each pause request and how it \
+            "The queue is paused. Run `fairq pause` to read each pause request and how it \
              ends.{clean}"
         ),
     }
@@ -3293,7 +3293,7 @@ fn print_other_pauses(others: &[&crate::pause::PauseView], target: crate::pause:
 
 /// Tells whether this job already stopped.
 ///
-/// A job that the list does not hold counts as stopped. `qex clean` can remove
+/// A job that the list does not hold counts as stopped. `fairq clean` can remove
 /// a record between the list and the command, and a record that went away is
 /// not work that continues.
 fn stopped(states: &std::collections::HashMap<uuid::Uuid, JobState>, id: uuid::Uuid) -> bool {
@@ -3303,7 +3303,7 @@ fn stopped(states: &std::collections::HashMap<uuid::Uuid, JobState>, id: uuid::U
 /// Reads the text of the user, and keeps the state of each job.
 ///
 /// A command that stops work must know the state before it acts. Without it,
-/// `qex kill $GROUP` cannot tell a stage that already stopped from a stage that
+/// `fairq kill $GROUP` cannot tell a stage that already stopped from a stage that
 /// waits in the queue, and those two need opposite answers.
 fn resolve_with_states(
     client: &mut Client,
@@ -3323,7 +3323,7 @@ fn resolve_with_states(
 /// it completes.
 const STOP_MANY_PART: usize = 500;
 
-/// Sends the ids of `qex cancel` or `qex kill` in parts, and gives the exit
+/// Sends the ids of `fairq cancel` or `fairq kill` in parts, and gives the exit
 /// code.
 fn stop_many(
     client: &mut Client,
@@ -3355,7 +3355,7 @@ fn report_stop_many(response: Response, worst: &mut i32) -> Result<()> {
     };
     for outcome in outcomes {
         if let Some(text) = outcome.error {
-            eprintln!("qex: {text}");
+            eprintln!("fairq: {text}");
             *worst = EXIT_NO_SUCH_JOB;
             continue;
         }
@@ -3380,8 +3380,8 @@ fn report_stop_many(response: Response, worst: &mut i32) -> Result<()> {
                 _ => report(Response::Error {
                     message: line.refusal.unwrap_or_else(|| {
                         format!(
-                            "the coordinator answered `{}` for the job {id}, and this qex \
-                             does not know that word. Read `qex status {id}`.",
+                            "the coordinator answered `{}` for the job {id}, and this fairq \
+                             does not know that word. Read `fairq status {id}`.",
                             line.did
                         )
                     }),
@@ -3399,7 +3399,7 @@ fn report_stop_many(response: Response, worst: &mut i32) -> Result<()> {
 pub fn cancel(args: cli::CancelArgs) -> Result<i32> {
     let mut client = Client::connect()?;
     // ONE request for every id. A request for each id made the coordinator
-    // read its whole queue for each one, so the cost of `qex cancel` with a
+    // read its whole queue for each one, so the cost of `fairq cancel` with a
     // hundred ids grew with the hundred AND with the queue.
     if client.can("stop-many")? {
         return stop_many(&mut client, &args.ids, |handles| Request::CancelMany {
@@ -3411,7 +3411,7 @@ pub fn cancel(args: cli::CancelArgs) -> Result<i32> {
         let (found, states) = match resolve_with_states(&mut client, raw) {
             Ok(pair) => pair,
             Err(e) => {
-                eprintln!("qex: {e}");
+                eprintln!("fairq: {e}");
                 worst = code_for_a_resolver_error(&e);
                 continue;
             }
@@ -3452,14 +3452,14 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
         bail!(
             "name the jobs to delete.\n\n\
              Examples:\n\
-             \x20   qex clean <id>\n\
-             \x20   qex clean completed        # or: qex clean --state completed\n\
-             \x20   qex clean done             # every job that stopped\n\
-             \x20   qex clean --auto           # everything safe, here and below\n\
-             \x20   qex clean --cwd            # the jobs of this directory\n\
-             \x20   qex clean --under          # the jobs of this directory and below\n\
-             \x20   qex clean --older-than 7d\n\
-             \x20   qex clean --all"
+             \x20   fairq clean <id>\n\
+             \x20   fairq clean completed        # or: fairq clean --state completed\n\
+             \x20   fairq clean done             # every job that stopped\n\
+             \x20   fairq clean --auto           # everything safe, here and below\n\
+             \x20   fairq clean --cwd            # the jobs of this directory\n\
+             \x20   fairq clean --under          # the jobs of this directory and below\n\
+             \x20   fairq clean --older-than 7d\n\
+             \x20   fairq clean --all"
         );
     }
 
@@ -3507,7 +3507,7 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
     // A reader who names the records, and gives no option that selects by a
     // property, needs those records only. The whole list costs the coordinator
     // one read of the disk for each job that stopped, so a history of a sweep
-    // made `qex clean <id>` pay for every record to delete one.
+    // made `fairq clean <id>` pay for every record to delete one.
     //
     // A word that is also the name of a state keeps the path below. That path
     // must learn if the word names a job, a pipeline or a state, and the state
@@ -3524,7 +3524,7 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
             match answer {
                 Ok(found) => targets.extend(found.ids),
                 Err(e) => {
-                    eprintln!("qex: {e}");
+                    eprintln!("fairq: {e}");
                     return Ok(EXIT_NO_SUCH_JOB);
                 }
             }
@@ -3542,7 +3542,7 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
                 other => worst = report(other)?,
             }
         }
-        println!("qex deleted {}", count_of(deleted, "record"));
+        println!("fairq deleted {}", count_of(deleted, "record"));
         return Ok(worst);
     }
 
@@ -3556,14 +3556,14 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
     let held = held_by_unfinished(&jobs);
     // The records that this command chose and then kept. The reason for each
     // one comes from the same rule that kept it, so the message states the
-    // relation that qex COMPUTED and never one that it assumed.
+    // relation that fairq COMPUTED and never one that it assumed.
     let mut stayed: Vec<uuid::Uuid> = Vec::new();
     let mut targets: Vec<uuid::Uuid> = Vec::new();
     let mut word_filters: Vec<StateFilter> = Vec::new();
 
     for raw in &args.ids {
-        // Accept a state name in place of a job id, so `qex clean completed`
-        // operates in the same way as `qex clean --state completed`.
+        // Accept a state name in place of a job id, so `fairq clean completed`
+        // operates in the same way as `fairq clean --state completed`.
         //
         // A job or a pipeline can have the name of a state. Test them first,
         // and give an error when the word gives both. A command that deletes
@@ -3574,7 +3574,7 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
             (true, Ok(_)) => {
                 let what = if names_work { "a job" } else { "a pipeline" };
                 eprintln!(
-                    "qex: `{raw}` is the name of {what} and the name of a state. Give the \
+                    "fairq: `{raw}` is the name of {what} and the name of a state. Give the \
                      id of the {} that you want, or use `--state {raw}` for the state.",
                     if names_work { "job" } else { "pipeline" }
                 );
@@ -3585,8 +3585,8 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
                 Ok(found) => targets.extend(found.ids),
                 Err(e) => {
                     // Use the same code as every other command for the same
-                    // fault. `qex clean` gave 1 where `qex kill` gave 127.
-                    eprintln!("qex: {e}");
+                    // fault. `fairq clean` gave 1 where `fairq kill` gave 127.
+                    eprintln!("fairq: {e}");
                     return Ok(EXIT_NO_SUCH_JOB);
                 }
             },
@@ -3612,7 +3612,7 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
             .unwrap_or(false);
 
         // A directory with no other option means every job that stopped in
-        // that directory. `qex clean --under` is then the whole answer for a
+        // that directory. `fairq clean --under` is then the whole answer for a
         // user who wants the records of one project.
         let by_directory_alone = by_directory
             && !args.auto
@@ -3633,7 +3633,7 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
 
         // Count a record as held ONLY when the reader asked for it. The count
         // says what this command did, and a record that no option selected is
-        // not a record that qex kept back.
+        // not a record that fairq kept back.
         if held.contains(&j.id) {
             stayed.push(j.id);
             continue;
@@ -3649,7 +3649,7 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
     // holds the same rule and refuses the deletion with the name of the job
     // that needs the record. That answer carries an exit code, and this
     // command must not take it away: a reader who names one record must learn
-    // that qex kept it.
+    // that fairq kept it.
     let mut deleted = 0usize;
     let mut worst = 0;
     for id in targets {
@@ -3659,12 +3659,12 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
         }
     }
 
-    println!("qex deleted {}", count_of(deleted, "record"));
+    println!("fairq deleted {}", count_of(deleted, "record"));
     if !stayed.is_empty() {
         // Name the work that HOLDS these records, and no other work.
         //
         // The reason comes from the same rule that kept each record, so this
-        // message states a relation that qex computed. A list of every job
+        // message states a relation that fairq computed. A list of every job
         // that has not stopped is a different thing, and most of those jobs
         // hold nothing.
         let nodes = dep_nodes(&jobs);
@@ -3726,11 +3726,11 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
 /// cannot answer one question two ways.
 ///
 /// The rule is the band. A job that RAN to its own end gives its own code, and
-/// qex maps a code that the band keeps onto the sentinel. Every other state
+/// fairq maps a code that the band keeps onto the sentinel. Every other state
 /// belongs to the queue or to the wait, so it takes a code from the band.
 fn exit_code_for(status: &JobStatus) -> i32 {
     // A job that ran to its own end gives its own exit code. The caller of
-    // `qex run` and of `qex submit --wait` expects the code of the command
+    // `fairq run` and of `fairq submit --wait` expects the code of the command
     // that it replaced.
     if matches!(status.state, JobState::Completed | JobState::Failed) {
         // A signal stopped the job, so the job gave no code of its own. The
@@ -3740,14 +3740,14 @@ fn exit_code_for(status: &JobStatus) -> i32 {
         }
         let Some(code) = status.exit_code.or(match status.state {
             JobState::Completed => Some(0),
-            // The job stopped, and qex holds neither an exit code nor a signal
-            // for it. qex does not know, and 1 would say that the JOB knew and
+            // The job stopped, and fairq holds neither an exit code nor a signal
+            // for it. fairq does not know, and 1 would say that the JOB knew and
             // gave 1.
             _ => None,
         }) else {
-            return EXIT_QEX_FAILED;
+            return EXIT_FAIRQ_FAILED;
         };
-        // The job gave a code that qex keeps for itself. Give the sentinel, so
+        // The job gave a code that fairq keeps for itself. Give the sentinel, so
         // the caller reads the record and does not read the code of the job as
         // an answer about the queue or about the wait.
         if code >= EXIT_BAND_FLOOR {
@@ -3758,10 +3758,10 @@ fn exit_code_for(status: &JobStatus) -> i32 {
 
     match status.state {
         JobState::Completed => 0,
-        // A job that `qex cancel` removed from the queue never ran and wrote
+        // A job that `fairq cancel` removed from the queue never ran and wrote
         // nothing, so it has the code of a job that something stopped. The
         // caller must not read it as a fault in the work: the work did not
-        // start. The code is the same for `qex run` and for `qex wait`,
+        // start. The code is the same for `fairq run` and for `fairq wait`,
         // because one state gives one answer.
         // The kernel stopped this job for memory. The remedy is a larger claim,
         // and it is not the remedy of the other three, so the code is its own.
@@ -3775,13 +3775,13 @@ fn exit_code_for(status: &JobStatus) -> i32 {
         // the JSON output.
         JobState::Skipped => EXIT_SKIPPED,
         // A state that is not the end of a job, or a job that ended with
-        // neither an exit code nor a signal. qex has no result to give, and 1
+        // neither an exit code nor a signal. fairq has no result to give, and 1
         // would say that the job ran and gave 1. No code in the table fits
-        // exactly: 121 says "qex could not do what you asked", and the part
-        // that qex could not do is the RESULT. The record holds the state, and
+        // exactly: 121 says "fairq could not do what you asked", and the part
+        // that fairq could not do is the RESULT. The record holds the state, and
         // the rule of the band holds here by construction, and not by the
         // states that happen to reach this function.
-        _ => EXIT_QEX_FAILED,
+        _ => EXIT_FAIRQ_FAILED,
     }
 }
 
@@ -3808,17 +3808,17 @@ fn describe_row(s: &crate::proto::JobRow) -> String {
             .clone()
             .unwrap_or_else(|| "the job waited more time than its queue limit".to_string()),
         // Point the reader at the CLAIM, and not at the machine — but do not
-        // say that the claim WAS too small. qex reads a kill count that covers
+        // say that the claim WAS too small. fairq reads a kill count that covers
         // every program of the user, so it cannot say that this job was the
         // victim, and `docs/reference.md` promises that it never says so. An
         // earlier text here said "The claim of N was too small", which broke
-        // that promise. Use the text of the `error` field when qex wrote one,
+        // that promise. Use the text of the `error` field when fairq wrote one,
         // because that text names the cause more exactly than a sentence that
         // this function builds from two numbers.
         JobState::Oom => s.error.clone().unwrap_or_else(|| {
             format!(
                 "the kernel stopped the job for memory. The claim was {}, and the job reached \
-                 {}. qex cannot say that the claim was too small: the machine can be full \
+                 {}. fairq cannot say that the claim was too small: the machine can be full \
                  while the claim is correct. Compare the two values, and give a larger \
                  `--mem` value if the usage was near the claim.",
                 format_size(s.mem),
@@ -3841,25 +3841,25 @@ fn describe_row(s: &crate::proto::JobRow) -> String {
 /// a JOB.
 ///
 /// The code 1 says "the job ran and it failed". A coordinator that refuses a
-/// request is a fault of qex, and no job gave a code for it, so it takes the
-/// code of the band. `qex kill` and the other commands never speak for a job,
+/// request is a fault of fairq, and no job gave a code for it, so it takes the
+/// code of the band. `fairq kill` and the other commands never speak for a job,
 /// so they keep the conventional 1.
 fn report_for_a_job(response: Response) -> Result<i32> {
     let code = report(response)?;
-    Ok(if code == 1 { EXIT_QEX_FAILED } else { code })
+    Ok(if code == 1 { EXIT_FAIRQ_FAILED } else { code })
 }
 
 fn report(response: Response) -> Result<i32> {
     match response {
         Response::Error { message, kind } => {
-            eprintln!("qex: {message}");
+            eprintln!("fairq: {message}");
             Ok(match kind {
                 ErrorKind::NoSuchJob => EXIT_NO_SUCH_JOB,
                 _ => 1,
             })
         }
         Response::Ok => Ok(0),
-        other => bail!("the coordinator gave an answer that qex did not expect: {other:?}"),
+        other => bail!("the coordinator gave an answer that fairq did not expect: {other:?}"),
     }
 }
 
@@ -3868,7 +3868,7 @@ fn short_id(id: &uuid::Uuid) -> String {
     id.to_string()[..8].to_string()
 }
 
-/// Gives the form of a record that qex SHOWS.
+/// Gives the form of a record that fairq SHOWS.
 ///
 /// This is the one boundary between a record and a reader. Everything that a
 /// command prints — the table, the sentences and the JSON — comes from the
@@ -3880,19 +3880,19 @@ fn short_id(id: &uuid::Uuid) -> String {
 fn for_display(mut s: JobStatus) -> JobStatus {
     s.name = safe_name(&s.name);
     s.group_name = s.group_name.as_deref().map(safe_name);
-    // A dedupe key is text that another agent chose, and `qex status` puts it
+    // A dedupe key is text that another agent chose, and `fairq status` puts it
     // in front of a reader. It is a LABEL and not a handle: no command finds a
     // job by its key, so the safe form loses nothing. Without this line, a key
     // that holds an ESC byte moves the cursor of the reader.
     s.dedupe_key = s.dedupe_key.as_deref().map(safe_name);
-    // A lock name is a word from the command line, and `qex status` prints the
-    // list of locks on its own line. `qex pause lock <name>` puts that same
+    // A lock name is a word from the command line, and `fairq status` prints the
+    // list of locks on its own line. `fairq pause lock <name>` puts that same
     // word in front of a person as well. Measured with a lock named
-    // `esc<ESC>[2Jlock`: `qex status` wrote the ESC byte to the terminal. A
+    // `esc<ESC>[2Jlock`: `fairq status` wrote the ESC byte to the terminal. A
     // lock name is a NAME, so it takes `safe_name`, in the same way as the
     // name of the job.
     s.locks = s.locks.iter().map(|l| safe_name(l)).collect();
-    // A tag is a word, like a lock name. `qex list --tag` still finds the
+    // A tag is a word, like a lock name. `fairq list --tag` still finds the
     // stored tag; this line is the form that a reader sees.
     s.tags = s.tags.iter().map(|t| safe_name(t)).collect();
     // The program and its arguments can hold any character. A reader needs
@@ -3902,7 +3902,7 @@ fn for_display(mut s: JobStatus) -> JobStatus {
     s.cwd = crate::job::visible(&s.cwd);
     // The two SENTENCES take the rule for a sentence, and not `safe_name`.
     //
-    // qex wrote these two, but it wrote them AROUND text that the caller chose.
+    // fairq wrote these two, but it wrote them AROUND text that the caller chose.
     // `blocked_reason` names the lock that a job waits for, and a lock name is a
     // word from the command line; `error` on an expired job folds the last
     // `blocked_reason` into itself, so that word reaches the reader again on a
@@ -3962,7 +3962,7 @@ fn resolve_targets_in(jobs: &[JobStatus], raw: &str) -> Result<Targets> {
 /// pipeline needs a coordinator.
 ///
 /// An error from the resolver comes back to the caller. An earlier version kept
-/// the value instead, and `qex wait` then reported "there is no job with the id
+/// the value instead, and `fairq wait` then reported "there is no job with the id
 /// x" for a value that named a job AND a pipeline. The user read that the value
 /// named nothing, and it named two things.
 fn expand_ids(raws: &[String]) -> Result<Vec<String>> {
@@ -4033,8 +4033,8 @@ fn resolve_targets(client: &mut Client, raw: &str) -> Result<Targets> {
 
 /// Reads the text of the user, for a command that operates on ONE job.
 ///
-/// `qex logs` reads one job. A pipeline gives an error that names the stages,
-/// because qex must not choose a stage for the reader.
+/// `fairq logs` reads one job. A pipeline gives an error that names the stages,
+/// because fairq must not choose a stage for the reader.
 fn resolve_id(client: &mut Client, raw: &str) -> Result<uuid::Uuid> {
     let found = resolve_targets(client, raw)?;
     if found.group.is_none() && found.ids.len() == 1 {
@@ -4047,7 +4047,7 @@ fn resolve_id(client: &mut Client, raw: &str) -> Result<uuid::Uuid> {
         found
             .jobs
             .iter()
-            // qex SHOWS the safe name only. See `job::safe_name`.
+            // fairq SHOWS the safe name only. See `job::safe_name`.
             .map(|j| format!("  {} {}", j.id, safe_name(&j.name)))
             .collect::<Vec<_>>()
             .join("\n")
@@ -4099,7 +4099,7 @@ fn find_id_on_disk(raw: &str) -> Result<Option<uuid::Uuid>> {
 ///
 /// An agent that drives twenty jobs asked about each job in a loop. It learned
 /// of a result late, it used the machine to ask, and it wrote the timer that
-/// qex exists to remove. This command gives one stream instead: the reader
+/// fairq exists to remove. This command gives one stream instead: the reader
 /// connects one time, and it receives one line for each change.
 pub fn events(args: cli::EventsArgs) -> Result<i32> {
     let since = parse_since(&args.since)?;
@@ -4108,7 +4108,7 @@ pub fn events(args: cli::EventsArgs) -> Result<i32> {
             .map_err(|e| anyhow::anyhow!("--timeout: {e}"))?
             .map(|d| {
                 // THE NUMBER OF THE READER BOUNDS THE WHOLE COMMAND. A reader
-                // who says five seconds must not wait longer while qex reaches
+                // who says five seconds must not wait longer while fairq reaches
                 // the coordinator: the connect, the lock and the read share
                 // this limit with the wait for the job.
                 crate::client::take_the_limit_of_the_reader(d);
@@ -4140,7 +4140,7 @@ pub fn events(args: cli::EventsArgs) -> Result<i32> {
             &version,
             pid,
             "events",
-            "qex events",
+            "fairq events",
             "That coordinator does not know this request, so the command would give you \
              nothing and no reason.",
         )
@@ -4157,7 +4157,7 @@ pub fn events(args: cli::EventsArgs) -> Result<i32> {
     // here and give the remedy.
     if let crate::events::Cursor::After { stream: None, .. } = since {
         eprintln!(
-            "qex: you gave a number with no stream name. qex cannot then see that the \
+            "fairq: you gave a number with no stream name. fairq cannot then see that the \
              coordinator restarted, and you can lose events with no message.\n\
              Keep the `stream_id` of the first line of the stream, and use \
              `--since <stream_id>:<seq>`."
@@ -4187,10 +4187,10 @@ pub fn events(args: cli::EventsArgs) -> Result<i32> {
                 // reader that takes this for an orderly end waits for a change
                 // that will never arrive.
                 eprintln!(
-                    "qex: the coordinator closed the event stream and gave no reason. \
+                    "fairq: the coordinator closed the event stream and gave no reason. \
                      Something stopped it.\n\
                      The records of the jobs are on the disk, and they are correct. \
-                     Run `qex events` again to read the stream of the next coordinator."
+                     Run `fairq events` again to read the stream of the next coordinator."
                 );
                 return Ok(1);
             }
@@ -4234,7 +4234,7 @@ pub fn events(args: cli::EventsArgs) -> Result<i32> {
     }
 }
 
-/// Names the limit that ended `qex events`, and gives the code for it.
+/// Names the limit that ended `fairq events`, and gives the code for it.
 ///
 /// The code 124 alone told the reader nothing about the limit that they gave,
 /// and a stream that ends with no word looks like a coordinator that stopped.
@@ -4247,9 +4247,9 @@ fn say_that_the_stream_reached_its_limit(args: &cli::EventsArgs) -> i32 {
         .split_whitespace()
         .collect();
     eprintln!(
-        "qex: `qex events` reached your time limit of {limit}, and it stopped. \
+        "fairq: `fairq events` reached your time limit of {limit}, and it stopped. \
          The coordinator and the jobs continue.\n\
-         qex: to continue the stream, run the command again with \
+         fairq: to continue the stream, run the command again with \
          `--since <stream_id>:<seq>` from the last line that you read."
     );
     EXIT_TIMEOUT
@@ -4275,7 +4275,7 @@ fn parse_since(text: &str) -> Result<crate::events::Cursor> {
             let id = name.trim().parse::<uuid::Uuid>().map_err(|_| {
                 anyhow::anyhow!(
                     "--since: `{name}` is not a stream name.\n\
-                     qex cannot then compare your number with this stream, and you would \
+                     fairq cannot then compare your number with this stream, and you would \
                      lose events with no message.\n\
                      Give the `stream_id` of the first line of the stream, as \
                      `--since <stream_id>:<seq>`."
@@ -4289,32 +4289,32 @@ fn parse_since(text: &str) -> Result<crate::events::Cursor> {
     match number.trim().parse::<u64>() {
         Ok(seq) => Ok(Cursor::After { seq, stream }),
         Err(_) => bail!(
-            "--since: qex cannot read `{text}`.\n\
+            "--since: fairq cannot read `{text}`.\n\
              The stream would then start at a place that you did not choose, and you \
              would lose events or read events a second time.\n\
              Use `start`, `now`, the `seq` number of the last event that you read, or \
-             `<stream_id>:<seq>`, which qex compares with this stream."
+             `<stream_id>:<seq>`, which fairq compares with this stream."
         ),
     }
 }
 
 /// Gives one line of text for one event, for a person to read.
-/// Gives the form of one event that qex SHOWS.
+/// Gives the form of one event that fairq SHOWS.
 ///
 /// The stream carries the name that the user gave, and a name can hold an ESC
-/// byte. `qex events` writes that name to a terminal, so the name must reach
-/// the reader in its safe form, exactly as `qex status` and `qex list` do. See
+/// byte. `fairq events` writes that name to a terminal, so the name must reach
+/// the reader in its safe form, exactly as `fairq status` and `fairq list` do. See
 /// `for_display`, which is the same boundary for a record, and `job::safe_name`
 /// for the rule.
 ///
 /// The JSON form takes the same treatment. `serde_json` already escapes a
 /// control byte, so the JSON is safe to parse either way; the reason to do it
-/// here is that one line of the stream and one line of `qex status --json` must
+/// here is that one line of the stream and one line of `fairq status --json` must
 /// hold the SAME name. A reader that compares the two would otherwise see two
 /// names for one job.
 ///
-/// The coordinator keeps the name that the user gave, so `qex wait <name>` and
-/// `qex kill <name>` still find the job.
+/// The coordinator keeps the name that the user gave, so `fairq wait <name>` and
+/// `fairq kill <name>` still find the job.
 fn event_for_display(event: crate::events::Event) -> crate::events::Event {
     use crate::events::Event;
     match event {
@@ -4396,8 +4396,8 @@ fn event_text(event: &crate::events::Event) -> String {
             "{}  GAP: {}. {reason}",
             crate::sys::clock_text(*time),
             match missed {
-                Some(n) => format!("qex lost {}", count_of(*n as usize, "event")),
-                None => "qex cannot count the events that you lost".to_string(),
+                Some(n) => format!("fairq lost {}", count_of(*n as usize, "event")),
+                None => "fairq cannot count the events that you lost".to_string(),
             }
         ),
         Event::Bye { time, reason } => {
@@ -4419,7 +4419,7 @@ fn event_text(event: &crate::events::Event) -> String {
 /// cause outside this queue: another user or the machine. The queue is stuck
 /// when no job started and the cause is a job of this queue.
 ///
-/// `qex info` and `qex top` both use this function. Two texts for one fact
+/// `fairq info` and `fairq top` both use this function. Two texts for one fact
 /// would say two different things after the first change to one of them.
 pub fn queue_line(info: &Response) -> String {
     let Response::Info {
@@ -4436,7 +4436,7 @@ pub fn queue_line(info: &Response) -> String {
     // `queue_state` and `health` are the marks of a coordinator that reports
     // the health. An older coordinator sends neither, and `unknown` is the true
     // answer. A defaulted value would say "the queue is running", which is a
-    // statement that qex did not measure.
+    // statement that fairq did not measure.
     let (Some(state), Some(health)) = (queue_state, health) else {
         return "queue: unknown · this coordinator is too old to report the health of the queue"
             .to_string();
@@ -4447,7 +4447,7 @@ pub fn queue_line(info: &Response) -> String {
 
     // A PAUSE HAS ITS OWN LINE, and this function gives none.
     //
-    // `qex info` and `qex top` each write the pause with `pause::queue_line`,
+    // `fairq info` and `fairq top` each write the pause with `pause::queue_line`,
     // which names the person, the reason and the end of the pause. A second
     // line here would say the same fact with fewer of those values, and the
     // reader would then have to decide which of the two to trust.
@@ -4501,7 +4501,7 @@ pub fn queue_line(info: &Response) -> String {
         ),
         "parked" => format!(
             "queue: the job at the front is larger than the budget and the config keeps it in the \
-             queue · {started}{front} · qex starts the jobs behind it"
+             queue · {started}{front} · fairq starts the jobs behind it"
         ),
         other => format!("queue: {other} · {started} · {counts}{front}"),
     }
@@ -4510,14 +4510,14 @@ pub fn queue_line(info: &Response) -> String {
 /// Writes the state of the coordinator.
 ///
 /// The process id here comes from the coordinator itself. Use this command to
-/// find the coordinator. Do not search the process list with `pgrep -f qex`,
+/// find the coordinator. Do not search the process list with `pgrep -f fairq`,
 /// because that pattern also matches the command that contains it.
 pub fn info(args: cli::InfoArgs) -> Result<i32> {
     let mut client = if args.no_start {
         // A socket that gives no answer is not a `no`. This command answers the
         // question "is a coordinator there", so it must not print that nothing
         // operates when it could not reach the socket. The error carries the
-        // limit, and the exit code says that qex stopped waiting.
+        // limit, and the exit code says that fairq stopped waiting.
         match Client::connect_existing_result()? {
             Some(c) => c,
             None => {
@@ -4571,7 +4571,7 @@ pub fn info(args: cli::InfoArgs) -> Result<i32> {
                     serde_json::to_string_pretty(&serde_json::json!({
                         "pid": pid,
                         "queue_state": queue_state,
-                        // The same values as `qex pause --json` gives, and
+                        // The same values as `fairq pause --json` gives, and
                         // no process id of a pauser under any name.
                         "paused": pause_json["paused"],
                         "paused_at": pause_json["paused_at"],
@@ -4612,21 +4612,21 @@ pub fn info(args: cli::InfoArgs) -> Result<i32> {
             // the coordinator holds, and those are no longer the values in the
             // file.
             if let Some(fault) = &config_error {
-                // Put the `qex:` prefix on EVERY line. A TOML parse error is
+                // Put the `fairq:` prefix on EVERY line. A TOML parse error is
                 // three lines and a caret, and a prefix on the first line only
                 // makes the other lines look like output of the command.
                 let fault: String = fault
                     .lines()
-                    .map(|l| format!("qex:   {l}\n"))
+                    .map(|l| format!("fairq:   {l}\n"))
                     .collect::<Vec<_>>()
                     .concat();
                 eprint!(
-                    "qex: WARNING: the configuration file changed, and qex cannot read it:\n\
+                    "fairq: WARNING: the configuration file changed, and fairq cannot read it:\n\
                      {fault}\
-                     qex:   The coordinator keeps the values that it had, and they are the \
+                     fairq:   The coordinator keeps the values that it had, and they are the \
                      values below.\n\
-                     qex:   Correct the file. The coordinator reads it again by itself. Run \
-                     `qex config show` for the full message.\n"
+                     fairq:   Correct the file. The coordinator reads it again by itself. Run \
+                     `fairq config show` for the full message.\n"
                 );
             }
             println!("coordinator pid: {pid}");
@@ -4740,7 +4740,7 @@ pub fn info(args: cli::InfoArgs) -> Result<i32> {
 ///
 /// Every command that lists jobs calls this function. A pause with no end is
 /// the pause that a person forgets, and an empty queue in the morning is the
-/// result, so qex says it every time and not one time.
+/// result, so fairq says it every time and not one time.
 fn warn_if_paused(client: &mut Client) {
     let Ok(Response::PauseState {
         queue,
@@ -4759,11 +4759,11 @@ fn warn_if_paused(client: &mut Client) {
         return;
     }
     if !picture.pauses.is_empty() {
-        eprintln!("qex: THE QUEUE IS PAUSED, so qex starts no job.");
+        eprintln!("fairq: THE QUEUE IS PAUSED, so fairq starts no job.");
     }
     for line in picture.lines(false) {
         if line != "queue: running" {
-            eprintln!("qex: {line}");
+            eprintln!("fairq: {line}");
         }
     }
 }
@@ -4782,7 +4782,7 @@ fn end_of_pause(duration: Option<&str>) -> Result<Option<u64>> {
         Some(d) => Ok(Some(crate::sys::now_secs() + d.as_secs())),
         None => bail!(
             "--for: give a time that is longer than zero, such as `30m`.\n\
-             To end a pause now, run `qex resume queue --pause ID`. `qex pause` gives the id \
+             To end a pause now, run `fairq resume queue --pause ID`. `fairq pause` gives the id \
              of each request."
         ),
     }
@@ -4804,11 +4804,11 @@ fn require_command(client: &mut Client, name: &str, command: &str, danger: &str)
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
-/// Why a refused `qex pause` matters.
+/// Why a refused `fairq pause` matters.
 const PAUSE_DANGER: &str = "The coordinator would start the jobs of the queue, and you would \
      believe that the machine is quiet.";
 
-/// Why a refused `qex resume` matters.
+/// Why a refused `fairq resume` matters.
 ///
 /// The danger of a refused resume is the opposite of the danger of a refused
 /// pause. A message that gave the pause words here would state a reason that is
@@ -4816,7 +4816,7 @@ const PAUSE_DANGER: &str = "The coordinator would start the jobs of the queue, a
 const RESUME_DANGER: &str = "That coordinator does not read the pause record, so it already \
      starts the jobs of the queue. This command would change nothing.";
 
-/// Why a refused `qex resume --pause` or `qex pause` matters, for a
+/// Why a refused `fairq resume --pause` or `fairq pause` matters, for a
 /// coordinator that holds one pause record and no set of requests.
 const REQUESTS_DANGER: &str = "That coordinator holds ONE pause record for the queue, with no id \
      for each request. A pause would change the pause of a different session, and a resume \
@@ -4890,7 +4890,7 @@ impl PausePicture {
     }
 
     /// Gives the status as the default JSON shows it: no process id of any
-    /// kind. `forensic` adds what qex recorded about each issuer.
+    /// kind. `forensic` adds what fairq recorded about each issuer.
     fn json(&self, forensic: bool) -> serde_json::Value {
         use crate::pause::Target;
         let now = crate::sys::now_secs();
@@ -4959,7 +4959,7 @@ impl PausePicture {
     }
 }
 
-/// Gives what qex recorded about the issuer of one request, for `--verbose`.
+/// Gives what fairq recorded about the issuer of one request, for `--verbose`.
 ///
 /// The words say what each number is. A reader who takes the reported number
 /// for a process of this machine, and tests it with `ps`, finds a stranger.
@@ -4998,16 +4998,16 @@ fn print_pause_state(picture: &PausePicture, json: bool, forensic: bool) -> Resu
         println!("{line}");
     }
     if picture.pauses.is_empty() && picture.locks.is_empty() {
-        println!("nothing is paused. To pause the queue, run `qex pause queue`.");
+        println!("nothing is paused. To pause the queue, run `fairq pause queue`.");
     }
     Ok(0)
 }
 
-/// Writes the answer of a `qex pause queue` or a `qex pause lock`: the receipt
+/// Writes the answer of a `fairq pause queue` or a `fairq pause lock`: the receipt
 /// of the new request, and the other requests that stand.
 ///
 /// The `resume_command` of a receipt is ALWAYS the guarded command for its own
-/// id, whatever qex knows about the issuer: it speaks to the holder of the id.
+/// id, whatever fairq knows about the issuer: it speaks to the holder of the id.
 fn print_receipt(
     receipt: &crate::proto::PauseReceipt,
     target: crate::pause::Target,
@@ -5051,7 +5051,7 @@ fn print_receipt(
     Ok(())
 }
 
-/// Stops qex from starting work, or takes a lock for the person.
+/// Stops fairq from starting work, or takes a lock for the person.
 pub fn pause(args: cli::PauseArgs) -> Result<i32> {
     use crate::proto::PauseTarget;
 
@@ -5068,8 +5068,8 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
         } => {
             let until = end_of_pause(duration.as_deref())?;
             let mut client = Client::connect()?;
-            require_command(&mut client, "pause", "qex pause", PAUSE_DANGER)?;
-            require_command(&mut client, "pause-requests", "qex pause", REQUESTS_DANGER)?;
+            require_command(&mut client, "pause", "fairq pause", PAUSE_DANGER)?;
+            require_command(&mut client, "pause-requests", "fairq pause", REQUESTS_DANGER)?;
 
             let response = client.call(&Request::Pause {
                 target: PauseTarget::Queue,
@@ -5105,14 +5105,14 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
                     if running == 1 {
                         println!(
                             "1 job still operates. It continues, because it already holds its \
-                             capacity. Use `qex pause queue --drain` to wait for it, or \
-                             `qex kill <id>` to stop it."
+                             capacity. Use `fairq pause queue --drain` to wait for it, or \
+                             `fairq kill <id>` to stop it."
                         );
                     } else {
                         println!(
                             "{running} jobs still operate. They continue, because each one \
-                             already holds its capacity. Use `qex pause queue --drain` to wait \
-                             for them, or `qex kill <id>` to stop one."
+                             already holds its capacity. Use `fairq pause queue --drain` to wait \
+                             for them, or `fairq kill <id>` to stop one."
                         );
                     }
                 }
@@ -5128,8 +5128,8 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
         } => {
             let until = end_of_pause(duration.as_deref())?;
             let mut client = Client::connect()?;
-            require_command(&mut client, "pause", "qex pause", PAUSE_DANGER)?;
-            require_command(&mut client, "pause-requests", "qex pause", REQUESTS_DANGER)?;
+            require_command(&mut client, "pause", "fairq pause", PAUSE_DANGER)?;
+            require_command(&mut client, "pause-requests", "fairq pause", REQUESTS_DANGER)?;
 
             let response = client.call(&Request::Pause {
                 target: PauseTarget::Lock { name: name.clone() },
@@ -5169,8 +5169,8 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
             let shown = crate::job::safe_name(&name);
             match lock.and_then(|l| l.held_by.as_ref()) {
                 Some(job) => println!(
-                    "the job {job} holds the lock `{shown}` now. qex gives it to you when \
-                     that job stops, and no other job takes it. Use `qex list` to watch \
+                    "the job {job} holds the lock `{shown}` now. fairq gives it to you when \
+                     that job stops, and no other job takes it. Use `fairq list` to watch \
                      that job."
                 ),
                 None => println!(
@@ -5185,7 +5185,7 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
 
 /// Ends ONE pause request, or every request of one target.
 ///
-/// `qex resume` with no `--pause` removes nothing. The coordinator refuses
+/// `fairq resume` with no `--pause` removes nothing. The coordinator refuses
 /// that form with the status lines; see `daemon::handle_resume` for the
 /// reason.
 pub fn resume(args: cli::ResumeArgs) -> Result<i32> {
@@ -5202,8 +5202,8 @@ pub fn resume(args: cli::ResumeArgs) -> Result<i32> {
     let all = args.which.all;
 
     let mut client = Client::connect()?;
-    require_command(&mut client, "pause", "qex resume", RESUME_DANGER)?;
-    require_command(&mut client, "pause-requests", "qex resume", REQUESTS_DANGER)?;
+    require_command(&mut client, "pause", "fairq resume", RESUME_DANGER)?;
+    require_command(&mut client, "pause-requests", "fairq resume", REQUESTS_DANGER)?;
 
     let response = client.call(&Request::Resume {
         target: target.clone(),
@@ -5305,16 +5305,16 @@ pub fn resume(args: cli::ResumeArgs) -> Result<i32> {
                 crate::job::safe_name(name)
             ),
         },
-        (None, true) => println!("no pause request stood, so qex ended none; {now_words}"),
+        (None, true) => println!("no pause request stood, so fairq ended none; {now_words}"),
         (Some(id), true) => println!(
             "pause {} does not stand: it reached its end, somebody resumed it, or it never \
-             existed. qex changed nothing; {now_words}",
+             existed. fairq changed nothing; {now_words}",
             safe_name(id)
         ),
         (Some(id), false) => println!("pause {} is ended; {now_words}", safe_name(id)),
         (None, false) => {
             println!(
-                "qex ended every pause request, {} in all; {now_words}",
+                "fairq ended every pause request, {} in all; {now_words}",
                 resumed.len()
             );
             for view in &resumed {
@@ -5428,7 +5428,7 @@ fn drain_queue(client: &mut Client) -> Result<i32> {
 
 /// Submits every stage of a pipeline file with one command.
 ///
-/// The names in the file belong to that file and to this submission. qex reads
+/// The names in the file belong to that file and to this submission. fairq reads
 /// each one and changes it into the id that it made a moment before, so no name
 /// leaves the file. A second run of the same file makes new jobs with new ids,
 /// and the two runs never meet. That is the fault that a dependency by name has
@@ -5466,7 +5466,7 @@ pub fn pipeline(args: cli::PipelineArgs) -> Result<i32> {
         &pipeline_stage_needs(&file, &cfg, group, &group_name)?,
     )?;
 
-    // The id of each stage that qex already submitted, by its name in the file.
+    // The id of each stage that fairq already submitted, by its name in the file.
     let mut ids: std::collections::BTreeMap<String, uuid::Uuid> = Default::default();
     let mut submitted: Vec<(String, uuid::Uuid)> = Vec::new();
 
@@ -5474,14 +5474,14 @@ pub fn pipeline(args: cli::PipelineArgs) -> Result<i32> {
         let stage = &file.jobs[position];
         let mut spec = crate::pipeline::stage_spec(stage, &cfg, group, &group_name)?;
 
-        // Change each name of this file into the id of the stage that qex just
+        // Change each name of this file into the id of the stage that fairq just
         // made. The order puts every stage after the stages that it waits for,
         // so each id is ready.
         for name in &stage.needs {
             match ids.get(name) {
                 Some(id) => spec.needs.push(*id),
                 None => bail!(
-                    "the stage `{}` waits for `{name}`, which qex did not submit",
+                    "the stage `{}` waits for `{name}`, which fairq did not submit",
                     stage.name
                 ),
             }
@@ -5490,7 +5490,7 @@ pub fn pipeline(args: cli::PipelineArgs) -> Result<i32> {
             match ids.get(name) {
                 Some(id) => spec.after.push(*id),
                 None => bail!(
-                    "the stage `{}` waits for `{name}`, which qex did not submit",
+                    "the stage `{}` waits for `{name}`, which fairq did not submit",
                     stage.name
                 ),
             }
@@ -5505,7 +5505,7 @@ pub fn pipeline(args: cli::PipelineArgs) -> Result<i32> {
                 id: given, warning, ..
             } => {
                 if let Some(text) = warning {
-                    eprintln!("qex: {}: {text}", stage.name);
+                    eprintln!("fairq: {}: {text}", stage.name);
                 }
                 ids.insert(stage.name.clone(), given);
                 submitted.push((stage.name.clone(), given));
@@ -5533,15 +5533,15 @@ pub fn pipeline(args: cli::PipelineArgs) -> Result<i32> {
             serde_json::to_string_pretty(&serde_json::json!({
                 "group": group.to_string(),
                 // The SAFE form, so that ONE field name carries ONE value.
-                // `qex list --json` gives this same value, and `qex list
+                // `fairq list --json` gives this same value, and `fairq list
                 // --group` takes it. See `job::safe_name`.
                 "group_name": crate::job::safe_name(&group_name),
                 "jobs": jobs,
             }))?
         );
     } else {
-        // The group id goes on stdout alone, so `GROUP=$(qex pipeline f.toml)`
-        // operates in the same way as `ID=$(qex submit ...)`.
+        // The group id goes on stdout alone, so `GROUP=$(fairq pipeline f.toml)`
+        // operates in the same way as `ID=$(fairq submit ...)`.
         for (name, id) in &submitted {
             // The SAFE name: this line goes to a terminal. The JSON above and
             // the id file keep the name of the stage as the file gives it,
@@ -5555,17 +5555,17 @@ pub fn pipeline(args: cli::PipelineArgs) -> Result<i32> {
 
 /// Writes the version of this command, and of the coordinator when one operates.
 ///
-/// A user reads `qex version` and `qex --version`. The two must agree, and the
+/// A user reads `fairq version` and `fairq --version`. The two must agree, and the
 /// long form also gives the version of the coordinator, because a coordinator
 /// that holds an earlier build behaves differently.
 pub fn version(args: cli::VersionArgs) -> Result<i32> {
     let mine = crate::version::VERSION;
 
-    // `--check` asks the service NOW. It is the one path in qex that opens a
+    // `--check` asks the service NOW. It is the one path in fairq that opens a
     // connection from a command of a user, and a person asked for it.
     //
     // The exit code is 0 when the answer arrived, whatever it says, and 1 when
-    // qex could not ask. A newer release is information: a code that says
+    // fairq could not ask. A newer release is information: a code that says
     // otherwise would fail every script that runs this command on the day of a
     // release.
     let check = if args.check {
@@ -5580,9 +5580,9 @@ pub fn version(args: cli::VersionArgs) -> Result<i32> {
     // A COORDINATOR THAT DID NOT ANSWER IS NOT A COORDINATOR THAT IS ABSENT.
     //
     // This command reports whether one operates and which version it is, so
-    // reporting "none" for a coordinator that qex could not reach would answer
+    // reporting "none" for a coordinator that fairq could not reach would answer
     // the question wrongly and exit 0. The limit reaches the reader instead,
-    // with the code that says qex stopped waiting.
+    // with the code that says fairq stopped waiting.
     let existing = match crate::paths::socket_path() {
         Ok(_) => Client::connect_existing_result()?,
         // A refused state directory still gives the version; other commands name it.
@@ -5633,7 +5633,7 @@ pub fn version(args: cli::VersionArgs) -> Result<i32> {
         });
     }
 
-    println!("qex {mine}");
+    println!("fairq {mine}");
     println!("can do:      {}", crate::capabilities::ALL.join(", "));
     match coordinator {
         None => println!("coordinator: none operates"),
@@ -5664,7 +5664,7 @@ pub fn version(args: cli::VersionArgs) -> Result<i32> {
                 );
             }
             if replaced {
-                println!("the qex program changed after this coordinator started");
+                println!("the fairq program changed after this coordinator started");
             }
         }
     }
@@ -5693,9 +5693,9 @@ pub fn complete(args: cli::CompleteArgs) -> Result<i32> {
     let jobs = crate::job::read_all_from_disk();
 
     let wanted: Vec<&crate::job::JobStatus> = match args.what.as_str() {
-        // `qex kill` takes a job that operates, and nothing else.
+        // `fairq kill` takes a job that operates, and nothing else.
         "active" => jobs.iter().filter(|j| j.state.is_active()).collect(),
-        // `qex cancel` takes a job that waits in the queue.
+        // `fairq cancel` takes a job that waits in the queue.
         "queued" => jobs
             .iter()
             .filter(|j| j.state == crate::job::JobState::Queued)
@@ -5709,10 +5709,10 @@ pub fn complete(args: cli::CompleteArgs) -> Result<i32> {
     out.reverse();
 
     // The id AND the name, for each set. A person types a name far more often
-    // than a uuid, and qex accepts either in the same place.
+    // than a uuid, and fairq accepts either in the same place.
     //
     // A name repeats over time, because two runs of one command can share it.
-    // qex answers that with an error that lists the jobs, so an ambiguous name
+    // fairq answers that with an error that lists the jobs, so an ambiguous name
     // costs a second command and never the wrong job.
     let mut seen = std::collections::BTreeSet::new();
     for job in out {
@@ -5793,11 +5793,11 @@ fn warn_if_temporary(path: &std::path::Path) {
     }
 
     eprintln!(
-        "qex: WARNING: the id file {} is in a directory that does not last.\n\
-         qex:   The job continues when your session stops, but this file goes with the\n\
-         qex:   session, and you then have no handle for a job that still operates.\n\
-         qex:   Put the id file in your project or in your home directory instead.\n\
-         qex:   `qex list` finds a job again when the id is lost.",
+        "fairq: WARNING: the id file {} is in a directory that does not last.\n\
+         fairq:   The job continues when your session stops, but this file goes with the\n\
+         fairq:   session, and you then have no handle for a job that still operates.\n\
+         fairq:   Put the id file in your project or in your home directory instead.\n\
+         fairq:   `fairq list` finds a job again when the id is lost.",
         path.display()
     );
 }
@@ -5845,7 +5845,7 @@ fn pipeline_id_file(
     Ok(text)
 }
 
-/// True when the user pressed Ctrl-C during `qex run`.
+/// True when the user pressed Ctrl-C during `fairq run`.
 static RUN_INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 extern "C" fn on_interrupt(_signal: libc::c_int) {
@@ -5855,14 +5855,14 @@ extern "C" fn on_interrupt(_signal: libc::c_int) {
 
 /// Catches SIGINT and SIGTERM while a command streams the output of a job.
 ///
-/// `qex run` stops its own job with them. `qex status --follow` did not start
+/// `fairq run` stops its own job with them. `fairq status --follow` did not start
 /// the job, so it stops its wait only, and `stream_until_done` knows the
 /// difference.
 fn catch_run_signals() {
-    // `qex run` keeps its handler after the first signal, because a second
+    // `fairq run` keeps its handler after the first signal, because a second
     // Ctrl-C must stop the job again when the first stop did not succeed. It
     // thus takes no SA_RESETHAND. `sigaction` gives the same rules on every
-    // system that qex supports.
+    // system that fairq supports.
     unsafe {
         let mut action: libc::sigaction = std::mem::zeroed();
         action.sa_sigaction = on_interrupt as *const () as libc::sighandler_t;
@@ -5876,15 +5876,15 @@ fn catch_run_signals() {
 /// Runs a command through the queue and waits for it here.
 ///
 /// This command exists for one reason: an agent uses the tools that it already
-/// knows. `qex run` goes before an existing command, and the output and the
+/// knows. `fairq run` goes before an existing command, and the output and the
 /// exit code are the same as before. The command takes a place in the queue, so
 /// it waits when the machine is busy, and it holds a claim while it operates.
 ///
 /// The exit code is the exit code of the job ONLY when the job ran. A job that
 /// something stopped gave no exit code of its own, and this command then gives
-/// the code of the state, which is the code of `qex wait`. See `exit_code_for`.
+/// the code of the state, which is the code of `fairq wait`. See `exit_code_for`.
 ///
-/// A job of `qex run` is a job like any other. It has a record, a log file and
+/// A job of `fairq run` is a job like any other. It has a record, a log file and
 /// an id.
 ///
 /// This command stops the job when it receives SIGINT (Ctrl-C) or SIGTERM,
@@ -5895,19 +5895,19 @@ fn catch_run_signals() {
 /// to the process group of this command never reaches the job.
 ///
 /// A hangup, such as a terminal that closes, and a SIGKILL therefore do not
-/// stop the job. It continues, and `qex list` finds it. Use `qex submit` for
+/// stop the job. It continues, and `fairq list` finds it. Use `fairq submit` for
 /// work that must live longer than the command that starts it.
 pub fn run(args: cli::RunArgs) -> Result<i32> {
-    // Name the command that the READER typed. `qex submit --follow` is this
-    // same command in a longer form, and a message about `qex run` names a
+    // Name the command that the READER typed. `fairq submit --follow` is this
+    // same command in a longer form, and a message about `fairq run` names a
     // command that such a reader never used.
     let name = if args.submit.follow {
-        "qex submit --follow"
+        "fairq submit --follow"
     } else {
-        "qex run"
+        "fairq run"
     };
 
-    // This command takes the options of `qex submit`, and `--each-line` is the
+    // This command takes the options of `fairq submit`, and `--each-line` is the
     // one option that it cannot obey: it waits for ONE job and gives the output
     // and the exit code of that job. To accept the option here and use one line
     // only would give the user a result that is not the file.
@@ -5915,34 +5915,34 @@ pub fn run(args: cli::RunArgs) -> Result<i32> {
         bail!(
             "`{name}` does not accept `--each-line`, because it waits for one job and \
              gives the output and the exit code of that job.\n\n\
-             Use `qex submit --each-line`, then wait for the group:\n\
-             \x20   GROUP=$(qex submit --each-line inputs.txt -- ./process {{}})"
+             Use `fairq submit --each-line`, then wait for the group:\n\
+             \x20   GROUP=$(fairq submit --each-line inputs.txt -- ./process {{}})"
         );
     }
 
     let cfg = Config::load()?;
     cfg.validate()?;
 
-    // `qex run` waits always, so `--wait` says nothing that this command does
+    // `fairq run` waits always, so `--wait` says nothing that this command does
     // not do. Refuse it, and do not accept it in silence: a user that gives it
     // expects a difference.
     if args.submit.quiet {
         bail!(
             "`{name}` does not accept `--quiet`, because it writes the output of the job to \
              your terminal.\n\n\
-             Use `qex submit --wait --quiet` for the exit code with no output."
+             Use `fairq submit --wait --quiet` for the exit code with no output."
         );
     }
 
     if args.submit.wait {
         bail!(
             "`{name}` does not accept `--wait`, because it always waits for the job.\n\n\
-             `qex run` writes the output of the job to your terminal. Use \
-             `qex submit --wait` to keep the output in the log file."
+             `fairq run` writes the output of the job to your terminal. Use \
+             `fairq submit --wait` to keep the output in the log file."
         );
     }
 
-    // `qex run` gives the output of the job on stdout. A JSON object there
+    // `fairq run` gives the output of the job on stdout. A JSON object there
     // would mix with that output, and neither part could be read.
     if args.submit.json {
         bail!(
@@ -5950,8 +5950,8 @@ pub fn run(args: cli::RunArgs) -> Result<i32> {
              This command writes the output of the job to stdout, so a JSON object there \
              would mix with that output.\n\n\
              Use two commands:\n\
-             \x20   ID=$(qex submit --json ... | jq -r .id)\n\
-             \x20   qex wait $ID"
+             \x20   ID=$(fairq submit --json ... | jq -r .id)\n\
+             \x20   fairq wait $ID"
         );
     }
 
@@ -6005,11 +6005,11 @@ pub fn run(args: cli::RunArgs) -> Result<i32> {
     let owns_jobs = coordinator_owns_jobs(&mut client)?;
     if !owns_jobs {
         eprintln!(
-            "qex: this coordinator keeps a job that waits, when this command stops without \
+            "fairq: this coordinator keeps a job that waits, when this command stops without \
              notice.\n\
-             qex: Ctrl-C and SIGTERM still stop the job. After a stop that this command cannot \
-             catch, remove the job with `qex cancel <id>`.\n\
-             qex: `qex list` gives the id."
+             fairq: Ctrl-C and SIGTERM still stop the job. After a stop that this command cannot \
+             catch, remove the job with `fairq cancel <id>`.\n\
+             fairq: `fairq list` gives the id."
         );
     }
 
@@ -6023,7 +6023,7 @@ pub fn run(args: cli::RunArgs) -> Result<i32> {
             deduplicated,
         } => {
             if let Some(text) = warning {
-                eprintln!("qex: {text}");
+                eprintln!("fairq: {text}");
             }
             (id, deduplicated)
         }
@@ -6039,7 +6039,7 @@ pub fn run(args: cli::RunArgs) -> Result<i32> {
     // Catch Ctrl-C, and stop the job with it.
     //
     // Without this, Ctrl-C would stop this command and leave the job in the
-    // queue. A user expects Ctrl-C to stop the work, because `qex run` looks
+    // queue. A user expects Ctrl-C to stop the work, because `fairq run` looks
     // like the command that it replaces.
     catch_run_signals();
 
@@ -6066,20 +6066,20 @@ pub fn run(args: cli::RunArgs) -> Result<i32> {
     // meets the rule and not the default behaviour of the system.
     if deduplicated {
         eprintln!(
-            "qex: this command waits for that job. It did not start it, so Ctrl-C stops \
+            "fairq: this command waits for that job. It did not start it, so Ctrl-C stops \
              this wait only.\n\
-             qex: to stop the job itself, run `qex kill {id}`."
+             fairq: to stop the job itself, run `fairq kill {id}`."
         );
     }
 
     let dir = paths::job_dir(&id)?;
-    // `qex run` sets no limit on its own wait. `--timeout` limits the JOB.
+    // `fairq run` sets no limit on its own wait. `--timeout` limits the JOB.
     stream_until_done(&mut client, id, &dir, !deduplicated, None, None)
 }
 
 /// Asks the coordinator to cancel this job if this command stops.
 ///
-/// The job of `qex run` has one reader, and it is this command. A job that
+/// The job of `fairq run` has one reader, and it is this command. A job that
 /// keeps a place in the queue for a reader that went away holds every job
 /// behind it, and it later takes a claim for output that nobody reads.
 ///
@@ -6088,7 +6088,7 @@ pub fn run(args: cli::RunArgs) -> Result<i32> {
 /// from a coordinator that did not answer.
 ///
 /// The id is in every message, because the step needs it. A reader who lost
-/// this command has `qex cancel {id}`, and `qex list` finds the id again.
+/// this command has `fairq cancel {id}`, and `fairq list` finds the id again.
 fn own_the_job(client: &mut Client, id: uuid::Uuid) {
     let answer = match client.call(&Request::OwnJob { id }) {
         Ok(Response::Ok) => OwnershipAnswer::Taken,
@@ -6106,7 +6106,7 @@ enum OwnershipAnswer {
     Taken,
     Refused(String),
     /// The coordinator answered, and the answer was neither a success nor an
-    /// error. qex read the answer correctly; it says nothing about the job.
+    /// error. fairq read the answer correctly; it says nothing about the job.
     ///
     /// A coordinator that does not KNOW this request does not reach this
     /// variant. Such a coordinator gives an error, and `Refused` carries it.
@@ -6120,22 +6120,22 @@ enum OwnershipAnswer {
 /// the reader takes. A message with no step costs the reader a second command.
 fn ownership_message(id: uuid::Uuid, answer: &OwnershipAnswer) -> Option<String> {
     let remedy = format!(
-        "qex: Ctrl-C and SIGTERM still stop it. After a stop that this command cannot catch, \
-         run `qex cancel {id}`."
+        "fairq: Ctrl-C and SIGTERM still stop it. After a stop that this command cannot catch, \
+         run `fairq cancel {id}`."
     );
     let first = match answer {
         OwnershipAnswer::Taken => return None,
         OwnershipAnswer::Refused(message) => {
-            format!("qex: the coordinator keeps the job {id} after this command stops: {message}")
+            format!("fairq: the coordinator keeps the job {id} after this command stops: {message}")
         }
-        // Say only what this answer proves. It proves that qex has no promise
+        // Say only what this answer proves. It proves that fairq has no promise
         // about the job, and it does not prove why.
         OwnershipAnswer::Unexpected => format!(
-            "qex: the coordinator gave an answer that does not say if it took the job {id}, so \
-             qex treats that job as one that the coordinator keeps after this command stops."
+            "fairq: the coordinator gave an answer that does not say if it took the job {id}, so \
+             fairq treats that job as one that the coordinator keeps after this command stops."
         ),
         OwnershipAnswer::NoAnswer(e) => format!(
-            "qex: the coordinator did not answer, so it keeps the job {id} after this command \
+            "fairq: the coordinator did not answer, so it keeps the job {id} after this command \
              stops: {e}"
         ),
     };
@@ -6148,9 +6148,9 @@ fn ownership_message(id: uuid::Uuid, answer: &OwnershipAnswer) -> Option<String>
 /// after the submit describes a job that is already in the queue, and it can
 /// never become a refusal.
 ///
-/// qex warns and continues here. The rule that a coordinator must REFUSE an
+/// fairq warns and continues here. The rule that a coordinator must REFUSE an
 /// option covers an option that the reader typed and relies on. This reader
-/// typed `qex run` and asked for a job, so a refusal would take the work away
+/// typed `fairq run` and asked for a job, so a refusal would take the work away
 /// to protect the cleanup of the work. Ctrl-C and SIGTERM still stop the job,
 /// and only a stop that this command cannot catch loses the rule.
 fn coordinator_owns_jobs(client: &mut Client) -> Result<bool> {
@@ -6158,9 +6158,9 @@ fn coordinator_owns_jobs(client: &mut Client) -> Result<bool> {
     Ok(have.iter().any(|n| n == "own-job"))
 }
 
-/// Stops the job of this `qex run`, after Ctrl-C or after a SIGTERM.
+/// Stops the job of this `fairq run`, after Ctrl-C or after a SIGTERM.
 ///
-/// Gives `true` when qex stopped the job. `qex run` then knows that IT stopped
+/// Gives `true` when fairq stopped the job. `fairq run` then knows that IT stopped
 /// the job, and it does not tell the user that a different command did.
 ///
 /// A job that still waits in the queue has no process, so the coordinator
@@ -6201,8 +6201,8 @@ fn stop_own_job(client: &mut Client, id: uuid::Uuid) -> bool {
     match answer {
         Err(e) => {
             eprintln!(
-                "qex: the coordinator did not answer, so the job {id} received no stop: {e}. The \
-                 job can still operate. Use `qex kill {id}`, or `qex cancel {id}` for a job that \
+                "fairq: the coordinator did not answer, so the job {id} received no stop: {e}. The \
+                 job can still operate. Use `fairq kill {id}`, or `fairq cancel {id}` for a job that \
                  waits, when the coordinator answers again."
             );
             false
@@ -6245,10 +6245,10 @@ fn stream_until_done(
                 // started the work, and it can be a run of four hours. A signal
                 // to this command stops this wait, and nothing else.
                 eprintln!(
-                    "\nqex: this wait stops. The job {id} continues, because this command \
+                    "\nfairq: this wait stops. The job {id} continues, because this command \
                      did not start it.\n\
-                     qex: to stop the job, run `qex kill {id}`. \
-                     To read the output again, run `qex status {id} --follow`."
+                     fairq: to stop the job, run `fairq kill {id}`. \
+                     To read the output again, run `fairq status {id} --follow`."
                 );
                 // The code says that the WAIT stopped, and not that a limit of
                 // the reader passed. 124 says the reader set a limit and the
@@ -6256,7 +6256,7 @@ fn stream_until_done(
                 return Ok(EXIT_WAIT_BROKEN);
             }
 
-            eprintln!("\nqex: stopping the job {id}");
+            eprintln!("\nfairq: stopping the job {id}");
             // Set the flag from the ANSWER, and not from the attempt. A stop
             // that failed leaves the job for a different command to stop, and
             // this command must then not tell the user that it stopped the job.
@@ -6304,7 +6304,7 @@ fn stream_until_done(
         let status = match client.call(&Request::Status { id }) {
             Ok(Response::Status { status }) => status,
             Ok(other) => return report_for_a_job(other),
-            // The limit of the reader passed, so qex asked nothing. That is
+            // The limit of the reader passed, so fairq asked nothing. That is
             // not a coordinator that stopped, and the reader must not be told
             // that it is. The record on the disk says whether the job has a
             // result, which is the one thing that the test of the limit below
@@ -6317,12 +6317,12 @@ fn stream_until_done(
             }
         };
 
-        // Say why nothing happens yet. A user of `qex run` sees no output while
-        // the job waits, and silence with no reason is the fault that qex
+        // Say why nothing happens yet. A user of `fairq run` sees no output while
+        // the job waits, and silence with no reason is the fault that fairq
         // removes everywhere else.
         if !announced_wait && status.state == JobState::Queued {
             if let Some(reason) = &status.blocked_reason {
-                eprintln!("qex: {}", crate::job::printable(reason));
+                eprintln!("fairq: {}", crate::job::printable(reason));
                 announced_wait = true;
             }
         }
@@ -6344,8 +6344,8 @@ fn stream_until_done(
                 // The hint carries the limit. See
                 // `say_that_the_wait_reached_its_limit`.
                 eprintln!(
-                    "qex: your wait reached its time limit. The job {id} continues.\n\
-                     qex: attach to it again:  qex status {id} --follow{}",
+                    "fairq: your wait reached its time limit. The job {id} continues.\n\
+                     fairq: attach to it again:  fairq status {id} --follow{}",
                     the_same_limit(limit)
                 );
                 return Ok(EXIT_TIMEOUT);
@@ -6369,7 +6369,7 @@ fn status_without_the_coordinator(
 ) -> Result<Box<JobStatus>> {
     if !*announced {
         eprintln!(
-            "qex: the coordinator stopped. The job {id} continues, and this command continues \
+            "fairq: the coordinator stopped. The job {id} continues, and this command continues \
              with it."
         );
         *announced = true;
@@ -6395,9 +6395,9 @@ fn status_without_the_coordinator(
                 own_the_job(client, id);
             } else {
                 eprintln!(
-                    "qex: this coordinator keeps the job {id} after this command stops.\n\
-                     qex: Ctrl-C and SIGTERM still stop it. After a stop that this command \
-                     cannot catch, run `qex cancel {id}`."
+                    "fairq: this coordinator keeps the job {id} after this command stops.\n\
+                     fairq: Ctrl-C and SIGTERM still stop it. After a stop that this command \
+                     cannot catch, run `fairq cancel {id}`."
                 );
             }
         }
@@ -6408,13 +6408,13 @@ fn status_without_the_coordinator(
 
     crate::job::read_status(dir).map(Box::new).with_context(|| {
         format!(
-            "the coordinator stopped, and qex could not read the record of the job {id}. The \
-             job can still operate. Use `qex status {id}` when the coordinator answers again"
+            "the coordinator stopped, and fairq could not read the record of the job {id}. The \
+             job can still operate. Use `fairq status {id}` when the coordinator answers again"
         )
     })
 }
 
-/// Writes why `qex run` stopped, when the job gave no exit code of its own.
+/// Writes why `fairq run` stopped, when the job gave no exit code of its own.
 ///
 /// The exit code speaks to a script. A person, and an agent that reads the
 /// output, needs the sentence as well. The important case is the job that a
@@ -6435,7 +6435,7 @@ fn report_run_stop(status: &JobStatus, stopped_here: bool) {
             (Some(_), _) => return,
             (None, Some(sig)) => format!(
                 "the signal {sig} stopped the job {id}, so the job gave no exit code of its \
-                 own. Use `qex status {id}` to read the record."
+                 own. Use `fairq status {id}` to read the record."
             ),
             _ => return,
         },
@@ -6451,12 +6451,12 @@ fn report_run_stop(status: &JobStatus, stopped_here: bool) {
         JobState::Killed => match status.signal {
             Some(sig) => format!(
                 "the signal {sig} stopped the job {id}, and this command did not send it. A \
-                 different command, or the job itself, sent it. Use `qex status {id}` to read \
+                 different command, or the job itself, sent it. Use `fairq status {id}` to read \
                  the record."
             ),
             None => format!(
                 "something stopped the job {id}, and this command did not stop it. Use \
-                 `qex status {id}` to read the record."
+                 `fairq status {id}` to read the record."
             ),
         },
         JobState::Cancelled if stopped_here => {
@@ -6467,11 +6467,11 @@ fn report_run_stop(status: &JobStatus, stopped_here: bool) {
              it wrote no output. Start the work again when you still need it."
         ),
         JobState::Timeout => format!(
-            "the job {id} reached its time limit, and qex stopped it. Give a longer `--timeout` \
+            "the job {id} reached its time limit, and fairq stopped it. Give a longer `--timeout` \
              when the work needs more time."
         ),
         // Say what the RECORD says. `describe_result` holds the full story of
-        // a kill for memory — the claim that qex tried, and whether it raised
+        // a kill for memory — the claim that fairq tried, and whether it raised
         // it — and two commands must not explain one state two ways. The words
         // "the machine ran out of memory" also sent readers to the machine
         // when the fault was in the claim.
@@ -6482,7 +6482,7 @@ fn report_run_stop(status: &JobStatus, stopped_here: bool) {
         JobState::Skipped => describe_result(status),
         other => format!("the job {id} is {other}"),
     };
-    eprintln!("qex: {text}");
+    eprintln!("fairq: {text}");
 }
 
 /// Submits the same job again, with the same command, environment and claim.
@@ -6497,7 +6497,7 @@ pub fn rerun(args: cli::RerunArgs) -> Result<i32> {
     let id = match resolve_id(&mut client, &args.id) {
         Ok(id) => id,
         Err(e) => {
-            eprintln!("qex: {e}");
+            eprintln!("fairq: {e}");
             return Ok(code_for_a_resolver_error(&e));
         }
     };
@@ -6511,13 +6511,13 @@ pub fn rerun(args: cli::RerunArgs) -> Result<i32> {
 
     // THE SPECIFICATION GIVES THE CLAIM OF THE NEW JOB, and the record does not.
     //
-    // For a job that this qex submits the two agree: qex writes the claim of the
+    // For a job that this fairq submits the two agree: fairq writes the claim of the
     // record from the specification, and it changes that value for no job.
     //
-    // They disagree for a record of an EARLIER qex, which could put a larger
+    // They disagree for a record of an EARLIER fairq, which could put a larger
     // number in the record after a kill for memory. A rerun that took the larger
     // number would carry `learned` with it, and tell the reader that a job
-    // measured a value that qex invented. The specification holds what a person
+    // measured a value that fairq invented. The specification holds what a person
     // asked for, so the claim of such a record does not go forward.
 
     // A new job needs a new id, and it must not keep the dependencies of the
@@ -6532,8 +6532,8 @@ pub fn rerun(args: cli::RerunArgs) -> Result<i32> {
 
     // A rerun must not keep the dedupe key of the first job.
     //
-    // `qex rerun` is the command that says "run this work again". With the key,
-    // qex would give the id of the first job and start nothing, and the command
+    // `fairq rerun` is the command that says "run this work again". With the key,
+    // fairq would give the id of the first job and start nothing, and the command
     // would do the one thing that it exists to prevent: nothing.
     spec.dedupe_key = None;
     spec.dedupe_window = 0;
@@ -6561,10 +6561,10 @@ pub fn rerun(args: cli::RerunArgs) -> Result<i32> {
             ..
         } => {
             if let Some(text) = warning {
-                eprintln!("qex: {text}");
+                eprintln!("fairq: {text}");
             }
             eprintln!(
-                "qex: the job {} runs again as {new_id}",
+                "fairq: the job {} runs again as {new_id}",
                 &id.to_string()[..8]
             );
             if let Some(path) = &args.id_file {
@@ -6597,7 +6597,7 @@ fn coordinator_capabilities(client: &mut Client) -> Result<(Vec<String>, String,
         _ => return Ok((Vec::new(), String::from("unknown"), 0)),
     };
 
-    // Every version that qex supports answers this request. A coordinator that
+    // Every version that fairq supports answers this request. A coordinator that
     // does not answer it is below the capability floor, and it gets an empty list;
     // the floor test then refuses it with the correct words.
     match client.call(&Request::Capabilities) {
@@ -6748,18 +6748,18 @@ fn resolve_directory(path: &std::path::Path, option: &str) -> Result<std::path::
 /// Says that the coordinator refused one stage of a pipeline, with the remedy.
 ///
 /// The remedy is a command that the reader types, so it must be a command that
-/// qex accepts. `qex cancel` takes ids, and a group id gives every stage of the
+/// fairq accepts. `fairq cancel` takes ids, and a group id gives every stage of the
 /// pipeline. It has no `--group` option.
 fn stage_refused_text(stage: &str, group: uuid::Uuid) -> String {
     format!(
-        "qex: the stage `{stage}` was refused. The stages before it are in the queue; \
-         use `qex cancel {group}` to remove them."
+        "fairq: the stage `{stage}` was refused. The stages before it are in the queue; \
+         use `fairq cancel {group}` to remove them."
     )
 }
 
 /// Collects the old records of every directory.
 ///
-/// `qex clean --auto` works on one directory tree and on one hour, for a user
+/// `fairq clean --auto` works on one directory tree and on one hour, for a user
 /// who finished a piece of work. This command works on every directory and on a
 /// longer time, for a machine that has run for days.
 ///
@@ -6843,7 +6843,7 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
             "id": id.to_string(), "name": name
         })).collect::<Vec<_>>(),
         "directories_with_no_record": orphans.len(),
-        // The key says what qex tested, and nothing more. A record stays
+        // The key says what fairq tested, and nothing more. A record stays
         // because a job waits for it, OR because its pipeline has work
         // left; the second is not a job that needs the record. An
         // agent parses this key, so a key that names a need sends the
@@ -6857,7 +6857,7 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
             println!("{}", serde_json::to_string_pretty(&answer)?);
         } else {
             println!(
-                "qex would delete {}, and {}, with no record, and free {}.",
+                "fairq would delete {}, and {}, with no record, and free {}.",
                 count_of(targets.len(), "record"),
                 plural_directories(orphans.len()),
                 format_size(bytes)
@@ -6886,7 +6886,7 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
         println!("{}", serde_json::to_string_pretty(&answer)?);
     } else {
         println!(
-            "qex deleted {}, and {}, with no record, and freed {}.",
+            "fairq deleted {}, and {}, with no record, and freed {}.",
             count_of(deleted, "record"),
             plural_directories(removed),
             format_size(freed)
@@ -6894,7 +6894,7 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
         if held_back > 0 {
             // "holds" and not "needs": a record can stay because a job waits
             // for it, and it can stay because its pipeline has work left. The
-            // second is not a job that needs the record. Use `qex clean <id>`
+            // second is not a job that needs the record. Use `fairq clean <id>`
             // for one record to read which rule kept it.
             println!(
                 "{} stayed, because work that has not stopped holds {}. \
@@ -6914,11 +6914,11 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
     for (path, error) in &stayed {
         // Somebody else chose the name of the directory, so it loses its control bytes.
         let path = crate::job::printable(path);
-        eprintln!("qex could not remove {path}: {error}.");
+        eprintln!("fairq could not remove {path}: {error}.");
     }
     if !stayed.is_empty() {
         eprintln!(
-            "{} stayed. Fix the cause, then run qex gc again, or delete {} by hand.",
+            "{} stayed. Fix the cause, then run fairq gc again, or delete {} by hand.",
             plural_directories(stayed.len()),
             if stayed.len() == 1 { "it" } else { "them" }
         );
@@ -6971,8 +6971,8 @@ fn dirs_nothing_holds(
         }
     } else {
         eprintln!(
-            "qex left {} with no record in place: this coordinator is older and cannot say \
-             whether a submission holds {}. Run qex gc again after that coordinator stops; \
+            "fairq left {} with no record in place: this coordinator is older and cannot say \
+             whether a submission holds {}. Run fairq gc again after that coordinator stops; \
              it stops when no job operates.",
             plural_directories(ids.len()),
             if ids.len() == 1 { "it" } else { "them" }
@@ -7052,11 +7052,11 @@ fn dep_nodes(jobs: &[JobStatus]) -> Vec<crate::deps::Node<'_>> {
         .collect()
 }
 
-/// Shows how much disk space qex holds.
+/// Shows how much disk space fairq holds.
 ///
 /// The output of a job has no limit, and a job that writes a large log holds
 /// that space until somebody deletes its record. This command says how much,
-/// and which jobs hold the most, so a user knows whether `qex gc` is worth the
+/// and which jobs hold the most, so a user knows whether `fairq gc` is worth the
 /// command.
 pub fn du(args: cli::DuArgs) -> Result<i32> {
     let cfg = Config::load()?;
@@ -7064,7 +7064,7 @@ pub fn du(args: cli::DuArgs) -> Result<i32> {
     let jobs_dir = paths::jobs_dir()?;
 
     // Read the records from the disk. This command must answer when no
-    // coordinator operates, in the same way as `qex top`.
+    // coordinator operates, in the same way as `fairq top`.
     let jobs = crate::job::read_all_from_disk();
 
     let mut per_job: Vec<(uuid::Uuid, String, String, u64, bool)> = Vec::new();
@@ -7136,7 +7136,7 @@ pub fn du(args: cli::DuArgs) -> Result<i32> {
         return Ok(0);
     }
 
-    println!("qex holds {} in {}", format_size(total), state.display());
+    println!("fairq holds {} in {}", format_size(total), state.display());
     println!(
         "  {} in {}",
         format_size(total_jobs),
@@ -7154,7 +7154,7 @@ pub fn du(args: cli::DuArgs) -> Result<i32> {
     if reclaimable > 0 {
         println!();
         println!(
-            "{} can go now. Run `qex gc` to free it.",
+            "{} can go now. Run `fairq gc` to free it.",
             format_size(reclaimable)
         );
     }
@@ -7170,7 +7170,7 @@ pub fn du(args: cli::DuArgs) -> Result<i32> {
                 state,
                 crate::job::fit_name(name, 16),
                 if *old {
-                    "  (qex gc would free this)"
+                    "  (fairq gc would free this)"
                 } else {
                     ""
                 }
@@ -7208,7 +7208,7 @@ mod tests {
             "a refusal carries the words of the coordinator: {refused}"
         );
 
-        // qex READ this answer correctly, so the message must not say that it
+        // fairq READ this answer correctly, so the message must not say that it
         // could not. It must say only that the answer proves nothing.
         let unexpected = ownership_message(id, &OwnershipAnswer::Unexpected)
             .expect("an answer that says nothing about the job must speak");
@@ -7216,7 +7216,7 @@ mod tests {
             !unexpected.contains("unknown variant")
                 && !unexpected.contains("could not read")
                 && !unexpected.contains("cannot read"),
-            "the words of the protocol must not reach a reader, and qex read this answer: \
+            "the words of the protocol must not reach a reader, and fairq read this answer: \
              {unexpected}"
         );
         assert!(
@@ -7234,7 +7234,7 @@ mod tests {
         // Every answer that speaks names the job and the step.
         for text in [&refused, &unexpected, &silent] {
             assert!(
-                text.contains(&format!("qex cancel {id}")),
+                text.contains(&format!("fairq cancel {id}")),
                 "each answer gives the step that removes the job: {text}"
             );
         }
@@ -7291,15 +7291,15 @@ mod tests {
         }
     }
 
-    /// A log file that qex could not complete must give a notice.
+    /// A log file that fairq could not complete must give a notice.
     ///
-    /// A process of a job can hold the output open after the job stops. qex
+    /// A process of a job can hold the output open after the job stops. fairq
     /// then writes the record and leaves the copy, and it cannot count what
     /// went. An earlier version wrote no count and no flag, so the record said
     /// that the file was complete. A program reads that field and not the text
     /// beside it.
     #[test]
-    fn a_log_file_that_qex_could_not_complete_gives_a_notice() {
+    fn a_log_file_that_fairq_could_not_complete_gives_a_notice() {
         use crate::job::LogsDropped;
         let mut s = status_with(JobState::Completed, Some(0));
 
@@ -7318,7 +7318,7 @@ mod tests {
             ..Default::default()
         });
         let notice = dropped_notice(&s, "stdout").unwrap();
-        assert!(notice.contains("qex removed"), "got: {notice}");
+        assert!(notice.contains("fairq removed"), "got: {notice}");
         assert!(notice.contains("did not close"), "got: {notice}");
 
         // A file that is complete, with nothing removed, gives no notice.
@@ -7365,8 +7365,8 @@ mod tests {
     /// The id of a pipeline names every stage of it, in the order of
     /// submission.
     ///
-    /// `qex pipeline` writes that id to stdout, so it is the value that a user
-    /// keeps. Before this, `qex wait $GROUP` answered "there is no job with the
+    /// `fairq pipeline` writes that id to stdout, so it is the value that a user
+    /// keeps. Before this, `fairq wait $GROUP` answered "there is no job with the
     /// id ..." with the code 127, and the documented way to use a pipeline
     /// ended with the user finding the last stage by hand.
     #[test]
@@ -7395,7 +7395,7 @@ mod tests {
     /// One word must never reach two pipelines.
     ///
     /// A pipeline takes its name from its file, so a second run of the same
-    /// file carries the same name. `qex kill ci` stopped the work of two
+    /// file carries the same name. `fairq kill ci` stopped the work of two
     /// separate runs, and the user named one. A short group id has the same
     /// fault, because two ids can start with the same characters.
     #[test]
@@ -7452,9 +7452,9 @@ mod tests {
         );
     }
 
-    /// The remedy for a stage that qex refused is a command that qex accepts.
+    /// The remedy for a stage that fairq refused is a command that fairq accepts.
     ///
-    /// The fault: the text named `qex cancel --group <id>`, and `qex cancel` has
+    /// The fault: the text named `fairq cancel --group <id>`, and `fairq cancel` has
     /// no such option, so the reader could not type the remedy.
     #[test]
     fn the_remedy_for_a_refused_stage_is_a_command_that_exists() {
@@ -7463,11 +7463,11 @@ mod tests {
         let text = stage_refused_text("test", group);
         let remedy = text
             .split('`')
-            .find(|part| part.starts_with("qex "))
+            .find(|part| part.starts_with("fairq "))
             .expect("the text must give a command");
-        assert_eq!(remedy, format!("qex cancel {group}"));
+        assert_eq!(remedy, format!("fairq cancel {group}"));
         let cli = cli::Cli::try_parse_from(remedy.split_whitespace())
-            .unwrap_or_else(|e| panic!("qex must accept its own remedy `{remedy}`: {e}"));
+            .unwrap_or_else(|e| panic!("fairq must accept its own remedy `{remedy}`: {e}"));
         let Some(cli::Command::Cancel(args)) = cli.command else {
             panic!("`{remedy}` must be the command `cancel`");
         };
@@ -7476,13 +7476,13 @@ mod tests {
         assert_eq!(args.ids, vec![group.to_string()]);
     }
 
-    /// The note about a claim goes beside the value that qex chose.
+    /// The note about a claim goes beside the value that fairq chose.
     ///
-    /// The fault: a person gave `--cpu 10`, qex learned the memory, and the
-    /// line ended with one note for the whole claim. The person read that qex
+    /// The fault: a person gave `--cpu 10`, fairq learned the memory, and the
+    /// line ended with one note for the whole claim. The person read that fairq
     /// learned the 10 cores also.
     #[test]
-    fn the_note_about_a_claim_covers_the_value_that_qex_chose_only() {
+    fn the_note_about_a_claim_covers_the_value_that_fairq_chose_only() {
         let mut s = status_with(JobState::Queued, None);
         s.cpu = 10;
         s.mem = 512 << 20;
@@ -7516,13 +7516,13 @@ mod tests {
         s.mem_source = "explicit".into();
         assert_eq!(claim_text(&s), "1 core, 512MB");
 
-        // A record of an earlier qex does not say which value qex learned, so
+        // A record of an earlier fairq does not say which value fairq learned, so
         // the note must not say it either.
         s.cpu_source = String::new();
         s.mem_source = String::new();
         assert_eq!(
             claim_text(&s),
-            "1 core, 512MB (qex learned one value or both from the earlier jobs of this \
+            "1 core, 512MB (fairq learned one value or both from the earlier jobs of this \
              command)"
         );
     }
@@ -7547,7 +7547,7 @@ mod tests {
 
     /// A pipeline of one stage is still a pipeline.
     ///
-    /// `qex status --json` chooses an array or an object from this, so a shape
+    /// `fairq status --json` chooses an array or an object from this, so a shape
     /// that came from the NUMBER of stages would change on the day a pipeline
     /// has one stage, and `jq '.[0]'` would stop working.
     #[test]
@@ -7583,7 +7583,7 @@ mod tests {
 
     /// A word that names a job AND a pipeline must give an error.
     ///
-    /// qex must not choose one of the two for the user. A command that kills
+    /// fairq must not choose one of the two for the user. A command that kills
     /// would kill the wrong work.
     #[test]
     fn a_word_that_names_a_job_and_a_pipeline_gives_an_error() {
@@ -7621,9 +7621,9 @@ mod tests {
     /// A short id that starts the id of a job AND the id of its own group is
     /// not an ambiguity.
     ///
-    /// Both readings give the SAME job, so qex must answer with that job. An
+    /// Both readings give the SAME job, so fairq must answer with that job. An
     /// error here would refuse a value that has one meaning, and the user
-    /// copied that value out of `qex list`.
+    /// copied that value out of `fairq list`.
     #[test]
     fn a_short_id_that_starts_a_job_and_its_own_group_gives_that_job() {
         let mut job = status_with(JobState::Completed, Some(0));
@@ -7635,7 +7635,7 @@ mod tests {
 
         let found = resolve_targets_in(&jobs, "12345678").expect("both readings give one job");
         assert_eq!(found.ids, vec![want]);
-        // The user named a job, and not a pipeline. `qex status --json` reads
+        // The user named a job, and not a pipeline. `fairq status --json` reads
         // this to choose an object over an array.
         assert_eq!(found.group, None);
     }
@@ -7677,7 +7677,7 @@ mod tests {
     ///
     /// The two readings must be compared by identity, and not by how many jobs
     /// each holds. A comparison of the counts alone calls this pair the same
-    /// job, and qex would then kill or delete the wrong work.
+    /// job, and fairq would then kill or delete the wrong work.
     #[test]
     fn one_job_and_a_one_stage_pipeline_of_the_same_size_still_give_an_error() {
         let mut alone = status_with(JobState::Completed, Some(0));
@@ -7712,7 +7712,7 @@ mod tests {
         assert_eq!(EXIT_JOB_SIGNAL, 98);
         assert_eq!(EXIT_OOM, 99);
         assert_eq!(EXIT_NO_RESULT, 100);
-        assert_eq!(EXIT_QEX_FAILED, 121);
+        assert_eq!(EXIT_FAIRQ_FAILED, 121);
         assert_eq!(EXIT_WAIT_BROKEN, 122);
         assert_eq!(EXIT_EXPIRED, 123);
         assert_eq!(EXIT_TIMEOUT, 124);
@@ -7777,7 +7777,7 @@ mod tests {
             EXIT_JOB_RESERVED
         );
         // The usual code of a job that a signal stopped, 128 + N. It is in the
-        // band, so it gives the sentinel as well. Only qex itself gives a code
+        // band, so it gives the sentinel as well. Only fairq itself gives a code
         // above 127.
         assert_eq!(
             exit_code_for(&status_with(JobState::Failed, Some(128))),
@@ -7789,7 +7789,7 @@ mod tests {
         );
     }
 
-    /// A job that something stopped gave no exit code of its own. `qex run`
+    /// A job that something stopped gave no exit code of its own. `fairq run`
     /// must give the code of the state, and not 1.
     ///
     /// 1 is the most common code of a program that failed. With 1, an agent
@@ -7797,7 +7797,7 @@ mod tests {
     /// stopped my job", so it starts the work again or it reports a fault that
     /// the work does not have.
     #[test]
-    fn qex_run_gives_the_code_of_the_state_when_something_stopped_the_job() {
+    fn fairq_run_gives_the_code_of_the_state_when_something_stopped_the_job() {
         assert_eq!(
             exit_code_for(&status_with(JobState::Killed, None)),
             EXIT_KILLED
@@ -7817,15 +7817,15 @@ mod tests {
         );
     }
 
-    /// Every code that qex gives is 0 to 96, or 97 to 127. A code of 128 or
-    /// above says that the qex PROCESS died from a signal, so no answer of qex
+    /// Every code that fairq gives is 0 to 96, or 97 to 127. A code of 128 or
+    /// above says that the fairq PROCESS died from a signal, so no answer of fairq
     /// may use one.
     ///
-    /// A dead process writes no exit code, so `128 + N` from a qex command can
+    /// A dead process writes no exit code, so `128 + N` from a fairq command can
     /// only mean that the command itself died. The job is then not described,
     /// and the caller must attach to it again.
     #[test]
-    fn no_answer_of_qex_reaches_the_codes_of_a_signal() {
+    fn no_answer_of_fairq_reaches_the_codes_of_a_signal() {
         for state in [
             JobState::Completed,
             JobState::Failed,
@@ -7863,7 +7863,7 @@ mod tests {
     ///
     /// It reads the DISPOSITION and not the flags. macOS gives `SA_RESETHAND`
     /// its effect and does not report the flag back, so a test of the flags
-    /// measures the system and not the behaviour of qex.
+    /// measures the system and not the behaviour of fairq.
     #[test]
     fn the_trap_of_a_wait_gives_the_disposition_back_to_the_system() {
         use std::sync::atomic::Ordering;
@@ -7907,9 +7907,9 @@ mod tests {
     /// with no exit code. The job then takes the code of a signal death, and
     /// the record names the signal.
     ///
-    /// A signal that qex KNOWS about is different. A kill, a cancel, a time
+    /// A signal that fairq KNOWS about is different. A kill, a cancel, a time
     /// limit and an out-of-memory kill each give a state of their own, and the
-    /// code is then 125: qex knows why the job stopped, and 125 says more than
+    /// code is then 125: fairq knows why the job stopped, and 125 says more than
     /// "a signal came".
     ///
     /// The usual form `128 + N` cannot serve here. A job that the
@@ -7936,7 +7936,7 @@ mod tests {
         // its claim from this line.
         assert!(text.contains("1GB") && text.contains("2GB"), "got: {text}");
         // It must also point the reader at the CLAIM, and it must NOT say that
-        // the claim was too small. qex reads a kill count that covers every
+        // the claim was too small. fairq reads a kill count that covers every
         // program of the user, so it cannot say that this job was the victim,
         // and `docs/reference.md` promises that it never says so.
         assert!(
@@ -7945,7 +7945,7 @@ mod tests {
         );
         assert!(text.contains("`--mem`"), "got: {text}");
 
-        // The `error` field wins when qex wrote one. That text comes from the
+        // The `error` field wins when fairq wrote one. That text comes from the
         // supervisor, which saw the event, so it names the cause more exactly
         // than a sentence that this function builds from two numbers.
         s.error = Some("the kernel stopped this job for memory, and its claim was 1GB".into());
@@ -7983,7 +7983,7 @@ mod tests {
     /// proof of it.
     ///
     /// This test calls the function that decides, so the answer it reads is
-    /// the answer that `qex clean` and `qex gc` use.
+    /// the answer that `fairq clean` and `fairq gc` use.
     #[test]
     fn a_record_that_an_unfinished_job_needs_through_a_chain_stays() {
         let mut a = status_with(JobState::Completed, Some(0));
@@ -8064,7 +8064,7 @@ mod tests {
     /// A record goes when the work of its pipeline stops.
     ///
     /// A rule that keeps a record for ever is as wrong as a rule that keeps
-    /// none. `qex clean` must remove what a reader asks it to remove.
+    /// none. `fairq clean` must remove what a reader asks it to remove.
     #[test]
     fn a_pipeline_that_stopped_holds_no_record() {
         let group = uuid::Uuid::new_v4();
@@ -8277,12 +8277,12 @@ mod tests {
         );
     }
 
-    /// A directory that is already gone is no failure of `qex gc`, and gc did not remove it.
+    /// A directory that is already gone is no failure of `fairq gc`, and gc did not remove it.
     /// No run of the CLI reaches this: nothing can delete a directory between gc's two steps.
     #[test]
     fn a_directory_that_is_already_gone_neither_went_nor_stayed() {
         let root =
-            crate::testutil::temp_dir().join(format!("qex-gc-gone-{}", uuid::Uuid::new_v4()));
+            crate::testutil::temp_dir().join(format!("fairq-gc-gone-{}", uuid::Uuid::new_v4()));
         let here = root.join("here");
         std::fs::create_dir_all(&here).unwrap();
         std::fs::write(here.join("blob"), b"12345").unwrap();

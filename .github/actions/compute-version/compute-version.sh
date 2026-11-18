@@ -18,7 +18,7 @@
 #
 # # THE TRAP: the tags are not in the history of `main`
 #
-# qex uses fishbone tagging. The commit that holds the release number hangs OFF
+# fairq uses fishbone tagging. The commit that holds the release number hangs OFF
 # `main` and is never ON it:
 #
 #     main:  A --- B --- C            <- the spine, always 0.0.0-dev

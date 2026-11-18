@@ -1,18 +1,18 @@
 ---
-name: qex
-description: Run a long local task (a build, a test suite, a training run, a data job) through the qex queue instead of a background command and a polling loop. Use this when a command takes minutes or more, when the machine is shared with other agents or people, when you must wait for work that you started earlier, or when you need the exit code, the output or the measured memory of a task that has already stopped.
+name: fairq
+description: Run a long local task (a build, a test suite, a training run, a data job) through the fairq queue instead of a background command and a polling loop. Use this when a command takes minutes or more, when the machine is shared with other agents or people, when you must wait for work that you started earlier, or when you need the exit code, the output or the measured memory of a task that has already stopped.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: install by building from the source, in place of upstream's downloads (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: the build gives the clone address, and says that it needs Rust 1.85 or later (issue #118). -->
 
-# qex — run long tasks and wait for them correctly
+# fairq — run long tasks and wait for them correctly
 
 You cannot see the work that another agent is about to start, and it cannot see
-yours. qex holds the work of every agent on this machine in one queue. It starts
+yours. fairq holds the work of every agent on this machine in one queue. It starts
 each job when the claim of the job fits the machine, records the result on the
-disk, and gives you one command that waits for it. `command -v qex` says whether
+disk, and gives you one command that waits for it. `command -v fairq` says whether
 it is installed. This project has no releases yet, so build it from the
 source, with Rust 1.85 or later:
 
@@ -22,15 +22,15 @@ cd local-resource-coordinator
 cargo build --release --locked
 ```
 
-That builds the binary at `target/release/qex`. The first command starts the
+That builds the binary at `target/release/fairq`. The first command starts the
 coordinator.
 
-`qex help agents` is the complete page inside the binary.
+`fairq help agents` is the complete page inside the binary.
 
-## If qex cannot start at all
+## If fairq cannot start at all
 
 Some harnesses run each command in a **sandbox**, and a sandbox can refuse the
-Unix socket that qex needs. qex says so and names the directory.
+Unix socket that fairq needs. fairq says so and names the directory.
 
 You cannot correct that yourself: the permissions belong to the person who
 starts you. Give them
@@ -50,17 +50,17 @@ while kill -0 "$PID"; do sleep 5; done          # the machine reuses that pid
 until [ -f done.marker ]; do sleep 30; done     # nobody will write that file
 ```
 
-qex is the parent of the task and waits for the process itself, so an answer
-always arrives. `qex watchers` finds monitors of this kind on the machine. To
-find the coordinator, use `qex info` — never search the process list.
+fairq is the parent of the task and waits for the process itself, so an answer
+always arrives. `fairq watchers` finds monitors of this kind on the machine. To
+find the coordinator, use `fairq info` — never search the process list.
 
 ## Which command
 
 | I want | Start the job | Attach to a job |
 | --- | --- | --- |
-| The output as it arrives | `qex run -- CMD` (= `qex submit --follow`) | `qex status <id> --follow` |
-| The record when it stops | `qex submit --wait -- CMD` | `qex status <id> --wait` |
-| The exit code only | `qex submit --wait -q -- CMD` | `qex status <id> --wait -q`, or `qex wait <id>...` for many |
+| The output as it arrives | `fairq run -- CMD` (= `fairq submit --follow`) | `fairq status <id> --follow` |
+| The record when it stops | `fairq submit --wait -- CMD` | `fairq status <id> --wait` |
+| The exit code only | `fairq submit --wait -q -- CMD` | `fairq status <id> --wait -q`, or `fairq wait <id>...` for many |
 
 Each gives the exit code of the job. They differ in what they **write**: the
 output of the job, the record of the job, or nothing.
@@ -70,10 +70,10 @@ the record on stdout as JSON. **Neither silences a fault of the wait** — no su
 job, a wait that reached its limit, a wait that a signal stopped — because those
 lines give the id that attaches to the job again. They go to stderr, not stdout.
 
-**Use `qex submit --wait` for your long work:**
+**Use `fairq submit --wait` for your long work:**
 
 ```sh
-qex submit --wait --cpu 2 --mem 4GB --id-file build.id -- make release
+fairq submit --wait --cpu 2 --mem 4GB --id-file build.id -- make release
 ```
 
 - One command. A submission and a separate wait is two, and the second is a
@@ -86,109 +86,109 @@ qex submit --wait --cpu 2 --mem 4GB --id-file build.id -- make release
   only when the parent sends a message. A subagent that ends its turn to wait
   then stays stopped until its parent notices the silence. Give every wait a
   limit below the command limit of your harness:
-  `qex submit --wait --wait-timeout TIME`, or `qex wait <id> --timeout TIME`.
+  `fairq submit --wait --wait-timeout TIME`, or `fairq wait <id> --timeout TIME`.
   Wait again when the command gives 124.
 - The output goes to the log file, so a job of two hours does not fill your
   context. The command ends with the **record**: state, exit code, resources and
   the last lines of both streams. Add `-q` for the exit code alone.
 - `--id-file` reaches the disk **before** the wait, so any interruption leaves
-  you a handle: `qex status "$(cat build.id)" --wait`.
+  you a handle: `fairq status "$(cat build.id)" --wait`.
 
 **Every submission joins a wait or gets its own.** With `--wait` that is
 automatic. With `--wait` or `--follow` the id goes to **stderr**, because stdout
 carries the result.
 
-`qex run` ties the job to the command: Ctrl-C and SIGTERM stop the **job**.
+`fairq run` ties the job to the command: Ctrl-C and SIGTERM stop the **job**.
 Every other command in the table watches the job and never stops it — Ctrl-C
 there gives 122 and the job continues. A SIGKILL, and the hangup of a terminal
-that closes, never stop a job; `qex list` finds it and `qex kill <id>` stops it.
+that closes, never stop a job; `fairq list` finds it and `fairq kill <id>` stops it.
 
-`qex wait A B C` waits for all three and writes one line for each.
-`qex wait --next A B C` returns when the **next** job stops — **one time**. The
+`fairq wait A B C` waits for all three and writes one line for each.
+`fairq wait --next A B C` returns when the **next** job stops — **one time**. The
 jobs that did not stop then have no watcher, so wait again for them.
 
 ## The exit codes
 
 **One table.** Every command that starts a job or gives you a job result obeys
-it: `qex submit`, `qex run`, `qex pipeline`, `qex rerun`, `qex wait` and
-`qex status --wait/--follow/-q`. `qex submit`, `qex pipeline` and `qex rerun`
+it: `fairq submit`, `fairq run`, `fairq pipeline`, `fairq rerun`, `fairq wait` and
+`fairq status --wait/--follow/-q`. `fairq submit`, `fairq pipeline` and `fairq rerun`
 give 0 when they start the work; they do not wait, so 0 is not the result of
 the job. A fault of those commands is 121, and never 1.
 
 | Code | Meaning |
 | --- | --- |
 | 0 to 96 | **The job.** The exit code of the job, unchanged. |
-| 97 to 127 | **qex.** The queue or the wait, never the job. |
+| 97 to 127 | **fairq.** The queue or the wait, never the job. |
 | 97 | The job gave a code from 97 to 255. Read the record for it. |
-| 98 | **A signal ended the job** — one that qex did not send, and that was not TERM or KILL. **Read the number in the record before you act**, because two causes give this code and need opposite answers: a fault inside the job, such as SIGSEGV or SIGABRT, means the work must change; a signal from outside, such as `kill -INT`, means somebody stopped you and the same command can run again. TERM and KILL give 125. The process that takes the signal is the command qex started: `-- sh -c my_binary` gives qex the shell, and a shell that survives its child exits 139, which qex reports as 97. |
-| 99 | **The kernel stopped the job for memory.** qex REPORTS this and acts on it in no way: no new attempt, no changed claim. qex reads a kill count that covers every program of your user, so it cannot say your job was the victim and cannot say the claim was too small — the machine can be full while your claim is correct. Compare the `usage` field with the claim, and submit again when the memory is free. macOS keeps no such count and gives 125 for the same kill, so never wait for 99 there. |
-| 100 | The job has not stopped, so there is no result. Only `qex status --quiet` with no wait gives it. |
-| 121 | qex could not do what you asked. No job ran. |
+| 98 | **A signal ended the job** — one that fairq did not send, and that was not TERM or KILL. **Read the number in the record before you act**, because two causes give this code and need opposite answers: a fault inside the job, such as SIGSEGV or SIGABRT, means the work must change; a signal from outside, such as `kill -INT`, means somebody stopped you and the same command can run again. TERM and KILL give 125. The process that takes the signal is the command fairq started: `-- sh -c my_binary` gives fairq the shell, and a shell that survives its child exits 139, which fairq reports as 97. |
+| 99 | **The kernel stopped the job for memory.** fairq REPORTS this and acts on it in no way: no new attempt, no changed claim. fairq reads a kill count that covers every program of your user, so it cannot say your job was the victim and cannot say the claim was too small — the machine can be full while your claim is correct. Compare the `usage` field with the claim, and submit again when the memory is free. macOS keeps no such count and gives 125 for the same kill, so never wait for 99 there. |
+| 100 | The job has not stopped, so there is no result. Only `fairq status --quiet` with no wait gives it. |
+| 121 | fairq could not do what you asked. No job ran. |
 | 122 | Your wait stopped, and **the job continues.** Attach to it again. |
 | 123 | The job gave up in the queue. It reached its `--max-queue-time`. |
 | 124 | Your wait reached its time limit. **The job continues.** |
 | 125 | Something stopped the job: a kill, a cancel or a time limit. |
 | 126 | A job that this job needed did not succeed. |
 | 127 | There is no job with that id. |
-| 128 and up | **qex itself died from a signal.** The job is not described, and it can still operate. |
+| 128 and up | **fairq itself died from a signal.** The job is not described, and it can still operate. |
 
 **The code answers `pass or fail`. The record answers `why`.** Read
-`qex status` when you act on the difference between "the job failed" and "my
+`fairq status` when you act on the difference between "the job failed" and "my
 wait stopped". **125 does not say that your work failed** — another agent on
-this machine can stop your job, so read the line on stderr first. `qex list`,
-`qex logs` and the other commands never speak for a job, so they use 0, 1, 2 and
+this machine can stop your job, so read the line on stderr first. `fairq list`,
+`fairq logs` and the other commands never speak for a job, so they use 0, 1, 2 and
 127 in the usual way.
 
 ## Your session can stop, and the work continues
 
 The job is not a child of your shell and not a child of you. A person stops you,
-your terminal closes, or qex replaces the coordinator: the job continues, it
+your terminal closes, or fairq replaces the coordinator: the job continues, it
 writes its result, and any later session attaches with the id.
 
 ```sh
-qex submit --wait --id-file .qex-build.id -- make   # a person stops you here
-qex status "$(cat .qex-build.id)" --wait            # a later session, and the result is there
+fairq submit --wait --id-file .fairq-build.id -- make   # a person stops you here
+fairq status "$(cat .fairq-build.id)" --wait            # a later session, and the result is there
 ```
 
 Put that file in the project or the home directory. **Not** in a scratch
 directory that your harness owns, and not in `/tmp`: the job outlives the
-session and the file does not. qex warns when the file goes to such a place. If
-you lose an id, `qex list --cwd .` gives the jobs of this directory.
+session and the file does not. fairq warns when the file goes to such a place. If
+you lose an id, `fairq list --cwd .` gives the jobs of this directory.
 
 ## Claims
 
-Give `--cpu` and `--mem`. qex compares the claims against the budget, which is
-75% of the machine and which `qex info` gives. Use `--cpu guess --mem guess`
+Give `--cpu` and `--mem`. fairq compares the claims against the budget, which is
+75% of the machine and which `fairq info` gives. Use `--cpu guess --mem guess`
 when you do not know the size: `half`/`guess` take one half of the budget, and
 `full`/`max` take all of it.
 
-**qex limits no job.** A claim decides what STARTS and when, and a job that
+**fairq limits no job.** A claim decides what STARTS and when, and a job that
 claims 2GB and uses 20GB still fills the machine. `[enforce] mode` says who else
-uses this machine — `cooperative` by default, or `single-user`, where qex uses
+uses this machine — `cooperative` by default, or `single-user`, where fairq uses
 90% of it and looks for no other coordinator — and neither value limits a job.
 
 **Do not run a small test job to measure a task.** It costs time and measures
 different work. Give `guess` and start the real task:
 
 ```sh
-qex submit --wait --cpu guess --mem guess -- ./task   # run 1
-qex submit --wait -- ./task                           # run 2: the claim is ready
+fairq submit --wait --cpu guess --mem guess -- ./task   # run 1
+fairq submit --wait -- ./task                           # run 2: the claim is ready
 ```
 
-qex records what each job really used and uses it as the claim for the next job
-of the same command. A job that the kernel stopped for memory teaches qex
-nothing today, so give a larger `--mem` yourself. `qex status --json` gives
+fairq records what each job really used and uses it as the claim for the next job
+of the same command. A job that the kernel stopped for memory teaches fairq
+nothing today, so give a larger `--mem` yourself. `fairq status --json` gives
 `max_rss` and `cpu_secs`.
 
 ## A key, so a second run starts nothing
 
 ```sh
-qex submit --wait --dedupe-key train:$(pwd) -- uv run train.py
+fairq submit --wait --dedupe-key train:$(pwd) -- uv run train.py
 ```
 
 While a job with that key waits or operates, a second submission starts **no**
-job: qex gives that id and exits 0, so your script cannot start the same
-four-hour run twice. Do not read `qex list` and decide for yourself — that test
+job: fairq gives that id and exits 0, so your script cannot start the same
+four-hour run twice. Do not read `fairq list` and decide for yourself — that test
 is a proxy, and another agent can submit between your read and your decision.
 The coordinator makes the test and the submission one step.
 
@@ -203,9 +203,9 @@ Do not put several steps in one script: one exit code and one mixed log leave
 you to find the cause.
 
 ```sh
-BUILD=$(qex submit --name build -- make)
-TEST=$(qex submit --name test --needs "$BUILD" -- make test)
-qex status "$TEST" --wait     # 126 if the build failed
+BUILD=$(fairq submit --name build -- make)
+TEST=$(fairq submit --name test --needs "$BUILD" -- make test)
+fairq status "$TEST" --wait     # 126 if the build failed
 ```
 
 A skipped stage names the **first** job that failed, so you read the cause and
@@ -213,27 +213,27 @@ not the chain. Use `--after` for a cleanup step that must run even when the step
 before it fails. Use an id in a script, and a name when you type a command.
 
 **If your work is submit, wait, then submit a job that reads the results, do not
-write a shell script that does the waits.** Give qex the dependency: use
-`--needs` as above, or put the stages in one file and run `qex pipeline
+write a shell script that does the waits.** Give fairq the dependency: use
+`--needs` as above, or put the stages in one file and run `fairq pipeline
 ci.toml`. A script that does not test the exit code of one wait starts the next
 stage on the files of an earlier run. A shell reads its script part by part
-while it runs, so a change to the file breaks every chain that uses it. qex has
+while it runs, so a change to the file breaks every chain that uses it. fairq has
 neither fault: the stages are all in the queue from the first moment, and a
 stage whose dependency did not succeed becomes `skipped`, with the code 126. Run
-`qex help pipeline`.
+`fairq help pipeline`.
 
 ## Many jobs at one time
 
 ```sh
-qex events --json      # one JSON object on one line for each change of state
+fairq events --json      # one JSON object on one line for each change of state
 ```
 
 Keep the `stream_id` of the first line and the largest `seq` you read, and give
 both to `--since` when you start again. A new coordinator restarts the numbers
 and gives you a `gap` line; with a number alone it cannot. **Act on `id` and
-`state`, not on the arrival of a line.** Run `qex help events`.
+`state`, not on the arrival of a line.** Run `fairq help events`.
 
-`qex list` names each job by its command: the program, then the first and the
+`fairq list` names each job by its command: the program, then the first and the
 last argument that do not start with `-`, and each gives the last part of its
 path, so `uv run --project P python run.py /d/a.json` is `uv-run-a.json` and
 `make` is `make`. A script, which is an argument that holds a space, enters
@@ -243,17 +243,17 @@ name does not tell your jobs apart.
 ## The other commands
 
 ```sh
-qex list                     what operates, what waits, and WHY it waits
-qex logs <id> --grep ERROR   the lines you want from a large log
-qex logs <id> --tail 50      the last lines of a log
-qex kill <id>                stop a job and each of its children
-qex cancel <id>              take a job out of the queue
-qex abort                    stop your jobs of this directory and empty their queue.
+fairq list                     what operates, what waits, and WHY it waits
+fairq logs <id> --grep ERROR   the lines you want from a large log
+fairq logs <id> --tail 50      the last lines of a log
+fairq kill <id>                stop a job and each of its children
+fairq cancel <id>              take a job out of the queue
+fairq abort                    stop your jobs of this directory and empty their queue.
                              To stop many jobs, use it: it pauses first, so the
                              scheduler starts nothing while it stops them.
-qex top                      watch the queue; j/k move, x stop, i info, t tail, q leave
-qex clean --auto             delete the records that stopped over an hour ago
-qex info                     the coordinator, the budget and the load
+fairq top                      watch the queue; j/k move, x stop, i info, t tail, q leave
+fairq clean --auto             delete the records that stopped over an hour ago
+fairq info                     the coordinator, the budget and the load
 ```
 
 Every command that reads data accepts `--json`.
@@ -267,13 +267,13 @@ Every command that reads data accepts `--json`.
   the code is 123; nothing ran, so there is no output.
 - **`pid` is null once a job stops.** The machine reuses that number. `last_pid`
   is history for a reader; never signal it.
-- **A claim is a promise, not a limit.** qex stops no job that goes above its
+- **A claim is a promise, not a limit.** fairq stops no job that goes above its
   claim, so a job that claims 2GB and uses 20GB still fills the machine.
 - **`--lock NAME` keeps two jobs apart** when they share something a claim
   cannot express: a build directory, a port, a database.
 - **`status --follow` writes the log from its first line.** For a job that
-  already stopped, use `qex logs --tail` or `qex status --wait` instead.
-- **`qex submit` copies your environment to the disk.** Use
+  already stopped, use `fairq logs --tail` or `fairq status --wait` instead.
+- **`fairq submit` copies your environment to the disk.** Use
   `--env-capture minimal` when the shell holds a token, and never paste
   `--show-env` output anywhere public.
 - **Under cron the environment is nearly empty.** Give `--env PATH=...` or run
@@ -297,6 +297,6 @@ for a value that you do not know; do not guess.
 Filed by an agent.
 model:   name and exact id, for example `Claude Opus 5 (claude-opus-5)`
 harness: name and version, for example `Claude Code 2.1.274`
-qex:     the output of `qex version`
+fairq:     the output of `fairq version`
 system:  macOS or Linux, and `sandbox` if your commands run in one
 ```

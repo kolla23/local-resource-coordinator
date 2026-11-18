@@ -3,7 +3,7 @@
 # Modified by the local-resource-coordinator fork, 2026-11-03: repository,
 # homepage and documentation name this fork's repository, not upstream's site.
 [package]
-name = "qex"
+name = "fairq"
 # NOT the version of a release. `main` holds this number for ever, and no pull
 # request changes it. The number of a release lives on the tag, and on the one
 # commit that the tag names; `build.rs` gives a build its own name. Read
@@ -18,11 +18,11 @@ documentation = "https://github.com/kolla23/local-resource-coordinator/tree/main
 readme = "README.md"
 keywords = ["queue", "scheduler", "jobs", "agents", "cli"]
 categories = ["command-line-utilities", "development-tools"]
-# The version of Rust that qex needs. The lock file has the format 4, which
+# The version of Rust that fairq needs. The lock file has the format 4, which
 # needs 1.78, and one dependency uses the 2024 edition, which needs 1.85. The
 # number below is that floor, and CI proves it on each change.
 rust-version = "1.85"
-# The files that a person needs to build and use qex. The state of a build is
+# The files that a person needs to build and use fairq. The state of a build is
 # large, and it belongs to no other machine.
 exclude = ["/.github", "/target", "/docs"]
 
