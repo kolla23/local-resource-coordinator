@@ -15,6 +15,8 @@
 # Test leg allows unprivileged user namespaces before the e2e step (issue #171).
 # Modified by the local-resource-coordinator fork, 2026-11-14: that step's
 # comment names the namespace rows without a count (issue #178).
+# Modified by the local-resource-coordinator fork, 2026-11-18: the Style job
+# runs the tests of the rename script and its checker (issue #28).
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -49,6 +51,8 @@ jobs:
         run: python3 .github/scripts/check-control-chars.py
       - name: The tests of the move checker
         run: python3 .github/scripts/check-moves-test.py
+      - name: The tests of the rename script and its checker
+        run: python3 .github/scripts/check-rename-test.py
       - name: The shell scripts pass shellcheck
         run: |
           shellcheck --version
