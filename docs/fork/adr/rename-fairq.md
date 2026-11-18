@@ -37,10 +37,11 @@ The new names are the plain token mapping qex to fairq and QEX to FAIRQ. The tab
 
 1. Make sure no old coordinator operates. There is no stop command. `qex info --no-start` prints `no coordinator operates` and exits 1 when none runs (src/commands.rs:4516-4529); otherwise it prints the coordinator's process id. Let its jobs finish: the coordinator exits after an hour with no job and no command (`IDLE_EXIT`, src/daemon.rs:41). Or, once no job of it operates, end it with `kill <that pid>` (reasoned, not run).
 2. Move `~/.config/qex.toml` to `~/.config/fairq.toml`, and `~/.local/state/qex` to `~/.local/state/fairq` (or the same names under `XDG_CONFIG_HOME` and `XDG_STATE_HOME`).
-3. Rename `QEX_*` to `FAIRQ_*` in your shell setup, job scripts and hooks.
-4. Install the fairq build. Moving the two paths back and reinstalling the older build undoes the upgrade.
+3. Rename `QEX_*` to `FAIRQ_*` in your shell setup, job scripts and hooks, and change every script, hook and installed skill copy that calls `qex` to call `fairq`.
+4. Remove the old `qex` binary from your PATH (`command -v qex` must print nothing). The fairq binary has a new name, so installing it does not replace the old one.
+5. Install the fairq build. Moving the two paths back and reinstalling the older build undoes the upgrade.
 
-**The two-coordinator risk.** The state directory decides the socket (src/paths.rs:44, 80, 101). An old coordinator left running beside a new one holds its own full budget, so the machine admits up to twice the work until the old one goes idle. Approach A documents this and does not prevent it; step 1 is the answer. This is reasoned from the code, not run.
+**The two-coordinator risk.** The state directory decides the socket (src/paths.rs:44, 80, 101). An old coordinator beside a new one holds its own full budget, so the machine admits up to twice the work. That happens in two ways: an old coordinator left running (step 1 answers it), and an old `qex` binary still on PATH, which any command that calls it starts again under a fresh `~/.local/state/qex` (steps 3 and 4 answer it). Approach A documents this and does not prevent it. This is reasoned from the code, not run.
 
 ## Recorded decisions
 
@@ -50,7 +51,7 @@ The new names are the plain token mapping qex to fairq and QEX to FAIRQ. The tab
 
 ## Porting a branch started before the rename
 
-The rename script is added by its own change and deleted by the rename itself. To port an older branch afterwards, fetch the script from the commit that added it:
+The rename script is added by its own change and deleted by the rename itself. To port an older branch afterwards, fetch the script from the commit that added it. Run this in a checkout of an up-to-date main (`git fetch` first), not on the older branch: `git log` searches only the history of the checked-out commit, and an older branch does not hold the commit that added the script.
 
 ```
 git show "$(git log --diff-filter=A --format=%H -- .github/scripts/rename-fairq.py)":.github/scripts/rename-fairq.py
