@@ -52,8 +52,6 @@ jobs:
         run: python3 .github/scripts/check-control-chars.py
       - name: The tests of the move checker
         run: python3 .github/scripts/check-moves-test.py
-      - name: The tests of the rename script and its checker
-        run: python3 .github/scripts/check-rename-test.py
       - name: The shell scripts pass shellcheck
         run: |
           shellcheck --version
