@@ -1,7 +1,8 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests of the line and record turn the check on, since the default is now never (issue #4); tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-02: update.lock is opened with O_NOFOLLOW, with a test (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the text of a newer release names this project's releases, with a test (issue #113).
-//! Looks for a newer release of qex, and says so one time.
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+//! Looks for a newer release of fairq, and says so one time.
 //!
 //! # Who asks
 //!
@@ -10,7 +11,7 @@
 //! A command must never wait for a web service, and must never fail because of
 //! one. The way to keep both rules absolutely is to take the network out of
 //! the path of a command: the coordinator already lives across commands, so it
-//! asks on its own time, in its own thread, and a `qex submit` waits for the
+//! asks on its own time, in its own thread, and a `fairq submit` waits for the
 //! queue and for nothing else. One call also serves every agent on the
 //! machine, which is the property that this queue exists for.
 //!
@@ -19,21 +20,21 @@
 //! network, and it never fails for this: a lock that it cannot take leaves the
 //! line for the next command.
 //!
-//! `qex version --check` is the one exception. A person asked for an answer
+//! `fairq version --check` is the one exception. A person asked for an answer
 //! now, so that command asks now.
 //!
-//! # How qex asks
+//! # How fairq asks
 //!
-//! It runs `curl`, and `wget` where the machine has no curl. qex holds nine
+//! It runs `curl`, and `wget` where the machine has no curl. fairq holds nine
 //! dependencies and an HTTP client would bring a TLS stack; both of these
 //! programs are on Linux and on macOS already. A machine with neither gets the
 //! message that says so, and nothing else changes.
 //!
-//! A curl that EXISTS AND FAILS is the answer. qex does not ask again with
+//! A curl that EXISTS AND FAILS is the answer. fairq does not ask again with
 //! wget: the second question costs the reader a second wait, and it asks the
 //! same service the same thing.
 //!
-//! # What qex never does
+//! # What fairq never does
 //!
 //! It never installs anything. A tool that replaces its own program needs a
 //! decision from the person who installed it, and that person may have a
@@ -50,22 +51,22 @@ use std::time::Duration;
 /// The word that turns the check off completely.
 pub const NEVER: &str = "never";
 
-/// What qex knows about the newest release.
+/// What fairq knows about the newest release.
 ///
 /// The coordinator writes this file and the CLI reads it, so a command needs
 /// no network and no coordinator to say that a newer release exists.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Record {
-    /// When qex last asked, in seconds. Zero says that it never asked.
+    /// When fairq last asked, in seconds. Zero says that it never asked.
     pub last_checked: u64,
     /// The newest release that the service named.
     pub newest: Option<String>,
     /// The service that answered.
     pub source: Option<String>,
-    /// What went wrong the last time qex asked.
+    /// What went wrong the last time fairq asked.
     pub error: Option<String>,
-    /// The version that qex last named to a reader.
+    /// The version that fairq last named to a reader.
     ///
     /// One message for each release. A line on every command teaches a reader
     /// to read no line at all.
@@ -134,7 +135,7 @@ fn with_the_record_in(dir: &std::path::Path, change: impl FnOnce(&mut Record)) -
 
     // FAIL WITH NO LOCK, AND NEVER WORK WITH NO LOCK.
     //
-    // A lock that qex cannot take leaves this function with two choices: read
+    // A lock that fairq cannot take leaves this function with two choices: read
     // and write anyway, or stop. To go on would give back exactly the fault
     // that the lock removes — the coordinator and a command writing the whole
     // record over each other — and it would do it in silence, at the moment
@@ -170,7 +171,7 @@ fn with_the_record_in(dir: &std::path::Path, change: impl FnOnce(&mut Record)) -
             std::thread::sleep(Duration::from_millis(5 + u64::from(jitter)));
             continue;
         }
-        bail!("qex could not lock {}: {e}", path.display());
+        bail!("fairq could not lock {}: {e}", path.display());
     }
 
     let mut record = read_record_in(dir);
@@ -203,11 +204,11 @@ pub fn interval(cfg: &Config) -> Result<Option<Duration>> {
 /// Asks the service now.
 ///
 /// This function talks to the network. Only the coordinator and
-/// `qex version --check` call it.
+/// `fairq version --check` call it.
 pub fn ask(cfg: &Config) -> Result<Answer> {
     let url = cfg.update.url.trim().to_string();
     if url.is_empty() {
-        bail!("[update] url is empty, so qex has nothing to ask");
+        bail!("[update] url is empty, so fairq has nothing to ask");
     }
     if !is_an_address(&url) {
         bail!(
@@ -230,7 +231,7 @@ pub fn ask(cfg: &Config) -> Result<Answer> {
     })
 }
 
-/// The most that qex reads from the service.
+/// The most that fairq reads from the service.
 ///
 /// The answer is one small JSON object. A service that sends more than this is
 /// not answering the question, and the coordinator must not hold it: a read
@@ -238,7 +239,7 @@ pub fn ask(cfg: &Config) -> Result<Answer> {
 /// floods, IN THE PROCESS WHOSE PURPOSE IS TO STOP AN OUT-OF-MEMORY KILL.
 const MOST_BYTES: usize = 256 * 1024;
 
-/// The most that qex keeps of what a program says about a fault.
+/// The most that fairq keeps of what a program says about a fault.
 ///
 /// It keeps the END of that text, because the reason comes last.
 const MOST_WORDS: usize = 2 * 1024;
@@ -252,26 +253,26 @@ const MOST_WORDS: usize = 2 * 1024;
 /// narrow test and not a test for a leading dash.
 const SCHEMES: [&str; 3] = ["https://", "http://", "file://"];
 
-/// True when qex may ask this address.
+/// True when fairq may ask this address.
 pub fn is_an_address(url: &str) -> bool {
     SCHEMES.iter().any(|scheme| url.starts_with(scheme))
 }
 
 /// Runs the program that talks to the network.
 ///
-/// QEX HOLDS THE TIME LIMIT, AND IT TRUSTS NO PROGRAM TO HOLD ONE.
+/// FAIRQ HOLDS THE TIME LIMIT, AND IT TRUSTS NO PROGRAM TO HOLD ONE.
 ///
 /// - `curl --max-time` covers a transfer over the network, and it does NOT
 ///   cover a read of `file://`: a URL that names a FIFO, a device or a mount
 ///   that stopped answering holds curl for ever.
 /// - The `-T` of GNU wget covers ONE operation, and the `wget` of busybox
 ///   takes that letter and then stops with a fault of memory. So the wget of
-///   qex carries no time limit of its own at all.
+///   fairq carries no time limit of its own at all.
 ///
 /// The limit here is thus the only one, and it must cover every way that a
 /// program can stop answering: one that says nothing, one that answers and
 /// then holds the pipe open, and one that fills the stream of its faults while
-/// qex reads the other one.
+/// fairq reads the other one.
 fn fetch(url: &str, limit: Duration) -> Result<String> {
     use std::io::Read;
     use std::os::unix::io::AsRawFd;
@@ -284,7 +285,7 @@ fn fetch(url: &str, limit: Duration) -> Result<String> {
                 "--max-time".into(),
                 // Round UP, and never to zero. A limit below one second would
                 // give curl `--max-time 0`, which means NO limit. The limit of
-                // qex stays exact; this one is the coarse backstop.
+                // fairq stays exact; this one is the coarse backstop.
                 limit.as_secs_f64().ceil().max(1.0).to_string(),
                 "--max-filesize".into(),
                 MOST_BYTES.to_string(),
@@ -305,7 +306,7 @@ fn fetch(url: &str, limit: Duration) -> Result<String> {
             //     Segmentation fault (core dumped)
             //
             // An option that one build of a program cannot obey is worse than
-            // no option, and qex holds the time limit itself.
+            // no option, and fairq holds the time limit itself.
             "wget",
             vec!["-q".into(), "-O".into(), "-".into(), url.into()],
         ),
@@ -320,20 +321,20 @@ fn fetch(url: &str, limit: Duration) -> Result<String> {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         // GIVE THE PROGRAM ITS OWN GROUP, so that a stop reaches every process
-        // of it. qex does the same for a job, and for the same reason: a
+        // of it. fairq does the same for a job, and for the same reason: a
         // program that starts another program leaves that other one behind
         // when a signal names one process. Measured with a shell that starts
         // `sleep`: four processes stayed with pid 1 as their parent.
         //
-        // A GROUP OF ITS OWN ALSO TAKES IT OUT OF THE GROUP OF QEX, so a
+        // A GROUP OF ITS OWN ALSO TAKES IT OUT OF THE GROUP OF FAIRQ, so a
         // Ctrl-C at a terminal no longer reaches it, and a coordinator that
         // stops leaves it with pid 1 as its parent. On Linux the kernel closes
         // that hole: PR_SET_PDEATHSIG asks for a signal when the thread that
         // started this program ends. A program with no time limit of its own —
         // the `wget` of busybox takes none that it can obey — would otherwise
-        // run for ever after qex is gone.
+        // run for ever after fairq is gone.
         //
-        // macOS has no equivalent, so there the bound holds while qex lives.
+        // macOS has no equivalent, so there the bound holds while fairq lives.
         // `curl` carries `--max-time` in either case.
         unsafe {
             use std::os::unix::process::CommandExt;
@@ -356,9 +357,9 @@ fn fetch(url: &str, limit: Duration) -> Result<String> {
         // READ THE STREAM OF FAULTS ON ITS OWN THREAD.
         //
         // Both streams are pipes with a small buffer. A program that fills the
-        // stream of its faults stops there and writes nothing more, and qex
+        // stream of its faults stops there and writes nothing more, and fairq
         // then waits for an answer that cannot arrive while that program waits
-        // for qex. The thread takes a bounded quantity and ends when the
+        // for fairq. The thread takes a bounded quantity and ends when the
         // program closes the pipe.
         // The thread SENDS its text, and this command never waits for the
         // thread itself. A program can leave a child of its own holding that
@@ -385,7 +386,7 @@ fn fetch(url: &str, limit: Duration) -> Result<String> {
                 // stops early leaves the program writing into a pipe that
                 // nobody empties, and the last line — the one that names the
                 // fault — never arrives. The end always comes: the program
-                // closes this stream when it stops, and qex stops it.
+                // closes this stream when it stops, and fairq stops it.
                 let mut buffer = [0u8; 4096];
                 while let Ok(n) = handle.read(&mut buffer) {
                     if n == 0 {
@@ -455,7 +456,7 @@ fn fetch(url: &str, limit: Duration) -> Result<String> {
                         }
                         // A read that failed gives no answer. It must not
                         // read as one: a part of a body would then reach the
-                        // reader as "the service gave an answer that qex
+                        // reader as "the service gave an answer that fairq
                         // could not read".
                         Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                         Err(_) => {
@@ -468,7 +469,7 @@ fn fetch(url: &str, limit: Duration) -> Result<String> {
         }
 
         // The program stops here, whatever it was doing. A program that
-        // answered is closing already, and one that qex stopped takes a
+        // answered is closing already, and one that fairq stopped takes a
         // signal: `wait` with no limit would hold this command for ever for a
         // program that closed its output and stayed.
         if !matches!(stop, Stop::Answered) {
@@ -484,25 +485,25 @@ fn fetch(url: &str, limit: Duration) -> Result<String> {
         match stop {
             Stop::TooMuch => bail!(
                 "the answer of {url} passed {MOST_BYTES} bytes, and the answer of this service \
-                 is one small object. qex stopped the read."
+                 is one small object. fairq stopped the read."
             ),
             Stop::TooSlow => bail!(
-                "{program} did not answer for {url} in {} seconds, and qex stopped it.",
+                "{program} did not answer for {url} in {} seconds, and fairq stopped it.",
                 limit.as_secs_f64()
             ),
-            Stop::Broken => bail!("qex could not read the answer of {program} for {url}"),
+            Stop::Broken => bail!("fairq could not read the answer of {program} for {url}"),
             Stop::Answered => {}
         }
 
         let Some(end) = ended else {
-            bail!("{program} did not stop for {url}, and qex could not wait for it");
+            bail!("{program} did not stop for {url}, and fairq could not wait for it");
         };
         if end.success() {
             return Ok(String::from_utf8_lossy(&body).to_string());
         }
 
         // The program ran and the request failed. Give the words of the
-        // program: they name the proxy, the certificate or the limit, and qex
+        // program: they name the proxy, the certificate or the limit, and fairq
         // cannot say it better.
         let code = end.code().unwrap_or(-1);
         bail!(
@@ -516,7 +517,7 @@ fn fetch(url: &str, limit: Duration) -> Result<String> {
     }
 
     bail!(
-        "qex asks a web service with `curl` or `wget`, and this machine has neither ({}). \
+        "fairq asks a web service with `curl` or `wget`, and this machine has neither ({}). \
          Install one, or set `[update] check = \"never\"` in your config file.",
         missing.join(" and ")
     )
@@ -536,7 +537,7 @@ enum Stop {
 
 /// Stops a program and every process that it started.
 ///
-/// qex asked for the program to lead a group of its own, so one signal to that
+/// fairq asked for the program to lead a group of its own, so one signal to that
 /// group reaches the program and every process that it started.
 ///
 /// The call that makes the group can fail, and this code cannot see that: it
@@ -592,7 +593,7 @@ fn tag_of(body: &str) -> Result<String> {
         tag_name: Option<String>,
     }
     let release: Release = serde_json::from_str(body)
-        .context("the service gave an answer that qex could not read as JSON")?;
+        .context("the service gave an answer that fairq could not read as JSON")?;
     let tag = release
         .tag_name
         .filter(|t| !t.trim().is_empty())
@@ -616,7 +617,7 @@ fn numbers_of(version: &str) -> Option<(u64, u64, u64)> {
 
 /// True when `newest` is a release above `mine`.
 ///
-/// A development build is never above and never below: `qex version --check`
+/// A development build is never above and never below: `fairq version --check`
 /// says what it is, and the automatic check says nothing at all about it.
 pub fn is_newer(mine: &str, newest: &str) -> bool {
     match (numbers_of(mine), numbers_of(newest)) {
@@ -639,9 +640,9 @@ pub fn check_if_due(cfg: &Config) {
 
     // THE FIRST RUN DOES NOT ASK.
     //
-    // A person who installed qex a moment ago holds the newest version nearly
+    // A person who installed fairq a moment ago holds the newest version nearly
     // by definition, so a call on the first day spends the network to say "you
-    // are up to date". qex therefore writes the time and stays quiet, and it
+    // are up to date". fairq therefore writes the time and stays quiet, and it
     // opens no connection at all until the first interval passes.
     if record.last_checked == 0 {
         with_the_record(|r| r.last_checked = now).ok();
@@ -666,7 +667,7 @@ pub fn check_if_due(cfg: &Config) {
                 r.source = Some(answer.source.clone());
                 r.error = None;
             }
-            // Keep the newest version that qex knows. A service that did not
+            // Keep the newest version that fairq knows. A service that did not
             // answer today does not remove what it said last week.
             Err(e) => r.error = Some(format!("{e:#}")),
         }
@@ -702,7 +703,7 @@ fn note_for_a_command_in(dir: &std::path::Path, mine: &str, cfg: &Config) -> Opt
     with_the_record_in(dir, |r| {
         line = note(mine, r);
         if line.is_some() {
-            // Keep the version that qex named, so the next command is quiet.
+            // Keep the version that fairq named, so the next command is quiet.
             r.told.clone_from(&r.newest);
         }
     })
@@ -714,10 +715,10 @@ fn note_for_a_command_in(dir: &std::path::Path, mine: &str, cfg: &Config) -> Opt
 ///
 /// It is a function of the version and the record alone, so a test gives it
 /// every case: this build is a development build, the release is older, the
-/// release is newer, and qex named that release already.
+/// release is newer, and fairq named that release already.
 fn note(mine: &str, record: &Record) -> Option<String> {
     // A development build takes no place in the order of the releases, so it
-    // gets no message. A person who builds qex knows what they built.
+    // gets no message. A person who builds fairq knows what they built.
     if crate::version::is_development(mine) {
         return None;
     }
@@ -730,12 +731,12 @@ fn note(mine: &str, record: &Record) -> Option<String> {
         return None;
     }
     Some(format!(
-        "qex: a newer qex exists: {newest}. This is {mine}. Run `qex version --check` for the \
+        "fairq: a newer fairq exists: {newest}. This is {mine}. Run `fairq version --check` for the \
          detail, or set `[update] check = \"never\"` to stop this message."
     ))
 }
 
-/// The answer of `qex version --check`, for a reader and for a program.
+/// The answer of `fairq version --check`, for a reader and for a program.
 pub struct Report {
     pub mine: String,
     pub newest: Option<String>,
@@ -774,7 +775,7 @@ impl Report {
     pub fn text(&self) -> String {
         if let Some(error) = &self.error {
             return format!(
-                "qex could not ask for the newest release: {error}\n\
+                "fairq could not ask for the newest release: {error}\n\
                  The version that you have still operates. Nothing changed."
             );
         }
@@ -800,17 +801,17 @@ impl Report {
                  Take it from \
                  https://github.com/kolla23/local-resource-coordinator/releases/latest , or \
                  build it from the source.\n\
-                 qex installs nothing by itself."
+                 fairq installs nothing by itself."
             );
         }
-        // qex ORDERS RELEASES BY THEIR NUMBERS. A service that answers with
+        // fairq ORDERS RELEASES BY THEIR NUMBERS. A service that answers with
         // something else — a name, a tag with letters, bytes that are not text
-        // — gives a version that has no place in that order, and qex must not
+        // — gives a version that has no place in that order, and fairq must not
         // call this build the newest on the strength of it.
         if numbers_of(&newest).is_none() {
             return format!(
                 "The service named `{newest}`, from {source}. That is not a release number of \
-                 the form X.Y.Z, so qex cannot say whether it is newer than this build."
+                 the form X.Y.Z, so fairq cannot say whether it is newer than this build."
             );
         }
         format!("This is the newest release. The newest is {newest}, from {source}.")
@@ -910,10 +911,10 @@ mod tests {
             "the line must say how to stop it: {line}"
         );
 
-        // The same release, once qex named it: say nothing.
+        // The same release, once fairq named it: say nothing.
         assert!(note("0.23.0", &record_of("0.24.0", Some("0.24.0"))).is_none());
 
-        // A release that came AFTER the one that qex named: say it again.
+        // A release that came AFTER the one that fairq named: say it again.
         assert!(note("0.23.0", &record_of("0.25.0", Some("0.24.0"))).is_some());
 
         // The newest release is this one, or older: say nothing.
@@ -923,7 +924,7 @@ mod tests {
         // A development build: say nothing, whatever the service said.
         assert!(note("0.0.0-dev+g98513e2", &record_of("9.9.9", None)).is_none());
 
-        // qex asked and learned nothing: say nothing.
+        // fairq asked and learned nothing: say nothing.
         let mut empty = record_of("0.24.0", None);
         empty.newest = None;
         assert!(note("0.23.0", &empty).is_none());
@@ -960,7 +961,7 @@ mod tests {
         assert_eq!(
             read_record_in(&dir).told.as_deref(),
             Some("0.24.0"),
-            "the record must remember the version that qex named"
+            "the record must remember the version that fairq named"
         );
 
         // The second command says nothing, and the record keeps its other
@@ -1031,7 +1032,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// A lock file that qex cannot OPEN stops the write.
+    /// A lock file that fairq cannot OPEN stops the write.
     ///
     /// To go on with no lock gives back the fault that the lock removes: the
     /// coordinator and a command writing the whole record over each other.
@@ -1043,7 +1044,7 @@ mod tests {
     /// and write nothing — and this test holds the half that a test can
     /// reach.
     #[test]
-    fn a_lock_file_that_qex_cannot_open_stops_the_write() {
+    fn a_lock_file_that_fairq_cannot_open_stops_the_write() {
         let dir = a_directory("nolock");
         write_record_in(&dir, &record_of("0.24.0", None)).unwrap();
         std::fs::create_dir(dir.join("update.lock")).unwrap();
@@ -1051,7 +1052,7 @@ mod tests {
         let answer = with_the_record_in(&dir, |r| r.told = Some("0.24.0".into()));
         assert!(
             answer.is_err(),
-            "a lock that qex cannot take must stop the write"
+            "a lock that fairq cannot take must stop the write"
         );
         // The record on the disk kept every field.
         let record = read_record_in(&dir);
@@ -1142,18 +1143,18 @@ mod tests {
 
         let mut cfg = Config::default();
         cfg.update.url = "-K/tmp/curlrc".into();
-        let e = format!("{:#}", ask(&cfg).expect_err("qex must refuse this"));
+        let e = format!("{:#}", ask(&cfg).expect_err("fairq must refuse this"));
         assert!(e.contains("must start with"), "got: {e}");
     }
 
     /// A service that never answers stops at the limit of the reader.
     ///
-    /// THIS TEST IS THE WHOLE OF THE TIME LIMIT. A deadline that qex tested
+    /// THIS TEST IS THE WHOLE OF THE TIME LIMIT. A deadline that fairq tested
     /// before a BLOCKING read gave no limit at all, and every test passed: a
     /// deadline made 1000 times longer still passed all of them. The test uses
     /// a FIFO, which nothing writes, so the real `curl` waits for ever — and
     /// `--max-time` of curl does NOT cover a read of `file://`, so the limit
-    /// under test here is the limit of qex and no other.
+    /// under test here is the limit of fairq and no other.
     #[test]
     fn a_service_that_never_answers_stops_at_the_limit() {
         let dir = a_directory("slow");

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 #
 # Tests that the title of a pull request follows Conventional Commits.
 #
@@ -112,7 +113,7 @@ gives the next version number.
 
 A title starts with a type, and then a colon and a space:
 
-    feat: add a command that shows the space that qex holds
+    feat: add a command that shows the space that fairq holds
     fix(top): show the queue when no coordinator operates
     feat!: rename --lock to --exclusive
 

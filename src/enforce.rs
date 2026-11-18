@@ -2,21 +2,22 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the oom mark (R3 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-10-06: the oom and killed-by-user marks are made and kept 0600.
 // Modified by the local-resource-coordinator fork, 2026-11-02: the oom and killed-by-user marks are opened with O_NOFOLLOW, with a test (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module reports a kill for memory. It applies no limit.
 //!
-//! qex does not limit a job. A claim decides what STARTS and when, and a job
+//! fairq does not limit a job. A claim decides what STARTS and when, and a job
 //! that claims two gigabytes and uses twenty still fills the machine.
 //!
-//! # What qex can still see
+//! # What fairq can still see
 //!
 //! Linux counts the processes that an out-of-memory killer stopped, in
-//! `memory.events` of each cgroup. qex reads the cgroup of ITS OWN PROCESS, so
+//! `memory.events` of each cgroup. fairq reads the cgroup of ITS OWN PROCESS, so
 //! a RISE in that count says that the kernel stopped something for memory while
 //! an attempt ran.
 //!
 //! That counter holds every program of this user below that cgroup, so it does
 //! not name the victim. A machine that is short of memory is also the machine
-//! on which a person uses `kill -9`, and the two arrive together. qex therefore
+//! on which a person uses `kill -9`, and the two arrive together. fairq therefore
 //! REPORTS the state `oom` and says what it cannot prove.
 //!
 //! macOS gives no such counter, so a kill for memory there reports the state
@@ -37,16 +38,16 @@ pub struct OomCounts {
 /// Reads the counts of a cgroup.
 ///
 /// A count is ZERO in two cases: the file does not name that count, and the
-/// file names it with a value that qex cannot read as a number.
+/// file names it with a value that fairq cannot read as a number.
 ///
 /// Zero is the correct answer for both, because zero is the answer that ACTS
-/// LEAST. A count that qex cannot read is a count that qex cannot use as
+/// LEAST. A count that fairq cannot read is a count that fairq cannot use as
 /// evidence, and a count of zero starts no attempt and records no bound. A
-/// count that qex guessed would raise a claim from a value that qex did not
+/// count that fairq guessed would raise a claim from a value that fairq did not
 /// measure.
 ///
-/// A file that qex cannot read at all gives `None`, which is a different
-/// answer: there is then no cgroup to ask, and qex reports no kill for memory.
+/// A file that fairq cannot read at all gives `None`, which is a different
+/// answer: there is then no cgroup to ask, and fairq reports no kill for memory.
 ///
 /// This function reads a file and nothing else, so a test gives it a directory
 /// that the test made.
@@ -71,14 +72,14 @@ pub fn read_oom_counts(cgroup: &Path) -> Option<OomCounts> {
 /// out-of-memory killer stopped below this cgroup. A RISE says that the kernel
 /// stopped something for memory while this attempt ran.
 ///
-/// It does NOT say that the job of this attempt was the victim. qex reads the
+/// It does NOT say that the job of this attempt was the victim. fairq reads the
 /// cgroup of its own process, and every program of this user below that cgroup
 /// raises the same count. The caller pairs this answer with the signal that
 /// stopped the job.
 ///
 /// # The count is a RISE, and never a total
 ///
-/// `before` holds the count that qex read before this attempt started. The
+/// `before` holds the count that fairq read before this attempt started. The
 /// count cannot be assumed to start at zero: the cgroup of this process holds
 /// the kills of every program that ran below it, including the earlier
 /// attempts of this job.
@@ -88,14 +89,14 @@ pub fn classify_oom(cgroup: &Path, before: OomCounts) -> bool {
     };
     // A cgroup can reach its limit and free enough memory after that, which
     // raises `oom` and stops no process. The job then stopped for a different
-    // reason, and qex must not report a kill for memory.
+    // reason, and fairq must not report a kill for memory.
     now.oom_kill > before.oom_kill
 }
 
 /// Gives the cgroup of THIS process.
 ///
-/// qex makes no cgroup for a job, so this is the cgroup that qex reads for a
-/// kill. It holds every program of this user below it, which is why qex cannot
+/// fairq makes no cgroup for a job, so this is the cgroup that fairq reads for a
+/// kill. It holds every program of this user below it, which is why fairq cannot
 /// name the victim of a kill.
 #[cfg(target_os = "linux")]
 pub fn own_cgroup() -> Option<PathBuf> {
@@ -117,11 +118,11 @@ pub fn own_cgroup() -> Option<PathBuf> {
 /// start live in here, so no caller passes them and no caller can pass the
 /// wrong ones.
 ///
-/// That matters because NEITHER count can be assumed to start at zero. qex
+/// That matters because NEITHER count can be assumed to start at zero. fairq
 /// reads the cgroup of its own process, and that cgroup holds the counts of
 /// every program that ran below it.
 pub struct OomWatch {
-    /// The cgroup that qex reads for this attempt.
+    /// The cgroup that fairq reads for this attempt.
     cgroup: Option<PathBuf>,
     /// The counts at the start of this attempt.
     before: OomCounts,
@@ -130,7 +131,7 @@ pub struct OomWatch {
 impl OomWatch {
     /// Reads the counts before the program of the attempt starts.
     ///
-    /// qex makes no cgroup for a job, so it reads the cgroup of THIS PROCESS,
+    /// fairq makes no cgroup for a job, so it reads the cgroup of THIS PROCESS,
     /// whatever made that cgroup. It then still finds a kill, and it cannot
     /// name the victim.
     pub fn start() -> Self {
@@ -159,17 +160,17 @@ impl OomWatch {
 /// Tests if the out-of-memory killer stopped a job.
 ///
 /// The kernel stops a process with `SIGKILL` for an out-of-memory event. That
-/// signal is the signal that `qex kill` sends, so this test separates the two
+/// signal is the signal that `fairq kill` sends, so this test separates the two
 /// causes. The states `oom` and `killed` need different corrections.
 pub fn was_oom_killed(job_dir: &Path) -> bool {
     oom_evidence(job_dir)
 }
 
-/// Gives the evidence that qex holds for a kill for memory.
+/// Gives the evidence that fairq holds for a kill for memory.
 ///
 /// # One answer, and it is the weakest one
 ///
-/// qex reads the cgroup of ITS OWN PROCESS. That counter counts every program
+/// fairq reads the cgroup of ITS OWN PROCESS. That counter counts every program
 /// of this user below that cgroup, so a kill in a different program raises it
 /// as well, and a machine that is short of memory is also the machine on which
 /// a person uses `kill -9`. The two arrive together.
@@ -177,7 +178,7 @@ pub fn was_oom_killed(job_dir: &Path) -> bool {
 /// So this evidence is sufficient to REPORT the state `oom`. It is not
 /// sufficient to say that the claim of this job was too small.
 ///
-/// A record of an EARLIER qex can name a scope: `job` when that version made a
+/// A record of an EARLIER fairq can name a scope: `job` when that version made a
 /// cgroup for the job and the counter of that cgroup rose at its own limit, and
 /// `machine` when it did not. This version makes no such cgroup and cannot
 /// distinguish those cases, so it reads every record the same way. A record
@@ -225,16 +226,16 @@ pub fn clear_oom(job_dir: &Path) {
 
 /// Records that a command stopped this job.
 ///
-/// `qex kill` writes this mark BEFORE it sends the signal.
+/// `fairq kill` writes this mark BEFORE it sends the signal.
 ///
-/// The kernel and `qex kill` both use `SIGKILL`, and the cgroup counter is not
-/// exact when qex applies no limit: qex then reads the counter of the session,
+/// The kernel and `fairq kill` both use `SIGKILL`, and the cgroup counter is not
+/// exact when fairq applies no limit: fairq then reads the counter of the session,
 /// which also counts a kill in a different program of the same user. A job that
 /// a person stopped must NEVER look like an out-of-memory kill, because the two
 /// states give the reader two different causes. `oom` sends the reader to the
 /// memory of the machine and to the claim of the job, and the person who sent
 /// the kill knows that neither one is the cause. A wrong cause costs that
-/// reader the time to disprove it, and qex must give no cause that it cannot
+/// reader the time to disprove it, and fairq must give no cause that it cannot
 /// support.
 ///
 /// This mark is thus the first evidence, and it wins against the counter.
@@ -250,7 +251,7 @@ pub fn was_user_killed(job_dir: &Path) -> bool {
 /// Deletes that mark.
 ///
 /// The mark belongs to ONE attempt, in the same way as the out-of-memory
-/// record. A job with `--retries` can stop with `qex kill` on the first attempt
+/// record. A job with `--retries` can stop with `fairq kill` on the first attempt
 /// and stop for memory on the second, and a mark that stayed would say that a
 /// command stopped an attempt that no command touched. The record would then
 /// lose the lesson of the kill for memory.
@@ -261,13 +262,13 @@ pub fn clear_user_kill(job_dir: &Path) {
 /// Tests if this machine can tell an out-of-memory kill from another kill.
 ///
 /// Linux counts the kills of the out-of-memory killer in `memory.events`, and
-/// every process is in a cgroup, so the evidence is there whether qex applies a
+/// every process is in a cgroup, so the evidence is there whether fairq applies a
 /// limit or not. macOS has no cgroup and no equivalent counter.
 ///
-/// qex uses this test to say what it does not know. A kill with no evidence
-/// gives the state `killed`, which is the safe answer: qex starts no new
-/// attempt for it. A reader must learn that qex could not tell, and not believe
-/// that qex knew.
+/// fairq uses this test to say what it does not know. A kill with no evidence
+/// gives the state `killed`, which is the safe answer: fairq starts no new
+/// attempt for it. A reader must learn that fairq could not tell, and not believe
+/// that fairq knew.
 pub fn oom_evidence_is_available() -> bool {
     own_cgroup().is_some()
 }
@@ -278,14 +279,14 @@ mod tests {
 
     /// The record of a kill for memory is written and read back.
     ///
-    /// A record of an EARLIER qex can name a scope — `job` or `machine` — from
+    /// A record of an EARLIER fairq can name a scope — `job` or `machine` — from
     /// a version that made a cgroup for the job. This version makes no such
     /// cgroup, so it cannot distinguish those cases and it reads every record
     /// the same way: the kernel stopped something for memory. A record that
     /// claims more than this version can prove must not be believed.
     #[test]
-    fn the_out_of_memory_record_is_read_back_whatever_an_earlier_qex_wrote() {
-        let dir = crate::testutil::temp_dir().join(format!("qex-oom-{}", std::process::id()));
+    fn the_out_of_memory_record_is_read_back_whatever_an_earlier_fairq_wrote() {
+        let dir = crate::testutil::temp_dir().join(format!("fairq-oom-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -299,13 +300,13 @@ mod tests {
         clear_oom(&dir);
         assert!(!was_oom_killed(&dir));
 
-        // Each of these is a record that an earlier qex wrote. Every one of
+        // Each of these is a record that an earlier fairq wrote. Every one of
         // them says the same thing to this version.
         for text in ["1", "job", "machine", "session"] {
             std::fs::write(dir.join("oom"), text.as_bytes()).unwrap();
             assert!(
                 was_oom_killed(&dir),
-                "a record of an earlier qex that holds `{text}` names a kill for memory"
+                "a record of an earlier fairq that holds `{text}` names a kill for memory"
             );
         }
 
@@ -317,7 +318,8 @@ mod tests {
     /// that no command touched.
     #[test]
     fn the_mark_of_a_kill_by_a_command_can_be_cleared() {
-        let dir = crate::testutil::temp_dir().join(format!("qex-userkill-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("fairq-userkill-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -337,7 +339,7 @@ mod tests {
     /// memory pressure of any kind.
     fn a_cgroup_with_events(name: &str, events: &str) -> std::path::PathBuf {
         let dir =
-            crate::testutil::temp_dir().join(format!("qex-events-{}-{name}", std::process::id()));
+            crate::testutil::temp_dir().join(format!("fairq-events-{}-{name}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("memory.events"), events.as_bytes()).unwrap();
@@ -377,19 +379,19 @@ mod tests {
     #[test]
     fn a_cgroup_with_no_events_file_gives_no_answer() {
         let dir =
-            crate::testutil::temp_dir().join(format!("qex-events-{}-none", std::process::id()));
+            crate::testutil::temp_dir().join(format!("fairq-events-{}-none", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         assert!(!classify_oom(&dir, OomCounts::default()));
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// A count that qex cannot read as a number is zero.
+    /// A count that fairq cannot read as a number is zero.
     ///
-    /// Zero is the answer that ACTS LEAST: it reports no kill. A count that qex
-    /// guessed would name a cause that qex did not measure.
+    /// Zero is the answer that ACTS LEAST: it reports no kill. A count that fairq
+    /// guessed would name a cause that fairq did not measure.
     #[test]
-    fn a_count_that_qex_cannot_read_is_zero() {
+    fn a_count_that_fairq_cannot_read_is_zero() {
         let dir = a_cgroup_with_events("unread", "oom what\noom_kill later\n");
         assert_eq!(
             read_oom_counts(&dir),
@@ -397,7 +399,7 @@ mod tests {
                 oom: 0,
                 oom_kill: 0
             }),
-            "a count that qex cannot read must not become evidence"
+            "a count that fairq cannot read must not become evidence"
         );
         assert!(!classify_oom(&dir, OomCounts::default()));
         std::fs::remove_dir_all(&dir).ok();
@@ -405,7 +407,7 @@ mod tests {
 
     /// The count is a RISE, and never a total.
     ///
-    /// The cgroup that qex reads holds the kills of every program of this user
+    /// The cgroup that fairq reads holds the kills of every program of this user
     /// below it, including the earlier attempts of this job. A total would name
     /// a kill that happened before this attempt started.
     #[test]
@@ -437,7 +439,7 @@ mod tests {
     /// that function read the cgroup as well. This test requires the FILE.
     #[test]
     fn the_answer_of_an_attempt_reaches_the_record() {
-        let job = crate::testutil::temp_dir().join(format!("qex-record-{}", std::process::id()));
+        let job = crate::testutil::temp_dir().join(format!("fairq-record-{}", std::process::id()));
         std::fs::remove_dir_all(&job).ok();
         std::fs::create_dir_all(&job).unwrap();
         let cgroup = a_cgroup_with_events("record", "oom 0\noom_kill 0\n");
@@ -466,7 +468,7 @@ mod tests {
     #[test]
     fn the_out_of_memory_mark_is_private() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = crate::testutil::temp_dir().join(format!("qex-oommode-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("fairq-oommode-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mode = || {
             std::fs::metadata(dir.join("oom"))
@@ -488,7 +490,7 @@ mod tests {
     #[test]
     fn the_out_of_memory_mark_is_not_written_through_a_link() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = crate::testutil::temp_dir().join(format!("qex-oomlink-{}", std::process::id()));
+        let dir = crate::testutil::temp_dir().join(format!("fairq-oomlink-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let target = dir.join("target");

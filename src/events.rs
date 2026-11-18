@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: test State gains the config-look fields (issue #17).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module holds the event stream of the coordinator.
 //!
 //! # The fault that this module removes
@@ -6,7 +7,7 @@
 //! An agent that drives twenty jobs asked about each job, one job at a time.
 //! Twenty commands gave twenty answers, and the agent then asked again. The
 //! agent thus learned of a result late, it used the machine to ask, and it
-//! wrote a loop with a timer — the monitor script that qex exists to remove.
+//! wrote a loop with a timer — the monitor script that fairq exists to remove.
 //!
 //! This module gives one stream instead. The reader connects one time, and it
 //! receives one line for each change. It needs no timer and no second command.
@@ -17,7 +18,7 @@
 //!
 //! * The state changed. This is the minimum, and it includes the first state:
 //!   a job that arrives in the queue gives an event with the state `queued` and
-//!   no previous state. That event IS the admission of the job, so qex needs no
+//!   no previous state. That event IS the admission of the job, so fairq needs no
 //!   separate name for it.
 //! * The reason that a queued job waits changed. Without this event, an agent
 //!   sees a job that says `queued` and never learns that the job waits for
@@ -33,14 +34,14 @@
 //! # The stream reports what the coordinator holds
 //!
 //! Each event carries the whole record of the job, in the form that
-//! `qex status --json` gives. A reader thus needs no second command to learn
+//! `fairq status --json` gives. A reader thus needs no second command to learn
 //! the exit code, the measured use or the cause of a failure.
 //!
 //! The events come from ONE function, `publish_changes`, which compares the
 //! records with the records that it reported before. Every path that changes a
-//! job — the queue, the scheduler, `qex cancel`, `qex kill`, the supervisor —
+//! job — the queue, the scheduler, `fairq cancel`, `fairq kill`, the supervisor —
 //! thus gives an event, and a new path gives one as well with no change here.
-//! The stream and `qex list` can never disagree, because they read one map.
+//! The stream and `fairq list` can never disagree, because they read one map.
 //!
 //! The stream reports what the coordinator OBSERVED, and it invents nothing.
 //! The supervisor of a job writes the record, and the coordinator reads that
@@ -91,7 +92,7 @@ pub const RETAINED: usize = 512;
 /// A test of the gap line must make the coordinator drop events. With the usual
 /// size that test needs more than five hundred events, and a test that takes
 /// minutes is a test that nobody runs.
-const RETAINED_VAR: &str = "QEX_EVENTS_RETAINED";
+const RETAINED_VAR: &str = "FAIRQ_EVENTS_RETAINED";
 
 /// The time between two tests of the log, for a reader that waits.
 ///
@@ -104,7 +105,7 @@ const POLL: Duration = Duration::from_millis(250);
 ///
 /// A reader that never reads fills the socket buffer, and the write then waits
 /// for ever. The ring already protects the memory of the coordinator, so this
-/// limit protects the thread and the file handle only. qex closes such a
+/// limit protects the thread and the file handle only. fairq closes such a
 /// connection, and the reader meets the end of the stream.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -149,7 +150,7 @@ pub enum Change {
 ///
 /// Each line is one JSON object, and the field `event` gives its type. A reader
 /// that meets a type that it does not know must ignore that line and continue;
-/// a later version of qex can add a type.
+/// a later version of fairq can add a type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
@@ -186,7 +187,7 @@ pub enum Event {
         /// The state before this event, or `null` for the first event of a job.
         previous: Option<JobState>,
         change: Change,
-        /// The whole record, as `qex status --json` gives it.
+        /// The whole record, as `fairq status --json` gives it.
         job: Box<JobStatus>,
     },
     /// The reader lost events, and this line counts them.
@@ -194,10 +195,10 @@ pub enum Event {
         time: u64,
         /// The number of events that the reader did not receive.
         ///
-        /// The value is `null` when qex cannot count them. That occurs when the
+        /// The value is `null` when fairq cannot count them. That occurs when the
         /// number of the reader comes from a different stream: the coordinator
         /// then has no common measure between the two, and a number would be a
-        /// statement that qex cannot support. The reason says what happened.
+        /// statement that fairq cannot support. The reason says what happened.
         missed: Option<u64>,
         /// The sequence number of the next event that the reader receives.
         next_seq: u64,
@@ -361,7 +362,7 @@ impl State {
         }
         self.retiring.append(&mut stopped_now);
 
-        // Forget a job that `qex clean` deleted. Without this step the map
+        // Forget a job that `fairq clean` deleted. Without this step the map
         // grows for as long as the coordinator operates.
         //
         // The removal gives NO event. A record that a reader deleted itself is
@@ -391,7 +392,7 @@ impl Drop for ReaderGuard {
 /// Writes the stream to one connection. Gives control back when the stream ends.
 ///
 /// The lines travel in the framing of the protocol, one `Response` for each
-/// line. qex does not open a second socket and does not invent a second format.
+/// line. fairq does not open a second socket and does not invent a second format.
 pub fn stream(
     coord: &Arc<Coordinator>,
     out: &mut std::os::unix::net::UnixStream,
@@ -417,7 +418,7 @@ pub fn stream(
         let stream_id = state.events.stream_id();
         lead.push(Event::Stream {
             time: now,
-            // The version that `qex info` reports, and not the number in
+            // The version that `fairq info` reports, and not the number in
             // `Cargo.toml`. `main` holds `0.0.0-dev` for ever, so the manifest
             // number names no build; `version::VERSION` comes from `build.rs`
             // and it names this one.
@@ -435,9 +436,9 @@ pub fn stream(
         // each record that it reads. The number 348 of the earlier stream thus
         // names a DIFFERENT event here, and the coordinator cannot see the
         // difference from the number alone. Say so, and start with what this
-        // coordinator holds. qex cannot count what the reader lost, because the
+        // coordinator holds. fairq cannot count what the reader lost, because the
         // two streams have no common measure; `missed` is therefore null, and
-        // a number there would be a statement that qex cannot support.
+        // a number there would be a statement that fairq cannot support.
         let other_stream = |given: uuid::Uuid| Event::Gap {
             time: now,
             missed: None,
@@ -487,7 +488,7 @@ pub fn stream(
                         "you asked for the events after {seq}, and this stream ({stream_id}) \
                          holds {first} to {last}. It never made that number, so a different \
                          coordinator gave it to you. Give the stream with the number, as \
-                         `--since <stream>:<seq>`, and qex compares them for you. The stream \
+                         `--since <stream>:<seq>`, and fairq compares them for you. The stream \
                          continues with the events that this coordinator holds."
                     ),
                 });
@@ -556,7 +557,7 @@ pub fn stream(
                     time: sys::now_secs(),
                     reason: "the coordinator stops, because no job operates and no command \
                              arrived for the idle time. The records of the jobs stay on the \
-                             disk. The next qex command starts a coordinator."
+                             disk. The next fairq command starts a coordinator."
                         .to_string(),
                 },
             )?;
@@ -888,7 +889,7 @@ mod tests {
             other => panic!("expected a job event, got {other:?}"),
         }
 
-        // A job that `qex clean` deleted gives no line, and it leaves nothing
+        // A job that `fairq clean` deleted gives no line, and it leaves nothing
         // behind. Without the second rule, the map grows for as long as the
         // coordinator operates.
         state.jobs.remove(&id);

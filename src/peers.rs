@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests that read the peer directory hold the env lock (issue #5); tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module shares the resource claims between the users of one machine.
 //!
 //! Each coordinator writes its claims to a file in a shared directory. Each
@@ -54,24 +55,24 @@ pub struct Claims {
     /// The devices of each indexed pool that the other users hold.
     ///
     /// A device in this set is not available to this coordinator. A peer
-    /// publishes the index, and not the quantity, so qex keeps the whole
+    /// publishes the index, and not the quantity, so fairq keeps the whole
     /// device for that user. That is the safe direction: a job of this user
     /// that shared the device would meet a memory error on the card.
     pub devices: std::collections::BTreeMap<String, std::collections::BTreeSet<u32>>,
-    /// The number of other coordinators that qex counted.
+    /// The number of other coordinators that fairq counted.
     pub count: usize,
 }
 
 /// The name of the variable that moves the peer directory.
 ///
-/// A test sets this so a suite run cannot write into `/tmp/qex`. The variable
+/// A test sets this so a suite run cannot write into `/tmp/fairq`. The variable
 /// is not `TMPDIR`: two users of one machine have different values of `TMPDIR`
 /// on macOS, and they must still share one directory.
-pub const DIR_VARIABLE: &str = "QEX_PEERS_DIR";
+pub const DIR_VARIABLE: &str = "FAIRQ_PEERS_DIR";
 
 /// Gives the peer directory that this process will use.
 ///
-/// `QEX_PEERS_DIR` wins when it is set, so a test can isolate itself. The
+/// `FAIRQ_PEERS_DIR` wins when it is set, so a test can isolate itself. The
 /// config value is the directory of the live queue.
 fn peers_location(cfg: &Config) -> PathBuf {
     match std::env::var_os(DIR_VARIABLE) {
@@ -89,7 +90,7 @@ fn peers_location(cfg: &Config) -> PathBuf {
 ///   subdirectory of this user.
 /// - The owner is the root user or the current user.
 ///
-/// If a test fails, the function gives `None`. qex then operates for one user
+/// If a test fails, the function gives `None`. fairq then operates for one user
 /// only. It does not give an error, because a shared directory is not necessary
 /// for a correct queue.
 fn peer_dir(cfg: &Config) -> Option<PathBuf> {
@@ -109,7 +110,7 @@ fn peer_dir(cfg: &Config) -> Option<PathBuf> {
 
             // Accept a directory that every user can write, whatever its owner.
             //
-            // qex makes this directory, so the first user of the machine owns
+            // fairq makes this directory, so the first user of the machine owns
             // it. A test for the owner would thus refuse the directory for
             // every other user, and each of those users would lose the shared
             // accounting with no message.
@@ -134,7 +135,7 @@ fn peer_dir(cfg: &Config) -> Option<PathBuf> {
     }
 }
 
-/// Writes the true state of the shared accounting, for `qex config show`.
+/// Writes the true state of the shared accounting, for `fairq config show`.
 ///
 /// This function tests the directory. A message that says "on" while the
 /// directory fails a test would tell the user that a feature operates when it
@@ -144,7 +145,7 @@ pub fn describe(cfg: &Config) -> String {
         // Say WHICH decision turned it off. Two do: the key, and the mode.
         return match cfg.peers.enabled {
             Some(false) => "off; the config file sets [peers] enabled = false".to_string(),
-            _ => "off; the config file sets [enforce] mode = \"single-user\", so qex \
+            _ => "off; the config file sets [enforce] mode = \"single-user\", so fairq \
                   expects no other coordinator"
                 .to_string(),
         };
@@ -161,8 +162,8 @@ pub fn describe(cfg: &Config) -> String {
             )
         }
         None => format!(
-            "NOT ACTIVE; qex cannot use the directory {}. It must be a directory with the \
-             sticky bit. qex uses the budget of this user only.",
+            "NOT ACTIVE; fairq cannot use the directory {}. It must be a directory with the \
+             sticky bit. fairq uses the budget of this user only.",
             cfg.peers.dir
         ),
     }
@@ -241,7 +242,7 @@ pub fn withdraw(cfg: &Config) {
 /// Reads the claims of the other users.
 ///
 /// This function ignores the record of the current user, and each record that
-/// fails a test. A record that qex cannot read gives no error, because a
+/// fails a test. A record that fairq cannot read gives no error, because a
 /// damaged file must not stop the queue.
 pub fn claims(cfg: &Config) -> Claims {
     let mut total = Claims::default();
@@ -343,7 +344,7 @@ pub fn claims(cfg: &Config) -> Claims {
     total
 }
 
-/// The largest peer record that qex reads. A record is small; a larger file is
+/// The largest peer record that fairq reads. A record is small; a larger file is
 /// not a record.
 const MAX_PEER_LEN: u64 = 64 * 1024;
 
@@ -404,7 +405,8 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     fn tmpdir(tag: &str) -> PathBuf {
-        let d = crate::testutil::temp_dir().join(format!("qex-peers-{tag}-{}", std::process::id()));
+        let d =
+            crate::testutil::temp_dir().join(format!("fairq-peers-{tag}-{}", std::process::id()));
         std::fs::remove_dir_all(&d).ok();
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -440,7 +442,7 @@ mod tests {
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
         let cfg = cfg_for(&dir);
         // Without the sticky bit, a different user can delete the files of this
-        // user. qex must then operate for one user only.
+        // user. fairq must then operate for one user only.
         assert!(peer_dir(&cfg).is_none());
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -668,13 +670,13 @@ mod tests {
         let cfg = Config::default();
         assert_eq!(
             peers_location(&cfg),
-            PathBuf::from("/tmp/qex"),
+            PathBuf::from("/tmp/fairq"),
             "TMPDIR must not move the shared peer directory"
         );
         std::fs::remove_dir_all(&tmp).ok();
     }
 
-    /// A test sets `QEX_PEERS_DIR` so it cannot reach `/tmp/qex`.
+    /// A test sets `FAIRQ_PEERS_DIR` so it cannot reach `/tmp/fairq`.
     #[test]
     fn the_peers_dir_variable_moves_the_peer_directory() {
         let _lock = crate::testutil::env_lock();
@@ -694,7 +696,7 @@ mod tests {
                 .exists(),
             "the record must land in the directory that the variable names"
         );
-        let live = PathBuf::from("/tmp/qex")
+        let live = PathBuf::from("/tmp/fairq")
             .join(user_dir_name(current_uid()))
             .join(peer_file_name(std::process::id() as i32));
         assert!(
@@ -710,6 +712,6 @@ mod tests {
         let _lock = crate::testutil::env_lock();
         let _q = crate::testutil::EnvVar::set(DIR_VARIABLE, "");
         let cfg = Config::default();
-        assert_eq!(peers_location(&cfg), PathBuf::from("/tmp/qex"));
+        assert_eq!(peers_location(&cfg), PathBuf::from("/tmp/fairq"));
     }
 }

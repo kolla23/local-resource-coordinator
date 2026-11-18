@@ -6,6 +6,7 @@ labels: ''
 assignees: ''
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: the search goes to this repository, and security faults go to its advisories (issue #109). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 <!--
 A SECURITY FAULT DOES NOT GO HERE. Report it privately at
@@ -26,7 +27,7 @@ surprised you. Each one is cheaper to correct than the hour that it costs the
 next reader.
 
 DO NOT PUT THE OUTPUT OF `--show-env` HERE, and nothing that a token can hide
-in. `qex submit` copies the environment of your shell into `spec.json`, so that
+in. `fairq submit` copies the environment of your shell into `spec.json`, so that
 output is a secret and this page is public.
 -->
 
@@ -35,7 +36,7 @@ output is a secret and this page is public.
 ```
 ```
 
-**What qex wrote, in full** (use `--json` where the command has it)
+**What fairq wrote, in full** (use `--json` where the command has it)
 
 ```
 ```
@@ -46,8 +47,8 @@ output is a secret and this page is public.
 **Your machine**
 
 ```
-qex version:
-qex info --no-start:   (if a coordinator operated)
+fairq version:
+fairq info --no-start:   (if a coordinator operated)
 system:                Linux or macOS, cores, memory
 ```
 
@@ -61,6 +62,6 @@ these lines. Write `unknown` for a value that you do not know; do not guess.
 Filed by an agent.
 model:   name and exact id, for example `Claude Opus 5 (claude-opus-5)`
 harness: name and version, for example `Claude Code 2.1.274`
-qex:     the output of `qex version`
+fairq:     the output of `fairq version`
 system:  macOS or Linux, and `sandbox` if your commands run in one
 ```

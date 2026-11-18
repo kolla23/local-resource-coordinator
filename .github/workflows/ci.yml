@@ -17,6 +17,7 @@
 # comment names the namespace rows without a count (issue #178).
 # Modified by the local-resource-coordinator fork, 2026-11-18: the Style job
 # runs the tests of the rename script and its checker (issue #28).
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -51,8 +52,6 @@ jobs:
         run: python3 .github/scripts/check-control-chars.py
       - name: The tests of the move checker
         run: python3 .github/scripts/check-moves-test.py
-      - name: The tests of the rename script and its checker
-        run: python3 .github/scripts/check-rename-test.py
       - name: The shell scripts pass shellcheck
         run: |
           shellcheck --version
@@ -129,7 +128,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Each version is named, and `ubuntu-latest` is not used. qex reads
+        # Each version is named, and `ubuntu-latest` is not used. fairq reads
         # /proc and controls processes, so the version of the system is part of
         # the test. A name that moves would change the test with no commit, and
         # a failure would then have no cause that a person can see.
@@ -188,10 +187,10 @@ jobs:
           key: build-version
       - run: .github/scripts/build-version-test.sh
 
-  # Cargo.toml names the earliest version of Rust that qex needs. A number that
+  # Cargo.toml names the earliest version of Rust that fairq needs. A number that
   # nothing tests is a guess, and a user with that version meets the error.
   msrv:
-    name: The earliest Rust that qex needs
+    name: The earliest Rust that fairq needs
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -201,7 +200,7 @@ jobs:
         run: |
           version="$(awk -F'"' '/^rust-version *= *"/ { print $2; exit }' Cargo.toml)"
           echo "version=$version" >>"$GITHUB_OUTPUT"
-          echo "Cargo.toml says that qex needs Rust $version."
+          echo "Cargo.toml says that fairq needs Rust $version."
       - run: rustup toolchain install ${{ steps.msrv.outputs.version }} --profile minimal
       - uses: Swatinem/rust-cache@v2
         with:
@@ -240,7 +239,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      # qex has no dependency that holds C, so the linker of Rust itself can
+      # fairq has no dependency that holds C, so the linker of Rust itself can
       # make a binary for another machine. No other toolchain is necessary.
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}

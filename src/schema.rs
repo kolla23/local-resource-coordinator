@@ -1,7 +1,8 @@
-//! This module holds the JSON Schema for the two formats that qex publishes.
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+//! This module holds the JSON Schema for the two formats that fairq publishes.
 //!
 //! An agent reads a schema to write a job file, or to read the `--json` output.
-//! The schemas are text in this file. qex does not build them from the Rust
+//! The schemas are text in this file. fairq does not build them from the Rust
 //! types, because the text also holds the descriptions and the examples.
 
 /// Gives the schema for one name.
@@ -20,8 +21,8 @@ pub const NAMES: &[&str] = &["job", "status", "pipeline", "event"];
 pub const JOB: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/qex/schema/job.json",
-  "title": "qex job file",
-  "description": "One job for `qex submit --job FILE`. qex reads TOML, YAML and JSON.",
+  "title": "fairq job file",
+  "description": "One job for `fairq submit --job FILE`. fairq reads TOML, YAML and JSON.",
   "type": "object",
   "required": ["command"],
   "additionalProperties": false,
@@ -35,11 +36,11 @@ pub const JOB: &str = r##"{
     },
     "name": {
       "type": "string",
-      "description": "The name in `qex list`. Letters, numbers, `-`, `_` and `.` only. It must not start with `-`. At most 128 characters. The default is the program name."
+      "description": "The name in `fairq list`. Letters, numbers, `-`, `_` and `.` only. It must not start with `-`. At most 128 characters. The default is the program name."
     },
     "cwd": {
       "type": "string",
-      "description": "The directory for the job. The default is the directory of the `qex submit` command."
+      "description": "The directory for the job. The default is the directory of the `fairq submit` command."
     },
     "timeout": {
       "type": "string",
@@ -54,7 +55,7 @@ pub const JOB: &str = r##"{
     "tags": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Tags for `qex list --tag`."
+      "description": "Tags for `fairq list --tag`."
     },
     "priority": {
       "type": "integer",
@@ -72,12 +73,12 @@ pub const JOB: &str = r##"{
     },
     "no_limit_env_hints": {
       "type": "boolean",
-      "description": "Do not tell the job how large its claim is. qex writes the claim into the environment of the job, so a runtime sizes its thread pool to the claim. Give true for a job that must see the machine as it is. true from any source turns the claim off."
+      "description": "Do not tell the job how large its claim is. fairq writes the claim into the environment of the job, so a runtime sizes its thread pool to the claim. Give true for a job that must see the machine as it is. true from any source turns the claim off."
     },
     "resources": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The claim for this job. qex uses the claim to decide how many jobs operate together.",
+      "description": "The claim for this job. fairq uses the claim to decide how many jobs operate together.",
       "properties": {
         "cpu": {
           "anyOf": [
@@ -95,12 +96,12 @@ pub const JOB: &str = r##"{
         "gpu": {
           "type": "integer",
           "minimum": 1,
-          "description": "The number of devices from the pool `gpu`. The devices come from [[pool]] in ~/.config/qex.toml. qex says WHICH index the job gets and writes it into the environment of the job. qex reads no driver, so this field operates on a machine with no CUDA library.",
+          "description": "The number of devices from the pool `gpu`. The devices come from [[pool]] in ~/.config/fairq.toml. fairq says WHICH index the job gets and writes it into the environment of the job. fairq reads no driver, so this field operates on a machine with no CUDA library.",
           "examples": [1, 2]
         },
         "vram": {
           "type": "string",
-          "description": "The quantity on EACH device that this job gets. qex does NOT add the memory of the devices together: a job that needs 40GB on one device cannot run on two devices of 24GB. With no value, the job takes the whole of each device that it gets.",
+          "description": "The quantity on EACH device that this job gets. fairq does NOT add the memory of the devices together: a job that needs 40GB on one device cannot run on two devices of 24GB. With no value, the job takes the whole of each device that it gets.",
           "examples": ["20GB"]
         },
         "claims": {
@@ -155,7 +156,7 @@ pub const JOB: &str = r##"{
     },
     "dedupe_key": {
       "type": "string",
-      "description": "Start no second job when a job with this key already exists. qex gives the id of that job and exits with the code 0. A key holds a job while that job waits or operates, and the key is free when the job stops. Use it in a script that can run a second time.",
+      "description": "Start no second job when a job with this key already exists. fairq gives the id of that job and exits with the code 0. A key holds a job while that job waits or operates, and the key is free when the job stops. Use it in a script that can run a second time.",
       "examples": ["build:/home/me/project", "train:experiment-7"]
     },
     "dedupe_window": {
@@ -170,20 +171,20 @@ pub const JOB: &str = r##"{
 pub const PIPELINE: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/qex/schema/pipeline.json",
-  "title": "qex pipeline file",
-  "description": "Several stages for `qex pipeline FILE`. qex reads TOML, YAML and JSON. The names in this file belong to this file and to one submission: qex changes each one into the id of the job that it just made, so two runs of the same file never share a name.",
+  "title": "fairq pipeline file",
+  "description": "Several stages for `fairq pipeline FILE`. fairq reads TOML, YAML and JSON. The names in this file belong to this file and to one submission: fairq changes each one into the id of the job that it just made, so two runs of the same file never share a name.",
   "type": "object",
   "required": ["jobs"],
   "additionalProperties": false,
   "properties": {
     "name": {
       "type": "string",
-      "description": "A name for the whole pipeline, for `qex list --group` to use. The default is the name of the file."
+      "description": "A name for the whole pipeline, for `fairq list --group` to use. The default is the name of the file."
     },
     "jobs": {
       "type": "array",
       "minItems": 1,
-      "description": "The stages. qex reads the whole file before it submits anything, so a circle of stages or a name that no stage has gives an error and no job starts.",
+      "description": "The stages. fairq reads the whole file before it submits anything, so a circle of stages or a name that no stage has gives an error and no job starts.",
       "items": {
         "type": "object",
         "required": ["name", "command"],
@@ -285,13 +286,13 @@ pub const PIPELINE: &str = r##"{
 pub const STATUS: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/qex/schema/status.json",
-  "title": "qex job status",
-  "description": "The output of `qex status --json`. The file status.json of each job has this format, with one difference: the file holds the job name as the user gave it, and the output holds the safe form. `qex list --json` gives an array of these objects.",
+  "title": "fairq job status",
+  "description": "The output of `fairq status --json`. The file status.json of each job has this format, with one difference: the file holds the job name as the user gave it, and the output holds the safe form. `fairq list --json` gives an array of these objects.",
   "type": "object",
   "required": ["id", "name", "state", "submitted_at", "cpu", "mem", "usage", "tags"],
   "properties": {
     "id": { "type": "string", "format": "uuid", "description": "The job id." },
-    "name": { "type": "string", "description": "The job name, in its SAFE form: letters, numbers, `-`, `_` and `.` only, never a first `-`, and 128 characters at most. qex replaces each other character with `_`, and a run of them with one `_`. Use this value in place of the id in each command; qex takes the name that the user gave as well." },
+    "name": { "type": "string", "description": "The job name, in its SAFE form: letters, numbers, `-`, `_` and `.` only, never a first `-`, and 128 characters at most. fairq replaces each other character with `_`, and a run of them with one `_`. Use this value in place of the id in each command; fairq takes the name that the user gave as well." },
     "command": {
       "type": "array",
       "items": { "type": "string" },
@@ -305,7 +306,7 @@ pub const STATUS: &str = r##"{
     },
     "pid": {
       "type": ["integer", "null"],
-      "description": "The process id of the job WHILE THE JOB OPERATES. The value is null before the job starts and null again after the job stops, because the machine gives that number to a different process soon after. A value that is not null thus means that the job operates now, and a reader can act on it. To stop a job, use `qex kill <id>`, which is correct at each moment."
+      "description": "The process id of the job WHILE THE JOB OPERATES. The value is null before the job starts and null again after the job stops, because the machine gives that number to a different process soon after. A value that is not null thus means that the job operates now, and a reader can act on it. To stop a job, use `fairq kill <id>`, which is correct at each moment."
     },
     "last_pid": {
       "type": ["integer", "null"],
@@ -313,7 +314,7 @@ pub const STATUS: &str = r##"{
     },
     "submitter": {
       "type": "array",
-      "description": "The processes above the `qex submit` command, nearest first, up to the first process of the machine. `qex abort` acts on the jobs whose chain shares a live process with its own, below the point where the session ends. Run `qex help abort`.",
+      "description": "The processes above the `fairq submit` command, nearest first, up to the first process of the machine. `fairq abort` acts on the jobs whose chain shares a live process with its own, below the point where the session ends. Run `fairq help abort`.",
       "items": {
         "type": "object",
         "properties": {
@@ -321,7 +322,7 @@ pub const STATUS: &str = r##"{
           "ppid": { "type": "integer", "description": "The parent. 0 means the first process." },
           "start": { "type": ["integer", "null"], "description": "The start time of the process, in a unit of the system. Compare for equality only." },
           "name": { "type": "string", "description": "The program name, in the safe form." },
-          "cwd": { "type": ["string", "null"], "description": "The working directory of the process, when qex could read it." },
+          "cwd": { "type": ["string", "null"], "description": "The working directory of the process, when fairq could read it." },
           "terminal": { "type": "boolean", "description": "True when the process has a controlling terminal." }
         }
       }
@@ -342,20 +343,20 @@ pub const STATUS: &str = r##"{
     "claim_source": {
       "type": "string",
       "enum": ["explicit", "learned", "default", "fan-out"],
-      "description": "Where the claim came from. `learned` is a claim from the earlier jobs of THIS command. `fan-out` is a claim from the earlier jobs of the fan-out, which qex measures against the template and not against the command of one line."
+      "description": "Where the claim came from. `learned` is a claim from the earlier jobs of THIS command. `fan-out` is a claim from the earlier jobs of the fan-out, which fairq measures against the template and not against the command of one line."
     },
     "cpu_source": {
       "type": "string",
       "enum": ["", "explicit", "learned", "default", "fan-out"],
-      "description": "Where `cpu` came from, with the words of `claim_source`. `claim_source` says `learned` when qex learned one value only; this field and `mem_source` say which one. Empty in a record of a qex that did not write it."
+      "description": "Where `cpu` came from, with the words of `claim_source`. `claim_source` says `learned` when fairq learned one value only; this field and `mem_source` say which one. Empty in a record of a fairq that did not write it."
     },
     "mem_source": {
       "type": "string",
       "enum": ["", "explicit", "learned", "default", "fan-out"],
       "description": "Where `mem` came from. See `cpu_source`."
     },
-    "attempts": { "type": "integer", "description": "The number of times that qex started this job." },
-    "retries_left": { "type": "integer", "description": "The number of times that qex may still start this job again after a failure. See --retries." },
+    "attempts": { "type": "integer", "description": "The number of times that fairq started this job." },
+    "retries_left": { "type": "integer", "description": "The number of times that fairq may still start this job again after a failure. See --retries." },
     "locks": {
       "type": "array",
       "items": { "type": "string" },
@@ -363,18 +364,18 @@ pub const STATUS: &str = r##"{
     },
     "claims": {
       "type": "object",
-      "description": "The counted claims of the job. The key is the pool name. This is the REQUEST. Read `assigned` for what qex gave.",
+      "description": "The counted claims of the job. The key is the pool name. This is the REQUEST. Read `assigned` for what fairq gave.",
       "additionalProperties": {
         "type": "object",
         "properties": {
           "count": { "type": "integer", "description": "The number of units, or of devices." },
-          "size": { "type": ["integer", "null"], "description": "The quantity in bytes on EACH device. null means the whole of each device. qex never adds the capacity of the devices together." }
+          "size": { "type": ["integer", "null"], "description": "The quantity in bytes on EACH device. null means the whole of each device. fairq never adds the capacity of the devices together." }
         }
       }
     },
     "assigned": {
       "type": "object",
-      "description": "The units and the devices that qex GAVE this job. The key is the pool name. The coordinator writes this value when the job starts, and it stays after the job stops. The environment of the job holds the same indices, and the environment goes away with the job while this record stays.",
+      "description": "The units and the devices that fairq GAVE this job. The key is the pool name. The coordinator writes this value when the job starts, and it stays after the job stops. The environment of the job holds the same indices, and the environment goes away with the job while this record stays.",
       "additionalProperties": {
         "type": "object",
         "properties": {
@@ -398,7 +399,7 @@ pub const STATUS: &str = r##"{
     },
     "forced": {
       "type": "boolean",
-      "description": "True if qex started the job although the claim is larger than the budget. qex starts such a job alone. The job can swap or stop with an out-of-memory error."
+      "description": "True if fairq started the job although the claim is larger than the budget. fairq starts such a job alone. The job can swap or stop with an out-of-memory error."
     },
     "forced_reason": {
       "type": ["string", "null"],
@@ -418,11 +419,11 @@ pub const STATUS: &str = r##"{
     },
     "passed_by": {
       "type": "integer",
-      "description": "The number of jobs that qex started after this job reached the front of the queue. At the value of `[queue] max_bypass`, qex keeps the capacity for this job and starts nothing else. The count is not reset when the cause of the wait changes, so a job that another user held becomes unpassable as soon as that user releases the capacity."
+      "description": "The number of jobs that fairq started after this job reached the front of the queue. At the value of `[queue] max_bypass`, fairq keeps the capacity for this job and starts nothing else. The count is not reset when the cause of the wait changes, so a job that another user held becomes unpassable as soon as that user releases the capacity."
     },
     "error": {
       "type": ["string", "null"],
-      "description": "The reason that the job failed, when qex gives the reason. A command that does not exist is the usual cause. qex also writes here for a job that it could not start, a job that reached the limit of its wait in the queue, a job that it skipped because a job that it needed did not succeed, and an attempt that failed while qex has an attempt to give. This field gives the REASON; read `state` for what became of the job."
+      "description": "The reason that the job failed, when fairq gives the reason. A command that does not exist is the usual cause. fairq also writes here for a job that it could not start, a job that reached the limit of its wait in the queue, a job that it skipped because a job that it needed did not succeed, and an attempt that failed while fairq has an attempt to give. This field gives the REASON; read `state` for what became of the job."
     },
     "needs": {
       "type": "array",
@@ -441,14 +442,14 @@ pub const STATUS: &str = r##"{
     },
     "logs_dropped": {
       "type": ["object", "null"],
-      "description": "What qex removed from the output files, because the job wrote more than [logs] max_bytes. The value is null when qex kept everything. qex keeps the first part and the last part of each file, and it writes a line between them that says how much went. The removed lines are NOT on the disk, so no option of `qex logs` gives them back.",
+      "description": "What fairq removed from the output files, because the job wrote more than [logs] max_bytes. The value is null when fairq kept everything. fairq keeps the first part and the last part of each file, and it writes a line between them that says how much went. The removed lines are NOT on the disk, so no option of `fairq logs` gives them back.",
       "properties": {
-        "stdout_bytes": { "type": "integer", "description": "The bytes that qex did not keep from stdout.log." },
-        "stdout_lines": { "type": "integer", "description": "The lines that qex did not keep from stdout.log." },
-        "stderr_bytes": { "type": "integer", "description": "The bytes that qex did not keep from stderr.log." },
-        "stderr_lines": { "type": "integer", "description": "The lines that qex did not keep from stderr.log." },
+        "stdout_bytes": { "type": "integer", "description": "The bytes that fairq did not keep from stdout.log." },
+        "stdout_lines": { "type": "integer", "description": "The lines that fairq did not keep from stdout.log." },
+        "stderr_bytes": { "type": "integer", "description": "The bytes that fairq did not keep from stderr.log." },
+        "stderr_lines": { "type": "integer", "description": "The lines that fairq did not keep from stderr.log." },
         "limit": { "type": "integer", "description": "The limit in bytes that operated, from [logs] max_bytes." },
-        "incomplete": { "type": "boolean", "description": "True when qex could not complete a log file, and could not count what went. A process of the job held the output open after the job stopped. The counts above are then the counts that arrived, and not the full quantity." }
+        "incomplete": { "type": "boolean", "description": "True when fairq could not complete a log file, and could not count what went. A process of the job held the output open after the job stopped. The counts above are then the counts that arrived, and not the full quantity." }
       }
     },
     "dedupe_key": {
@@ -468,7 +469,7 @@ pub const STATUS: &str = r##"{
 }
 "##;
 
-/// The schema of one line of `qex events`.
+/// The schema of one line of `fairq events`.
 ///
 /// The stream is the interface for a program, so it needs a schema as much as
 /// the status does. A reader that writes a parser from an example writes a
@@ -476,8 +477,8 @@ pub const STATUS: &str = r##"{
 pub const EVENT: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/qex/schema/event.json",
-  "title": "qex event line",
-  "description": "One line of `qex events --json`. The command writes one of these objects on each line, at the moment of the change. Read the field `event` first. IGNORE A VALUE OF `event` THAT YOU DO NOT KNOW: a later version of qex can add one, and a reader that stops at an unknown line loses the lines after it.",
+  "title": "fairq event line",
+  "description": "One line of `fairq events --json`. The command writes one of these objects on each line, at the moment of the change. Read the field `event` first. IGNORE A VALUE OF `event` THAT YOU DO NOT KNOW: a later version of fairq can add one, and a reader that stops at an unknown line loses the lines after it.",
   "type": "object",
   "required": ["event", "time"],
   "properties": {
@@ -489,12 +490,12 @@ pub const EVENT: &str = r##"{
     "time": { "type": "integer", "description": "The time of the line, in seconds after the Unix epoch." },
     "seq": {
       "type": "integer",
-      "description": "The number of this event, on a `job` line. KEEP THE LARGEST NUMBER THAT YOU READ, WITH THE `stream_id` OF THE FIRST LINE. Give both to `qex events --since <stream_id>:<seq>` when your program starts again, and you lose nothing. The numbers belong to one stream: a new coordinator starts them at 1 again, so a number alone names a different event there and qex cannot see the difference."
+      "description": "The number of this event, on a `job` line. KEEP THE LARGEST NUMBER THAT YOU READ, WITH THE `stream_id` OF THE FIRST LINE. Give both to `fairq events --since <stream_id>:<seq>` when your program starts again, and you lose nothing. The numbers belong to one stream: a new coordinator starts them at 1 again, so a number alone names a different event there and fairq cannot see the difference."
     },
     "stream_id": {
       "type": "string",
       "format": "uuid",
-      "description": "On a `stream` line: the name of this stream. Keep it with the largest `seq` that you read, and give both to `--since`. qex then compares them, and it gives a `gap` line when the coordinator changed. Two coordinators can start in one second, so the start time does not separate them; this name does."
+      "description": "On a `stream` line: the name of this stream. Keep it with the largest `seq` that you read, and give both to `--since`. fairq then compares them, and it gives a `gap` line when the coordinator changed. Two coordinators can start in one second, so the start time does not separate them; this name does."
     },
     "version": { "type": "string", "description": "On a `stream` line: the version of the coordinator." },
     "pid": { "type": "integer", "description": "On a `stream` line: the process id of the coordinator." },
@@ -509,11 +510,11 @@ pub const EVENT: &str = r##"{
     "state": {
       "type": "string",
       "enum": ["queued", "starting", "running", "completed", "failed", "killed", "timeout", "expired", "oom", "cancelled", "skipped"],
-      "description": "On a `job` line: the state of the job now. Run `qex help states` for each state. The stream gives one line for each state THAT THE COORDINATOR SAW: it reads the record of a job twice each second, so a job that is shorter than that period goes from `starting` to `completed` with no `running` line. The field `previous` then says `starting`, so the sequence that you read is the true sequence."
+      "description": "On a `job` line: the state of the job now. Run `fairq help states` for each state. The stream gives one line for each state THAT THE COORDINATOR SAW: it reads the record of a job twice each second, so a job that is shorter than that period goes from `starting` to `completed` with no `running` line. The field `previous` then says `starting`, so the sequence that you read is the true sequence."
     },
     "previous": {
       "type": ["string", "null"],
-      "description": "On a `job` line: the state before this event. The value is null for the first line of a job, which is the line that says that qex accepted it."
+      "description": "On a `job` line: the state before this event. The value is null for the first line of a job, which is the line that says that fairq accepted it."
     },
     "change": {
       "type": "string",
@@ -522,11 +523,11 @@ pub const EVENT: &str = r##"{
     },
     "job": {
       "type": "object",
-      "description": "On a `job` line: the whole record of the job, in the form that `qex status --json` gives. See `qex schema status`. You thus need no second command to learn the exit code, the measured use or the cause of a failure."
+      "description": "On a `job` line: the whole record of the job, in the form that `fairq status --json` gives. See `fairq schema status`. You thus need no second command to learn the exit code, the measured use or the cause of a failure."
     },
     "missed": {
       "type": ["integer", "null"],
-      "description": "On a `gap` line: the number of events that you did not receive, or null when qex cannot count them. The value is null when your number comes from a different stream, because the two streams have no common measure; the field `reason` then says what happened. The coordinator keeps the last events only, and it never waits for a reader. Read the stream in a loop, and do the work of an event in a different thread or process."
+      "description": "On a `gap` line: the number of events that you did not receive, or null when fairq cannot count them. The value is null when your number comes from a different stream, because the two streams have no common measure; the field `reason` then says what happened. The coordinator keeps the last events only, and it never waits for a reader. Read the stream in a loop, and do the work of an event in a different thread or process."
     },
     "next_seq": { "type": "integer", "description": "On a `gap` line: the number of the next event that you receive." },
     "reason": { "type": "string", "description": "On a `gap` or `bye` line: the reason, in words for a person to read." }
@@ -612,17 +613,17 @@ mod tests {
         }
     }
 
-    /// The two schemas must list EVERY state that qex has, and no other.
+    /// The two schemas must list EVERY state that fairq has, and no other.
     ///
     /// A missing state gives an agent an incorrect list, and a reader that
     /// validates the stream refuses a line that is correct. The event schema had
     /// lost `expired` in that way.
     ///
     /// The list comes from `JobState::ALL`, and not from a list written here. A
-    /// list written here would pass while a state that qex added reached
+    /// list written here would pass while a state that fairq added reached
     /// NEITHER schema — which is the whole fault, one step further back.
     #[test]
-    fn each_schema_lists_every_state_that_qex_has() {
+    fn each_schema_lists_every_state_that_fairq_has() {
         use crate::job::JobState;
         let want: Vec<&str> = JobState::ALL.iter().map(|s| s.as_str()).collect();
 
@@ -643,13 +644,13 @@ mod tests {
             assert_eq!(
                 listed.len(),
                 want.len(),
-                "the `{name}` schema lists a state that qex does not have: {listed:?}"
+                "the `{name}` schema lists a state that fairq does not have: {listed:?}"
             );
         }
     }
 
     /// The job schema must list each field of the job file. A missing field
-    /// looks unsupported to an agent that reads `qex schema`, and a field that
+    /// looks unsupported to an agent that reads `fairq schema`, and a field that
     /// the schema names but the parser refuses is an error.
     ///
     /// The names come from `JobFile`, and not from a list written here. See

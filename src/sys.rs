@@ -6,12 +6,13 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: a zombie group leader is no live job; zombie_group_leader forwards to src/os/ (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: group_members and process_uids forward to src/os/ (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the two forwarders lose their lint expectation, since the fix calls them; pid_namespace_identity forwards to src/os/ (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module reads the machine capacity and the current machine load.
-//! It also holds the process functions that qex needs.
+//! It also holds the process functions that fairq needs.
 //!
 //! Each function has a Linux version and a macOS version. If a load measurement
 //! is not available, the function gives a safe default value. It does not give
-//! an error. A measurement that qex cannot read must not stop a job.
+//! an error. A measurement that fairq cannot read must not stop a job.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -92,7 +93,7 @@ pub fn pid_namespace_identity() -> Option<(String, u64)> {
     crate::os::pid_namespace_identity()
 }
 
-/// What qex reads about one process for the chain of a submission.
+/// What fairq reads about one process for the chain of a submission.
 pub struct ProcessInfo {
     pub ppid: i32,
     pub start: Option<u64>,
@@ -169,7 +170,7 @@ pub fn process_exe(pid: i32) -> Option<std::path::PathBuf> {
 
 /// Gives the number of seconds after the Unix epoch.
 ///
-/// qex writes each time value as an integer. A reader can then compare the
+/// fairq writes each time value as an integer. A reader can then compare the
 /// times in a status file without a date library.
 pub fn now_secs() -> u64 {
     SystemTime::now()
@@ -204,7 +205,7 @@ mod tests {
     fn liveness_check_agrees_about_this_process() {
         assert!(pid_alive(std::process::id() as i32));
         assert!(!pid_alive(-1));
-        // For kill(2), the pid 0 means the current process group. qex must not
+        // For kill(2), the pid 0 means the current process group. fairq must not
         // accept 0 as the pid of a live job.
         assert!(!pid_alive(0));
     }
@@ -402,7 +403,8 @@ mod tests {
             .into_iter()
             .find(|p| std::path::Path::new(p).exists())
             .expect("a sleep program");
-        let dir = crate::testutil::temp_dir().join(format!("qex-not-utf8-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("fairq-not-utf8-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let link = dir.join(std::ffi::OsStr::from_bytes(b"sl\xffep"));
         std::os::unix::fs::symlink(sleep, &link).unwrap();

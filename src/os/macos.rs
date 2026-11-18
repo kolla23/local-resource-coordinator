@@ -30,15 +30,15 @@ fn sysctl_u64(name: &[u8]) -> Option<u64> {
 
 #[cfg(target_os = "macos")]
 fn vm_available() -> Option<u64> {
-    // The structure and the count come from `libc`. qex made its own structure
+    // The structure and the count come from `libc`. fairq made its own structure
     // before, and that structure was WRONG: the real one mixes 32-bit and
-    // 64-bit fields and it aligns to 8 bytes, so the size that qex sent to the
+    // 64-bit fields and it aligns to 8 bytes, so the size that fairq sent to the
     // kernel did not agree with the size that the kernel writes.
     let mut stats: libc::vm_statistics64 = unsafe { std::mem::zeroed() };
     let mut count = libc::HOST_VM_INFO64_COUNT;
 
     // `libc` marks `mach_host_self` as deprecated and gives the `mach2` crate
-    // as the answer. qex reads one value from it, and a dependency for one
+    // as the answer. fairq reads one value from it, and a dependency for one
     // value is a poor exchange. The function itself is not deprecated: it is
     // the interface of the kernel, and it does not go away.
     #[allow(deprecated)]
@@ -61,7 +61,7 @@ fn vm_available() -> Option<u64> {
     // The free pages are not the answer on macOS. macOS keeps the memory of
     // the machine in use, and it gives the memory back when a program asks for
     // it. A count of the free pages alone thus says that a machine with 16GB
-    // has 300MB, and qex would then keep each job in the queue for ever on a
+    // has 300MB, and fairq would then keep each job in the queue for ever on a
     // machine that has no fault.
     //
     // These four kinds of page go to a new job with no operation to the disk:

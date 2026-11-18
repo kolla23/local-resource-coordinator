@@ -42,7 +42,8 @@
 // Modified by the local-resource-coordinator fork, 2026-11-16: four tests of a Submit whose record write fails: its job directory goes and its id makes a job; a keyed resend that waited makes the job; a link at the directory is removed and not followed; a directory that cannot be removed is named in the answer and the log; and the failed-mkdir test checks that no leftover is named (issue #187).
 // Modified by the local-resource-coordinator fork, 2026-11-16: three tests that qex gc names a directory with no record that it could not remove, in its text and its JSON, with no control byte (issue #194).
 // Modified by the local-resource-coordinator fork, 2026-11-17: five tests that qex gc leaves the directory of a Submit in progress, leaves what an earlier coordinator cannot vouch for, asks in parts, removes what a killed coordinator left and stops on another answer (issue #200).
-//! End-to-end tests for qex.
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+//! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
 //! directory and peer directory in a temporary location. A test thus starts
@@ -82,13 +83,13 @@ use std::time::{Duration, Instant};
 /// uses it in place of `true`, `sleep`, `echo` or `sh -c` needs no Unix program.
 const TESTJOB: &str = env!("CARGO_BIN_EXE_testjob");
 
-/// One isolated qex installation.
+/// One isolated fairq installation.
 struct Harness {
     root: PathBuf,
     /// Variables that each command of this test gets in addition.
     extra_env: Vec<(String, String)>,
-    /// The peer directory of this test. Every command sets `QEX_PEERS_DIR` to
-    /// this path, so a suite run cannot write into `/tmp/qex`.
+    /// The peer directory of this test. Every command sets `FAIRQ_PEERS_DIR` to
+    /// this path, so a suite run cannot write into `/tmp/fairq`.
     peers_dir: PathBuf,
     /// The signal that Drop sends to each process that holds a file of this
     /// test, and the time that Drop gives those processes to stop.
@@ -119,17 +120,17 @@ struct Holders {
 
 /// The name of the variable that moves the peer directory. It must match
 /// `src/peers.rs`. An integration test cannot read that constant.
-const QEX_PEERS_DIR: &str = "QEX_PEERS_DIR";
+const FAIRQ_PEERS_DIR: &str = "FAIRQ_PEERS_DIR";
 
 /// The live peer directory of this machine. A test that would write here
 /// writes into the queue of the person who runs the suite.
-const LIVE_PEERS_DIR: &str = "/tmp/qex";
+const LIVE_PEERS_DIR: &str = "/tmp/fairq";
 
 /// Gives the peer directory for one test.
 ///
-/// A config that already names a directory that is not `/tmp/qex` keeps that
+/// A config that already names a directory that is not `/tmp/fairq` keeps that
 /// directory, so two coordinators can still share a private one. Every other
-/// config gets `isolated`. `/tmp/qex` is never the answer: that path is the
+/// config gets `isolated`. `/tmp/fairq` is never the answer: that path is the
 /// live queue.
 fn peers_dir_for_test(config: &str, isolated: &Path) -> PathBuf {
     for line in config.lines() {
@@ -153,13 +154,13 @@ fn peers_dir_for_test(config: &str, isolated: &Path) -> PathBuf {
 ///
 /// Threads and a copied program cannot call `Harness::command`. They must
 /// still set the same variables, or a coordinator they start writes into
-/// `/tmp/qex`.
+/// `/tmp/fairq`.
 fn isolate(cmd: &mut Command, root: &Path, peers: &Path) {
     cmd.env("XDG_CONFIG_HOME", root.join("cfg"))
         .env("XDG_STATE_HOME", root.join("state"))
         .env("XDG_RUNTIME_DIR", root.join("run"))
-        .env("QEX_IDLE_EXIT_SECS", "120")
-        .env(QEX_PEERS_DIR, peers);
+        .env("FAIRQ_IDLE_EXIT_SECS", "120")
+        .env(FAIRQ_PEERS_DIR, peers);
 }
 
 /// Gives one stream of a command in a form for a failure message.
@@ -199,7 +200,7 @@ const STOP_LIMIT: Duration = Duration::from_secs(5);
 impl Harness {
     /// Makes a new installation with the given config file.
     fn new(name: &str, config: &str) -> Self {
-        // Keep the path short. The socket path must fit in `sun_path`, and qex
+        // Keep the path short. The socket path must fit in `sun_path`, and fairq
         // uses a directory in /tmp when it does not fit. Both paths are tested,
         // but a short path here tests the usual one.
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -232,7 +233,7 @@ impl Harness {
             Path::new(LIVE_PEERS_DIR),
             "the suite must not write into the live peer directory {LIVE_PEERS_DIR}"
         );
-        std::fs::write(root.join("cfg/qex.toml"), config).unwrap();
+        std::fs::write(root.join("cfg/fairq.toml"), config).unwrap();
         Self {
             root,
             extra_env: Vec::new(),
@@ -268,17 +269,17 @@ impl Harness {
     /// Every environment value of a test lives here. With a second place, a
     /// reader must change both, and a miss is silent.
     fn command(&self, args: &[&str]) -> Command {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_qex"));
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_fairq"));
         cmd.args(args);
         isolate(&mut cmd, &self.root, &self.peers_dir);
         cmd.envs(self.extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         cmd
     }
 
-    fn qex(&self, args: &[&str]) -> Output {
+    fn fairq(&self, args: &[&str]) -> Output {
         self.command(args)
             .output()
-            .unwrap_or_else(|e| panic!("`qex {}` did not start: {e}", args.join(" ")))
+            .unwrap_or_else(|e| panic!("`fairq {}` did not start: {e}", args.join(" ")))
     }
 
     /// Runs a command and requires an answer inside a time limit.
@@ -291,27 +292,27 @@ impl Harness {
     /// nobody can run the command again, so that output is the only evidence
     /// of the fault. See `describe_stream` for the form of it.
     ///
-    /// The limit belongs to the TEST. A `--timeout` of qex acts after qex
+    /// The limit belongs to the TEST. A `--timeout` of fairq acts after fairq
     /// resolves the id, so it cannot bound a fault before that point.
-    fn qex_within(&self, args: &[&str], limit: Duration) -> Output {
+    fn fairq_within(&self, args: &[&str], limit: Duration) -> Output {
         let shown = args.join(" ");
         let mut child = self
             .command(args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .unwrap_or_else(|e| panic!("`qex {shown}` did not start: {e}"));
+            .unwrap_or_else(|e| panic!("`fairq {shown}` did not start: {e}"));
 
         // Read both streams while the command runs. A pipe that fills stops
         // the command, and this test must not make that condition itself.
         let mut out_pipe = child
             .stdout
             .take()
-            .unwrap_or_else(|| panic!("`qex {shown}` gives no stdout"));
+            .unwrap_or_else(|| panic!("`fairq {shown}` gives no stdout"));
         let mut err_pipe = child
             .stderr
             .take()
-            .unwrap_or_else(|| panic!("`qex {shown}` gives no stderr"));
+            .unwrap_or_else(|| panic!("`fairq {shown}` gives no stderr"));
         let read_out = std::thread::spawn(move || {
             let mut buf = Vec::new();
             let _ = std::io::Read::read_to_end(&mut out_pipe, &mut buf);
@@ -331,7 +332,7 @@ impl Harness {
         let status = loop {
             match child
                 .try_wait()
-                .unwrap_or_else(|e| panic!("the test cannot read `qex {shown}`: {e}"))
+                .unwrap_or_else(|e| panic!("the test cannot read `fairq {shown}`: {e}"))
             {
                 Some(status) => break status,
                 None if started.elapsed() >= limit => {
@@ -342,8 +343,8 @@ impl Harness {
                     let out = read_out.join().unwrap_or_default();
                     let err = read_err.join().unwrap_or_default();
                     panic!(
-                        "`qex {shown}` gave no answer in {limit:?}. A wait that \
-                         nothing can satisfy is the fault that qex removes.\n{}\n{}",
+                        "`fairq {shown}` gave no answer in {limit:?}. A wait that \
+                         nothing can satisfy is the fault that fairq removes.\n{}\n{}",
                         describe_stream("stdout", &out),
                         describe_stream("stderr", &err),
                     );
@@ -361,10 +362,10 @@ impl Harness {
 
     /// Runs a command and requires that it succeeds.
     fn ok(&self, args: &[&str]) -> String {
-        let out = self.qex(args);
+        let out = self.fairq(args);
         assert!(
             out.status.success(),
-            "the command `qex {}` failed with the code {:?}\nstdout: {}\nstderr: {}",
+            "the command `fairq {}` failed with the code {:?}\nstdout: {}\nstderr: {}",
             args.join(" "),
             out.status.code(),
             String::from_utf8_lossy(&out.stdout),
@@ -404,7 +405,7 @@ impl Harness {
             if test() {
                 return;
             }
-            // Each test spawns a `qex` process, and two tests operate together.
+            // Each test spawns a `fairq` process, and two tests operate together.
             // At 50ms that was 40 processes each second on a machine with four
             // cores, and the test then held the cores that the job needed. The
             // test must not make the load that it waits for.
@@ -414,11 +415,11 @@ impl Harness {
         // Say WHY the condition did not arrive.
         //
         // Without this, a failure on a build machine gives "the job starts"
-        // and nothing else, and the machine goes away with the answer. qex
-        // holds the reason for each job that waits, and `qex info` holds the
+        // and nothing else, and the machine goes away with the answer. fairq
+        // holds the reason for each job that waits, and `fairq info` holds the
         // budget and the load, so a test must show them both.
-        let jobs = String::from_utf8_lossy(&self.qex(&["list"]).stdout).to_string();
-        let info = String::from_utf8_lossy(&self.qex(&["info", "--no-start"]).stdout).to_string();
+        let jobs = String::from_utf8_lossy(&self.fairq(&["list"]).stdout).to_string();
+        let info = String::from_utf8_lossy(&self.fairq(&["info", "--no-start"]).stdout).to_string();
 
         // A job that did not reach its state leaves its evidence in its own
         // directory: the record, the log of its supervisor, and the supervisor
@@ -449,7 +450,7 @@ impl Harness {
                 "\njob {id}  state={state}  supervisor={sup:?} ({alive})\n"
             ));
 
-            let dir = self.root.join("state/qex/jobs").join(&id);
+            let dir = self.root.join("state/fairq/jobs").join(&id);
             for file in ["status.json", "supervisor.log", "stderr.log"] {
                 if let Ok(text) = std::fs::read(dir.join(file)) {
                     let text = String::from_utf8_lossy(&text);
@@ -473,8 +474,8 @@ impl Harness {
         }
 
         panic!(
-            "qex did not reach this condition in {limit:?}: {what}\n\n\
-             --- qex list ---\n{jobs}\n--- qex info ---\n{info}\n{detail}"
+            "fairq did not reach this condition in {limit:?}: {what}\n\n\
+             --- fairq list ---\n{jobs}\n--- fairq info ---\n{info}\n{detail}"
         );
     }
 
@@ -483,14 +484,14 @@ impl Harness {
     /// THIS IS MONOTONIC: once a job starts, it stays true. A test that waits
     /// for `state == "running"` waits for a window, and a job that stops before
     /// the test looks makes that condition false FOR EVER — which is the fault
-    /// that qex exists to remove, in the tests of qex.
+    /// that fairq exists to remove, in the tests of fairq.
     fn has_started(&self, id: &str) -> bool {
         !matches!(self.state_of(id).as_str(), "queued" | "starting")
     }
 
     /// Stops a job that a test started, and leaves no process behind.
     ///
-    /// `qex kill` refuses a job that is between the queue and its first
+    /// `fairq kill` refuses a job that is between the queue and its first
     /// process, so this function waits for the job to start. Without it, a test
     /// leaves a `sleep` process on the machine, and the next test then measures
     /// a machine that is busy.
@@ -503,17 +504,17 @@ impl Harness {
         // the kill with "the job has no process". That is a race in the test
         // and never a fault of the code under test: the purpose here is to
         // leave no process behind.
-        self.qex(&["kill", id, "--grace", "1s"]);
+        self.fairq(&["kill", id, "--grace", "1s"]);
     }
 
-    /// Writes a stored name into an existing job record, as an earlier qex did.
+    /// Writes a stored name into an existing job record, as an earlier fairq did.
     ///
-    /// A later qex refuses such a name at submission. The record on the disk
+    /// A later fairq refuses such a name at submission. The record on the disk
     /// can still hold one. Stop the coordinator first, so the next command
     /// loads this name from the disk.
     fn plant_stored_name(&self, id: &str, name: &str) {
         for file in ["status.json", "spec.json"] {
-            let path = self.root.join("state/qex/jobs").join(id).join(file);
+            let path = self.root.join("state/fairq/jobs").join(id).join(file);
             let text = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("reading {} for a planted name: {e}", path.display()));
             let mut value: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -525,7 +526,7 @@ impl Harness {
     /// Gives the process id of the coordinator.
     ///
     /// The value comes from the coordinator itself. A search of the process
-    /// list with `pgrep -f qex` also matches the command that contains those
+    /// list with `pgrep -f fairq` also matches the command that contains those
     /// letters, so this code does not use that method.
     fn coordinator_pid(&self) -> i32 {
         let text = self.ok(&["info", "--json"]);
@@ -534,13 +535,13 @@ impl Harness {
     }
 
     fn job_dir(&self, id: &str) -> PathBuf {
-        self.root.join("state/qex/jobs").join(id)
+        self.root.join("state/fairq/jobs").join(id)
     }
 
-    /// Starts a qex command beside this test, and gives the child.
+    /// Starts a fairq command beside this test, and gives the child.
     ///
     /// A test that sends a signal to a WAIT needs the command to be alive while
-    /// the test decides what to do, so the test cannot use `qex()`, which waits
+    /// the test decides what to do, so the test cannot use `fairq()`, which waits
     /// for the command to stop.
     #[allow(clippy::zombie_processes)]
     fn spawn(&self, args: &[&str]) -> std::process::Child {
@@ -548,12 +549,12 @@ impl Harness {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .expect("qex did not start")
+            .expect("fairq did not start")
     }
 
-    /// Starts `qex run` beside this test, and gives the child and the job id.
+    /// Starts `fairq run` beside this test, and gives the child and the job id.
     ///
-    /// A test that stops the job of a `qex run` needs the id while the command
+    /// A test that stops the job of a `fairq run` needs the id while the command
     /// still waits, so the command writes the id to a file with `--id-file`.
     /// The two output streams go to a pipe, so that the test can read what the
     /// command said about the reason that the job stopped.
@@ -578,7 +579,7 @@ impl Harness {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .expect("qex run did not start");
+            .expect("fairq run did not start");
 
         let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
@@ -590,14 +591,14 @@ impl Harness {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        panic!("`qex run` did not write its id file in 30 seconds");
+        panic!("`fairq run` did not write its id file in 30 seconds");
     }
 
     /// Runs a command and gives it this text on standard input.
     ///
-    /// `qex submit --each-line -` reads the lines from another program, and a
+    /// `fairq submit --each-line -` reads the lines from another program, and a
     /// test must measure that path with real pipes.
-    fn qex_stdin(&self, args: &[&str], input: &str) -> Output {
+    fn fairq_stdin(&self, args: &[&str], input: &str) -> Output {
         use std::io::Write;
         let mut child = self
             .command(args)
@@ -605,14 +606,14 @@ impl Harness {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .expect("qex did not start");
+            .expect("fairq did not start");
         child
             .stdin
             .take()
             .unwrap()
             .write_all(input.as_bytes())
             .unwrap();
-        child.wait_with_output().expect("qex did not stop")
+        child.wait_with_output().expect("fairq did not stop")
     }
 
     /// Writes the config file again, while the installation operates.
@@ -621,7 +622,7 @@ impl Harness {
     /// keeps the values that it read when it started, and each NEW process
     /// reads what this function wrote.
     fn write_config(&self, config: &str) {
-        std::fs::write(self.root.join("cfg/qex.toml"), config).unwrap();
+        std::fs::write(self.root.join("cfg/fairq.toml"), config).unwrap();
     }
 
     /// Names the process that ran the stop hook of this job.
@@ -743,7 +744,7 @@ impl Harness {
     /// that could not inspect the processes. It is weaker than the look: it
     /// says nothing about a supervisor.
     ///
-    /// Two questions, and both must say no. `qex info --no-start` asks the
+    /// Two questions, and both must say no. `fairq info --no-start` asks the
     /// socket that the product calculates, which is outside this root when the
     /// path is long. The second question goes to each file in the run
     /// directory, because a test can move the socket to a different name, and
@@ -763,7 +764,7 @@ impl Harness {
         let mut left = limit;
         loop {
             let product = self.ask_the_product(left);
-            let listener = std::fs::read_dir(self.root.join("state/qex/run"))
+            let listener = std::fs::read_dir(self.root.join("state/fairq/run"))
                 .ok()
                 .and_then(|dir| {
                     dir.flatten()
@@ -772,7 +773,7 @@ impl Harness {
                 });
             let seen = match (&product, &listener) {
                 (Ok(false), None) => return Ok(()),
-                (Ok(true), _) => "`qex info --no-start` says that a coordinator of this test \
+                (Ok(true), _) => "`fairq info --no-start` says that a coordinator of this test \
                                   is running, so a process stayed, and the harness cannot \
                                   name it."
                     .to_string(),
@@ -796,14 +797,14 @@ impl Harness {
         }
     }
 
-    /// Asks `qex info --no-start --json` if a coordinator is running.
+    /// Asks `fairq info --no-start --json` if a coordinator is running.
     ///
     /// Drop calls this function, so it must not panic and it must not hang.
     /// The command waits without end when a listener accepts the connection
     /// and never answers, so the harness stops the command at the limit.
     /// `Err` is the answer "not known", which is not "gone".
     fn ask_the_product(&self, limit: Duration) -> Result<bool, String> {
-        const ASK: &str = "`qex info --no-start --json`";
+        const ASK: &str = "`fairq info --no-start --json`";
         let mut child = self
             .command(&["info", "--no-start", "--json"])
             .stdin(std::process::Stdio::null())
@@ -861,7 +862,7 @@ impl Harness {
         let list: Vec<String> = pids.iter().map(|p| p.to_string()).collect();
         format!(
             "the test harness could not stop the process {} that holds a file under {}. \
-             Such a process can hold a part of the budget of this machine, and no qex \
+             Such a process can hold a part of the budget of this machine, and no fairq \
              command of a different state directory can see it. The harness did not \
              delete that directory, so the state that names the process is still there. \
              Stop each process by its number, and then delete the directory.",
@@ -1060,7 +1061,7 @@ impl Drop for Harness {
 fn a_job_that_succeeds_gives_the_exit_code_zero() {
     let h = Harness::with_default_config("ok");
     let id = h.submit(&["submit", "--", TESTJOB, "exit", "0"]);
-    let out = h.qex(&["wait", &id]);
+    let out = h.fairq(&["wait", &id]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(h.state_of(&id), "completed");
 }
@@ -1069,7 +1070,7 @@ fn a_job_that_succeeds_gives_the_exit_code_zero() {
 fn a_job_that_fails_gives_the_exit_code_one() {
     let h = Harness::with_default_config("fail");
     let id = h.submit(&["submit", "--", TESTJOB, "exit", "1"]);
-    let out = h.qex(&["wait", &id]);
+    let out = h.fairq(&["wait", &id]);
     assert_eq!(out.status.code(), Some(1));
 
     let status = h.status_json(&id);
@@ -1082,21 +1083,21 @@ fn a_job_that_fails_gives_the_exit_code_one() {
 fn a_wait_gives_the_exit_code_of_the_job() {
     let h = Harness::with_default_config("pass");
     let id = h.submit(&["submit", "--", TESTJOB, "exit", "42"]);
-    assert_eq!(h.qex(&["wait", &id]).status.code(), Some(42));
+    assert_eq!(h.fairq(&["wait", &id]).status.code(), Some(42));
 }
 
-/// A job that gives a code that qex keeps for itself gives the sentinel 97, and
+/// A job that gives a code that fairq keeps for itself gives the sentinel 97, and
 /// the record holds the true code.
 ///
 /// THIS TEST IS THE WHOLE FEATURE. Without the sentinel, a job that exits 124 of
 /// its own accord looks exactly like a wait that reached its time limit, and the
 /// two need different actions from the reader.
 #[test]
-fn a_job_code_that_qex_keeps_gives_the_sentinel() {
+fn a_job_code_that_fairq_keeps_gives_the_sentinel() {
     let h = Harness::with_default_config("band124");
     let id = h.submit(&["submit", "--", "sh", "-c", "exit 124"]);
 
-    let out = h.qex(&["wait", &id]);
+    let out = h.fairq(&["wait", &id]);
     assert_eq!(
         out.status.code(),
         Some(97),
@@ -1106,18 +1107,18 @@ fn a_job_code_that_qex_keeps_gives_the_sentinel() {
 }
 
 /// The two boundaries of the band. An error of one moves a job code into the
-/// band of qex, or a code of qex out of it.
+/// band of fairq, or a code of fairq out of it.
 #[test]
 fn the_boundaries_of_the_band_hold() {
     let h = Harness::with_default_config("bandedge");
 
     let low = h.submit(&["submit", "--", "sh", "-c", "exit 96"]);
-    assert_eq!(h.qex(&["wait", &low]).status.code(), Some(96));
+    assert_eq!(h.fairq(&["wait", &low]).status.code(), Some(96));
 
     // The sentinel value itself. The answer is the sentinel, so the rule stays
     // true for every code in the band.
     let sentinel = h.submit(&["submit", "--", "sh", "-c", "exit 97"]);
-    assert_eq!(h.qex(&["wait", &sentinel]).status.code(), Some(97));
+    assert_eq!(h.fairq(&["wait", &sentinel]).status.code(), Some(97));
     assert_eq!(h.status_json(&sentinel)["exit_code"], 97);
 }
 
@@ -1131,11 +1132,11 @@ fn a_signal_that_stopped_the_job_gives_its_own_code() {
     let h = Harness::with_default_config("jobsignal");
     let id = h.submit(&["submit", "--", "sh", "-c", "kill -SEGV $$"]);
 
-    let out = h.qex(&["wait", &id]);
+    let out = h.fairq(&["wait", &id]);
     assert_eq!(
         out.status.code(),
         Some(98),
-        "a signal in the job must not give `128 + N`, which qex keeps for itself"
+        "a signal in the job must not give `128 + N`, which fairq keeps for itself"
     );
     let status = h.status_json(&id);
     assert_eq!(
@@ -1149,7 +1150,7 @@ fn a_signal_that_stopped_the_job_gives_its_own_code() {
 ///
 /// Ctrl-C on a wait gives 130 from the shell, which is `128 + 2`, and that form
 /// says "the job died from a signal". The job did not: the wait died. A dead
-/// process cannot label its own exit, so qex catches the signal.
+/// process cannot label its own exit, so fairq catches the signal.
 #[test]
 fn a_signal_to_the_wait_gives_the_code_of_a_broken_wait() {
     let h = Harness::with_default_config("waitsig");
@@ -1174,7 +1175,7 @@ fn a_signal_to_the_wait_gives_the_code_of_a_broken_wait() {
 
     let said = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(
-        said.contains("qex status") && said.contains("--wait"),
+        said.contains("fairq status") && said.contains("--wait"),
         "the message must give the command that attaches again: {said}"
     );
 
@@ -1197,7 +1198,7 @@ fn follow_obeys_the_time_limit_of_the_reader() {
     });
 
     let started = Instant::now();
-    let out = h.qex(&["status", &id, "--follow", "--timeout", "2s"]);
+    let out = h.fairq(&["status", &id, "--follow", "--timeout", "2s"]);
     assert_eq!(
         out.status.code(),
         Some(124),
@@ -1216,18 +1217,18 @@ fn follow_obeys_the_time_limit_of_the_reader() {
     h.stop(&id);
 }
 
-/// The help of `qex submit` must say WHERE the id goes.
+/// The help of `fairq submit` must say WHERE the id goes.
 ///
-/// An agent that reads "stdout" writes `ID=$(qex submit --wait ...)` and
+/// An agent that reads "stdout" writes `ID=$(fairq submit --wait ...)` and
 /// captures the record of the job in place of the id.
 #[test]
 fn the_help_of_submit_says_that_the_id_goes_to_stderr() {
     let h = Harness::with_default_config("submithelp");
-    let text = String::from_utf8_lossy(&h.qex(&["submit", "--help"]).stdout).to_string();
+    let text = String::from_utf8_lossy(&h.fairq(&["submit", "--help"]).stdout).to_string();
     let wait_part = text
         .split("--wait")
         .nth(1)
-        .expect("`--wait` must be in the help of `qex submit`")
+        .expect("`--wait` must be in the help of `fairq submit`")
         .to_string();
     assert!(
         wait_part.contains("STDERR") || wait_part.contains("stderr"),
@@ -1235,7 +1236,7 @@ fn the_help_of_submit_says_that_the_id_goes_to_stderr() {
     );
 }
 
-/// `qex submit --wait` gives the exit code of the job, and it writes the id file
+/// `fairq submit --wait` gives the exit code of the job, and it writes the id file
 /// BEFORE the wait begins.
 ///
 /// The id file is the handle after a crash, and not after a tidy stop only. A
@@ -1283,7 +1284,7 @@ fn submit_with_a_wait_gives_the_code_of_the_job_and_writes_the_id_first() {
     assert_eq!(
         out.status.code(),
         Some(7),
-        "`qex submit --wait` must give the exit code of the job: {}",
+        "`fairq submit --wait` must give the exit code of the job: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     // stdout holds the RECORD of the job, so a reader needs no second command.
@@ -1296,25 +1297,25 @@ fn submit_with_a_wait_gives_the_code_of_the_job_and_writes_the_id_first() {
     assert!(String::from_utf8_lossy(&out.stderr).contains(&id));
 }
 
-/// `qex run` and `qex submit --wait` must never answer one question two ways.
+/// `fairq run` and `fairq submit --wait` must never answer one question two ways.
 #[test]
-fn submit_with_a_wait_and_qex_run_give_one_code() {
+fn submit_with_a_wait_and_fairq_run_give_one_code() {
     let h = Harness::with_default_config("waitagree");
     for code in [0, 3, 96] {
         let command = format!("exit {code}");
-        let submit = h.qex(&["submit", "--wait", "--", "sh", "-c", &command]);
+        let submit = h.fairq(&["submit", "--wait", "--", "sh", "-c", &command]);
         let (child, _) = h.run_bg(&["--", "sh", "-c", &command]);
         let run = wait_run(child, "the job gives its own exit code");
         assert_eq!(
             submit.status.code(),
             run.status.code(),
-            "`qex submit --wait` and `qex run` gave two codes for the code {code}"
+            "`fairq submit --wait` and `fairq run` gave two codes for the code {code}"
         );
         assert_eq!(submit.status.code(), Some(code));
     }
 }
 
-/// A command line that qex cannot read must not speak in the voice of the job.
+/// A command line that fairq cannot read must not speak in the voice of the job.
 ///
 /// The code 2 says "the job exited 2" under the table of the band, and no job
 /// ran. An agent that gives a wrong option meets this on its first call.
@@ -1338,11 +1339,11 @@ fn a_usage_error_of_a_command_that_speaks_for_a_job_uses_the_band() {
         vec!["pipeline", "--no-such-option"],
         vec!["rerun", "--no-such-option"],
     ] {
-        let out = h.qex(&args);
+        let out = h.fairq(&args);
         assert_eq!(
             out.status.code(),
             Some(121),
-            "`qex {}` must give a code from the band: {}",
+            "`fairq {}` must give a code from the band: {}",
             args.join(" "),
             String::from_utf8_lossy(&out.stderr)
         );
@@ -1350,7 +1351,7 @@ fn a_usage_error_of_a_command_that_speaks_for_a_job_uses_the_band() {
 
     // A command that never starts a job and never gives a job result keeps the
     // conventional code 2.
-    let out = h.qex(&["list", "--no-such-option"]);
+    let out = h.fairq(&["list", "--no-such-option"]);
     assert_eq!(out.status.code(), Some(2));
 }
 
@@ -1371,8 +1372,8 @@ fn a_command_line_that_is_not_utf8_gives_the_code_of_the_command() {
         (b"q\xffx", &[b"status"], 121),
         (b"q\xffx", &[b"pipeline", missing.as_bytes()], 121),
         (b"q\xffx", &[b"list", b"--no-such-option"], 2),
-        (b"qex", &[b"st\xfftus"], 121),
-        (b"qex", &[b"--b\xffd", b"list"], 2),
+        (b"fairq", &[b"st\xfftus"], 121),
+        (b"fairq", &[b"--b\xffd", b"list"], 2),
     ];
     for (arg0, args, code) in rows {
         let args: Vec<&OsStr> = args.iter().map(|a| OsStr::from_bytes(a)).collect();
@@ -1416,22 +1417,22 @@ fn testjob_runs_a_command_line_that_is_not_utf8() {
     );
 }
 
-/// `qex pipeline` and `qex rerun` start a job, so they speak in the same voice
-/// as `qex submit`. A refusal is 121. An id that does not exist is 127.
+/// `fairq pipeline` and `fairq rerun` start a job, so they speak in the same voice
+/// as `fairq submit`. A refusal is 121. An id that does not exist is 127.
 #[test]
 fn pipeline_and_rerun_use_the_band_of_a_job() {
     let h = Harness::with_default_config("pipeband");
 
     let missing = h.root.join("no-such-pipeline.toml");
-    let out = h.qex(&["pipeline", missing.to_str().unwrap()]);
+    let out = h.fairq(&["pipeline", missing.to_str().unwrap()]);
     assert_eq!(
         out.status.code(),
         Some(121),
-        "a pipeline file that qex cannot read is a refusal: {}",
+        "a pipeline file that fairq cannot read is a refusal: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let out = h.qex(&["rerun", "00000000-0000-0000-0000-000000000000"]);
+    let out = h.fairq(&["rerun", "00000000-0000-0000-0000-000000000000"]);
     assert_eq!(
         out.status.code(),
         Some(127),
@@ -1440,7 +1441,7 @@ fn pipeline_and_rerun_use_the_band_of_a_job() {
     );
 }
 
-/// `qex status --follow` is the way back to a job of `qex run`.
+/// `fairq status --follow` is the way back to a job of `fairq run`.
 ///
 /// It writes the output of the job and no text of its own on stdout, and it
 /// gives the exit code of the job.
@@ -1455,7 +1456,7 @@ fn status_with_follow_attaches_to_a_job_and_gives_its_output() {
         "echo first; sleep 1; echo second; exit 5",
     ]);
 
-    let out = h.qex(&["status", &id, "--follow"]);
+    let out = h.fairq(&["status", &id, "--follow"]);
     assert_eq!(
         out.status.code(),
         Some(5),
@@ -1464,17 +1465,17 @@ fn status_with_follow_attaches_to_a_job_and_gives_its_output() {
     let said = String::from_utf8_lossy(&out.stdout).to_string();
     assert_eq!(
         said, "first\nsecond\n",
-        "stdout must hold the output of the job and no text of qex: {said:?}"
+        "stdout must hold the output of the job and no text of fairq: {said:?}"
     );
 }
 
-/// `qex submit --follow` is `qex run` in a longer form, so the two must give
+/// `fairq submit --follow` is `fairq run` in a longer form, so the two must give
 /// one output and one code.
 #[test]
-fn submit_with_follow_is_qex_run() {
+fn submit_with_follow_is_fairq_run() {
     let h = Harness::with_default_config("longrun");
-    let follow = h.qex(&["submit", "--follow", "--", "sh", "-c", "echo hello; exit 4"]);
-    let run = h.qex(&["run", "--", "sh", "-c", "echo hello; exit 4"]);
+    let follow = h.fairq(&["submit", "--follow", "--", "sh", "-c", "echo hello; exit 4"]);
+    let run = h.fairq(&["run", "--", "sh", "-c", "echo hello; exit 4"]);
     assert_eq!(follow.status.code(), run.status.code());
     assert_eq!(follow.status.code(), Some(4));
     assert_eq!(
@@ -1490,16 +1491,16 @@ fn quiet_gives_the_exit_code_and_no_text() {
     let h = Harness::with_default_config("quiet");
     let id = h.submit(&["submit", "--", "sh", "-c", "echo noise; exit 3"]);
 
-    let out = h.qex(&["status", &id, "--wait", "--quiet"]);
+    let out = h.fairq(&["status", &id, "--wait", "--quiet"]);
     assert_eq!(out.status.code(), Some(3));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "");
 
-    let out = h.qex(&["wait", &id, "--quiet"]);
+    let out = h.fairq(&["wait", &id, "--quiet"]);
     assert_eq!(out.status.code(), Some(3));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "");
 
     // Without a wait, `--quiet` reads the record as it stands now.
-    let out = h.qex(&["status", &id, "--quiet"]);
+    let out = h.fairq(&["status", &id, "--quiet"]);
     assert_eq!(out.status.code(), Some(3));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "");
 
@@ -1508,7 +1509,7 @@ fn quiet_gives_the_exit_code_and_no_text() {
     h.until("the job starts", Duration::from_secs(45), || {
         h.has_started(&running)
     });
-    let out = h.qex(&["status", &running, "--quiet"]);
+    let out = h.fairq(&["status", &running, "--quiet"]);
     assert_eq!(
         out.status.code(),
         Some(100),
@@ -1521,7 +1522,7 @@ fn quiet_gives_the_exit_code_and_no_text() {
 ///
 /// A code that reads the first stage alone says that a build succeeded while a
 /// later stage failed, which is the fault that this branch exists to remove: a
-/// code of qex that does not describe the job.
+/// code of fairq that does not describe the job.
 #[test]
 fn quiet_on_a_pipeline_reports_the_stage_that_failed() {
     let h = Harness::with_default_config("quietpipe");
@@ -1533,7 +1534,7 @@ fn quiet_on_a_pipeline_reports_the_stage_that_failed() {
     )
     .unwrap();
     let group = h.ok(&["pipeline", file.to_str().unwrap()]);
-    h.qex(&["wait", &group, "--timeout", "45s"]);
+    h.fairq(&["wait", &group, "--timeout", "45s"]);
 
     // Every form of the question gives one answer.
     for args in [
@@ -1541,11 +1542,11 @@ fn quiet_on_a_pipeline_reports_the_stage_that_failed() {
         vec!["status", &group, "--wait", "--quiet"],
         vec!["wait", &group, "--quiet"],
     ] {
-        let out = h.qex(&args);
+        let out = h.fairq(&args);
         assert_eq!(
             out.status.code(),
             Some(6),
-            "`qex {}` must give the code of the stage that failed",
+            "`fairq {}` must give the code of the stage that failed",
             args.join(" ")
         );
     }
@@ -1596,7 +1597,7 @@ fn a_wait_for_many_jobs_says_why_the_later_job_waits() {
     );
 
     h.stop(&holder);
-    h.qex(&["cancel", &second]);
+    h.fairq(&["cancel", &second]);
 }
 
 /// `--quiet` silences the REPORT, and never a fault of the wait.
@@ -1633,8 +1634,8 @@ fn quiet_keeps_the_faults_of_the_wait() {
         vec!["wait", &waiter, "--quiet", "--timeout", "3s"],
         vec!["status", &waiter, "--wait", "--quiet", "--timeout", "3s"],
     ] {
-        let out = h.qex(&args);
-        assert_eq!(out.status.code(), Some(124), "`qex {}`", args.join(" "));
+        let out = h.fairq(&args);
+        assert_eq!(out.status.code(), Some(124), "`fairq {}`", args.join(" "));
         assert_eq!(
             String::from_utf8_lossy(&out.stdout),
             "",
@@ -1652,7 +1653,7 @@ fn quiet_keeps_the_faults_of_the_wait() {
     }
 
     // A job that does not exist is a fault as well.
-    let out = h.qex(&["wait", "0f0f0f0f", "--quiet"]);
+    let out = h.fairq(&["wait", "0f0f0f0f", "--quiet"]);
     assert_eq!(out.status.code(), Some(127));
     assert!(
         !String::from_utf8_lossy(&out.stderr).is_empty(),
@@ -1660,7 +1661,7 @@ fn quiet_keeps_the_faults_of_the_wait() {
     );
 
     h.stop(&holder);
-    h.qex(&["cancel", &waiter]);
+    h.fairq(&["cancel", &waiter]);
 }
 
 /// `--follow` must not give the code of a wait for a job that stopped.
@@ -1673,7 +1674,7 @@ fn follow_gives_the_code_of_the_job_and_not_the_limit_of_the_reader() {
     for _ in 0..6 {
         let id = h.submit(&["submit", "--", "sh", "-c", "echo out; exit 5"]);
         // A limit that lands near the end of the job.
-        let out = h.qex(&["status", &id, "--follow", "--timeout", "1s"]);
+        let out = h.fairq(&["status", &id, "--follow", "--timeout", "1s"]);
         assert_eq!(
             out.status.code(),
             Some(5),
@@ -1683,14 +1684,14 @@ fn follow_gives_the_code_of_the_job_and_not_the_limit_of_the_reader() {
     }
 }
 
-/// A limit with no wait says nothing that qex can obey, so qex refuses it.
+/// A limit with no wait says nothing that fairq can obey, so fairq refuses it.
 #[test]
 fn a_limit_with_no_wait_is_refused() {
     let h = Harness::with_default_config("nolimit");
     let id = h.submit(&["submit", "--", "true"]);
-    h.qex(&["wait", &id, "--timeout", "30s"]);
+    h.fairq(&["wait", &id, "--timeout", "30s"]);
 
-    let out = h.qex(&["status", &id, "--timeout", "5s"]);
+    let out = h.fairq(&["status", &id, "--timeout", "5s"]);
     assert_eq!(out.status.code(), Some(121));
     let said = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(
@@ -1723,7 +1724,7 @@ fn wait_with_next_says_why_a_job_waits() {
         .unwrap_or("")
         .to_string();
 
-    let out = h.qex(&["wait", "--next", &waiter, "--timeout", "4s"]);
+    let out = h.fairq(&["wait", "--next", &waiter, "--timeout", "4s"]);
     let said = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(
         said.contains(&reason),
@@ -1731,10 +1732,10 @@ fn wait_with_next_says_why_a_job_waits() {
     );
 
     h.stop(&holder);
-    h.qex(&["cancel", &waiter]);
+    h.fairq(&["cancel", &waiter]);
 }
 
-/// qex inside a real sandbox must name the sandbox.
+/// fairq inside a real sandbox must name the sandbox.
 ///
 /// bubblewrap is the sandbox that Codex uses on Linux, and a state directory
 /// that it mounts read-only is the fault that an agent reports. The message
@@ -1742,9 +1743,9 @@ fn wait_with_next_says_why_a_job_waits() {
 /// who starts the agent and not to the agent.
 ///
 /// The test gives no verdict on a machine with no `bwrap`. It is the tool of
-/// one sandbox, and qex does not need it.
+/// one sandbox, and fairq does not need it.
 #[test]
-fn qex_inside_bubblewrap_names_the_sandbox() {
+fn fairq_inside_bubblewrap_names_the_sandbox() {
     if Command::new("bwrap")
         .arg("--version")
         .output()
@@ -1756,9 +1757,9 @@ fn qex_inside_bubblewrap_names_the_sandbox() {
 
     let h = Harness::with_default_config("bwrap");
     let state = h.root.join("state");
-    std::fs::create_dir_all(state.join("qex/run")).unwrap();
+    std::fs::create_dir_all(state.join("fairq/run")).unwrap();
 
-    // A sandbox that gives qex a read-only state directory. qex writes its
+    // A sandbox that gives fairq a read-only state directory. fairq writes its
     // records, its logs and its socket there, so nothing works.
     let out = Command::new("bwrap")
         .args([
@@ -1779,7 +1780,7 @@ fn qex_inside_bubblewrap_names_the_sandbox() {
             "XDG_CONFIG_HOME",
             h.root.join("cfg").to_str().unwrap(),
             "--",
-            env!("CARGO_BIN_EXE_qex"),
+            env!("CARGO_BIN_EXE_fairq"),
             "list",
         ])
         .output()
@@ -1788,7 +1789,7 @@ fn qex_inside_bubblewrap_names_the_sandbox() {
     let said = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(
         said.contains("docs/sandbox.md"),
-        "qex inside a sandbox must give the page for a person: {said}"
+        "fairq inside a sandbox must give the page for a person: {said}"
     );
     // The CAUSE comes first, and the remedy after it. A reader that meets the
     // remedy first does not know what it corrects.
@@ -1815,7 +1816,7 @@ fn qex_inside_bubblewrap_names_the_sandbox() {
 #[test]
 fn a_job_that_does_not_exist_answers_at_once_with_no_coordinator() {
     let h = Harness::with_default_config("nojobfast");
-    // Start a coordinator, then stop it. Nothing else runs qex here, so
+    // Start a coordinator, then stop it. Nothing else runs fairq here, so
     // nothing starts another one.
     h.ok(&["info", "--json"]);
     let pid = h.coordinator_pid();
@@ -1831,7 +1832,7 @@ fn a_job_that_does_not_exist_answers_at_once_with_no_coordinator() {
     // none to ask.
     let missing = "3f2b1c0d-0000-4000-8000-000000000000";
     let started = Instant::now();
-    let out = h.qex(&["wait", missing, "--quiet", "--timeout", "60s"]);
+    let out = h.fairq(&["wait", missing, "--quiet", "--timeout", "60s"]);
     assert_eq!(out.status.code(), Some(127));
     assert!(
         started.elapsed() < Duration::from_secs(8),
@@ -1860,7 +1861,7 @@ fn an_id_file_that_fails_does_not_lose_the_job() {
     }
 
     let path = locked.join("job.id");
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--wait",
         "--id-file",
@@ -1884,7 +1885,7 @@ fn an_id_file_that_fails_does_not_lose_the_job() {
     let said = String::from_utf8_lossy(&out.stderr).to_string();
     let id = said
         .lines()
-        .find_map(|l| l.strip_prefix("qex: job "))
+        .find_map(|l| l.strip_prefix("fairq: job "))
         .expect("the id must reach stderr before anything can fail");
     assert!(
         id.trim().parse::<uuid::Uuid>().is_ok(),
@@ -1898,9 +1899,9 @@ fn an_id_file_that_fails_does_not_lose_the_job() {
     assert_eq!(h.status_json(id.trim())["exit_code"], 4);
 }
 
-/// `qex version --check` asks the service that the config file names.
+/// `fairq version --check` asks the service that the config file names.
 ///
-/// The test gives a `file://` address, so it measures qex and not a network.
+/// The test gives a `file://` address, so it measures fairq and not a network.
 #[test]
 fn version_check_asks_the_service_and_says_what_it_found() {
     let h = Harness::with_default_config("updatecheck");
@@ -1913,7 +1914,7 @@ fn version_check_asks_the_service_and_says_what_it_found() {
         answer.display()
     ));
 
-    let out = h.qex(&["version", "--check"]);
+    let out = h.fairq(&["version", "--check"]);
     assert_eq!(out.status.code(), Some(0), "the answer arrived");
     let said = String::from_utf8_lossy(&out.stdout).to_string();
     assert!(
@@ -1924,10 +1925,10 @@ fn version_check_asks_the_service_and_says_what_it_found() {
         said.contains(&answer.display().to_string()),
         "the service that answered must be named: {said}"
     );
-    // `--check` ADDS to the answer of `qex version`, so the version and the
+    // `--check` ADDS to the answer of `fairq version`, so the version and the
     // coordinator stay where a reader of that command expects them.
     let value: serde_json::Value =
-        serde_json::from_slice(&h.qex(&["version", "--check", "--json"]).stdout).unwrap();
+        serde_json::from_slice(&h.fairq(&["version", "--check", "--json"]).stdout).unwrap();
     assert!(value["version"].is_string(), "got: {value}");
     assert!(value["coordinator"].is_object(), "got: {value}");
     let update = &value["update"];
@@ -1961,7 +1962,10 @@ fn version_check_asks_the_service_and_says_what_it_found() {
             said.contains("A newer release exists"),
             "a release below 9.9.9 must be told about it: {said}"
         );
-        assert_eq!(update["newer"], true, "9.9.9 is above every release of qex");
+        assert_eq!(
+            update["newer"], true,
+            "9.9.9 is above every release of fairq"
+        );
     }
 }
 
@@ -1972,19 +1976,19 @@ fn version_check_says_what_stopped_it() {
     h.write_config(
         "[peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
-         [update]\nurl = \"file:///qex-no-such-file-9e3a\"\n",
+         [update]\nurl = \"file:///fairq-no-such-file-9e3a\"\n",
     );
 
-    let out = h.qex(&["version", "--check"]);
+    let out = h.fairq(&["version", "--check"]);
     assert_eq!(
         out.status.code(),
         Some(1),
-        "qex could not ask, and that is the only case that gives 1"
+        "fairq could not ask, and that is the only case that gives 1"
     );
     let said = String::from_utf8_lossy(&out.stdout).to_string();
     assert!(
         said.contains("could not ask"),
-        "the message must say that qex could not ask: {said}"
+        "the message must say that fairq could not ask: {said}"
     );
     assert!(
         said.contains("still operates") || said.contains("Nothing changed"),
@@ -1994,7 +1998,7 @@ fn version_check_says_what_stopped_it() {
     // A job still runs. A service that does not answer is not a fault of the
     // queue.
     let id = h.submit(&["submit", "--", "true"]);
-    assert_eq!(h.qex(&["wait", &id]).status.code(), Some(0));
+    assert_eq!(h.fairq(&["wait", &id]).status.code(), Some(0));
 }
 
 /// `never` is absolute: no file, and no message.
@@ -2004,18 +2008,18 @@ fn never_asks_nothing_and_writes_nothing() {
     h.write_config(
         "[peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
-         [update]\ncheck = \"never\"\nurl = \"file:///qex-no-such-file-9e3a\"\n",
+         [update]\ncheck = \"never\"\nurl = \"file:///fairq-no-such-file-9e3a\"\n",
     );
 
     let id = h.submit(&["submit", "--", "true"]);
-    assert_eq!(h.qex(&["wait", &id]).status.code(), Some(0));
+    assert_eq!(h.fairq(&["wait", &id]).status.code(), Some(0));
 
     // WAIT LONGER THAN THE FIRST LOOK OF THE COORDINATOR.
     //
     // That thread waits two seconds before it looks at all, so a test that
     // ends at once passes whatever `never` does. A test of an absolute promise
     // must give that promise a chance to break.
-    let record = h.root.join("state/qex/update.json");
+    let record = h.root.join("state/fairq/update.json");
     let deadline = Instant::now() + Duration::from_secs(6);
     while Instant::now() < deadline {
         assert!(
@@ -2027,7 +2031,7 @@ fn never_asks_nothing_and_writes_nothing() {
     }
 
     // The coordinator was there for the whole of that time.
-    assert!(h.qex(&["info", "--no-start"]).status.success());
+    assert!(h.fairq(&["info", "--no-start"]).status.success());
 }
 
 /// The fork's default is `never`: a config that names no `check` writes no
@@ -2039,14 +2043,14 @@ fn the_default_asks_nothing_and_writes_nothing() {
     h.write_config(
         "[peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
-         [update]\nurl = \"file:///qex-no-such-file-4c1d\"\n",
+         [update]\nurl = \"file:///fairq-no-such-file-4c1d\"\n",
     );
 
     let id = h.submit(&["submit", "--", "true"]);
-    assert_eq!(h.qex(&["wait", &id]).status.code(), Some(0));
+    assert_eq!(h.fairq(&["wait", &id]).status.code(), Some(0));
 
     // Longer than the coordinator's first look, as in the test above.
-    let record = h.root.join("state/qex/update.json");
+    let record = h.root.join("state/fairq/update.json");
     let deadline = Instant::now() + Duration::from_secs(6);
     while Instant::now() < deadline {
         assert!(
@@ -2056,11 +2060,11 @@ fn the_default_asks_nothing_and_writes_nothing() {
         );
         std::thread::sleep(Duration::from_millis(250));
     }
-    assert!(h.qex(&["info", "--no-start"]).status.success());
+    assert!(h.fairq(&["info", "--no-start"]).status.success());
 }
 
 /// With no release yet the service answers 404, and the automatic check fails
-/// quietly; `qex version --check` says it could not ask and gives 1 (issue #113).
+/// quietly; `fairq version --check` says it could not ask and gives 1 (issue #113).
 #[test]
 fn a_service_with_no_release_fails_quietly() {
     use std::io::{Read, Write};
@@ -2107,8 +2111,8 @@ fn a_service_with_no_release_fails_quietly() {
     ));
 
     // THE CHECK IS DUE AT ONCE: a fresh install asks nothing in its first
-    // interval, so the record says that qex last asked long ago.
-    let state = h.root.join("state/qex");
+    // interval, so the record says that fairq last asked long ago.
+    let state = h.root.join("state/fairq");
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -2119,7 +2123,7 @@ fn a_service_with_no_release_fails_quietly() {
     std::fs::set_permissions(&record, std::fs::Permissions::from_mode(0o600)).unwrap();
 
     let id = h.submit(&["submit", "--", "true"]);
-    let out = h.qex(&["wait", &id]);
+    let out = h.fairq(&["wait", &id]);
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -2143,15 +2147,15 @@ fn a_service_with_no_release_fails_quietly() {
     assert!(value["newest"].is_null(), "no release was named: {value}");
 
     // QUIET: the next commands succeed and say nothing about the check.
-    let submitted = h.qex(&["submit", "--", "true"]);
+    let submitted = h.fairq(&["submit", "--", "true"]);
     assert!(submitted.status.success());
     let id = String::from_utf8_lossy(&submitted.stdout)
         .trim()
         .to_string();
     assert!(id.parse::<uuid::Uuid>().is_ok(), "submit wrote: {id}");
-    let out = h.qex(&["wait", &id]);
+    let out = h.fairq(&["wait", &id]);
     assert_eq!(out.status.code(), Some(0));
-    let info = h.qex(&["info"]);
+    let info = h.fairq(&["info"]);
     assert!(info.status.success());
     for said in [&submitted.stderr, &out.stderr, &info.stderr] {
         let said = String::from_utf8_lossy(said);
@@ -2161,21 +2165,21 @@ fn a_service_with_no_release_fails_quietly() {
         );
     }
 
-    // A person who asks learns that qex could not ask, and nothing else broke.
-    let out = h.qex(&["version", "--check"]);
-    assert_eq!(out.status.code(), Some(1), "qex could not ask");
+    // A person who asks learns that fairq could not ask, and nothing else broke.
+    let out = h.fairq(&["version", "--check"]);
+    assert_eq!(out.status.code(), Some(1), "fairq could not ask");
     let said = String::from_utf8_lossy(&out.stdout);
     assert!(said.contains("could not ask"), "got: {said}");
     assert!(said.contains("Nothing changed"), "got: {said}");
     assert!(
         !String::from_utf8_lossy(&out.stderr).contains("panicked"),
-        "a 404 must not crash qex"
+        "a 404 must not crash fairq"
     );
 }
 
 /// The first run of a fresh install asks nothing.
 ///
-/// It writes the time and stays quiet, so qex opens no connection in its first
+/// It writes the time and stays quiet, so fairq opens no connection in its first
 /// interval. A `file://` address proves it: the file holds a release far above
 /// this build, and no message names it.
 #[test]
@@ -2191,22 +2195,22 @@ fn a_fresh_install_asks_nothing_and_says_nothing() {
     ));
 
     let id = h.submit(&["submit", "--", "true"]);
-    let out = h.qex(&["wait", &id]);
+    let out = h.fairq(&["wait", &id]);
     assert_eq!(out.status.code(), Some(0));
     assert!(
-        !String::from_utf8_lossy(&out.stderr).contains("newer qex"),
+        !String::from_utf8_lossy(&out.stderr).contains("newer fairq"),
         "a fresh install must say nothing about a release"
     );
 
-    // The record holds the time, and no version: qex wrote the time and asked
+    // The record holds the time, and no version: fairq wrote the time and asked
     // nothing.
     h.until(
         "the coordinator wrote the record",
         Duration::from_secs(45),
-        || h.root.join("state/qex/update.json").exists(),
+        || h.root.join("state/fairq/update.json").exists(),
     );
     let value: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(h.root.join("state/qex/update.json")).unwrap())
+        serde_json::from_slice(&std::fs::read(h.root.join("state/fairq/update.json")).unwrap())
             .unwrap();
     assert!(value["last_checked"].as_u64().unwrap_or(0) > 0);
     assert!(
@@ -2215,14 +2219,14 @@ fn a_fresh_install_asks_nothing_and_says_nothing() {
     );
 }
 
-/// `qex status --wait` ends with the record, so one command gives everything.
+/// `fairq status --wait` ends with the record, so one command gives everything.
 #[test]
 fn status_with_wait_ends_with_the_record_of_the_job() {
     let h = Harness::with_default_config("statusrec");
     let id = h.submit(&[
         "submit", "--", TESTJOB, "print", "bad", "--stderr", "exit", "9",
     ]);
-    let out = h.qex(&["status", &id, "--wait"]);
+    let out = h.fairq(&["status", &id, "--wait"]);
     assert_eq!(out.status.code(), Some(9));
     let said = String::from_utf8_lossy(&out.stdout).to_string();
     assert!(
@@ -2231,10 +2235,10 @@ fn status_with_wait_ends_with_the_record_of_the_job() {
     );
 }
 
-/// A wait must say why the job does not start, and `qex run` already did.
+/// A wait must say why the job does not start, and `fairq run` already did.
 ///
 /// Issue #28: the documentation tells an agent to use a wait, so the command
-/// that qex recommends was the command that went silent. A queue that does
+/// that fairq recommends was the command that went silent. A queue that does
 /// nothing and does not say why is the fault that this tool exists to remove.
 #[test]
 fn a_wait_says_why_the_job_does_not_start() {
@@ -2255,7 +2259,7 @@ fn a_wait_says_why_the_job_does_not_start() {
     });
 
     // Take the reason from the RECORD, and require the wait to say the same
-    // thing. A test that accepts any line of qex passes when the whole feature
+    // thing. A test that accepts any line of fairq passes when the whole feature
     // is deleted: the message of the interrupt below satisfies it alone.
     let reason = h.status_json(&waiter)["blocked_reason"]
         .as_str()
@@ -2276,7 +2280,7 @@ fn a_wait_says_why_the_job_does_not_start() {
     );
 
     h.stop(&holder);
-    h.qex(&["cancel", &waiter]);
+    h.fairq(&["cancel", &waiter]);
 }
 
 /// A coordinator that stops while the wait OPENS must not give an answer about
@@ -2369,12 +2373,12 @@ fn wait_with_next_names_the_jobs_that_have_no_watcher() {
     let fast = h.submit(&["submit", "--", "true"]);
     let slow = h.submit(&["submit", "--", "sleep", "20"]);
 
-    let out = h.qex(&["wait", "--next", &fast, &slow]);
+    let out = h.fairq(&["wait", "--next", &fast, &slow]);
     assert_eq!(out.status.code(), Some(0));
 
     let said = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(
-        said.contains(&slow) && said.contains("qex wait --next"),
+        said.contains(&slow) && said.contains("fairq wait --next"),
         "`--next` must name the job that stays, and the command that waits for it: {said}"
     );
 
@@ -2388,7 +2392,7 @@ fn a_wait_that_reaches_its_limit_gives_the_code_124() {
     let h = Harness::with_default_config("waitlimit");
     let id = h.submit(&["submit", "--", "sleep", "30"]);
 
-    let out = h.qex(&["wait", &id, "--timeout", "2s"]);
+    let out = h.fairq(&["wait", &id, "--timeout", "2s"]);
     assert_eq!(out.status.code(), Some(124));
 
     // The limit stops the wait only. The job must continue.
@@ -2403,7 +2407,7 @@ fn a_wait_that_reaches_its_limit_gives_the_code_124() {
 #[test]
 fn a_missing_job_gives_the_code_127() {
     let h = Harness::with_default_config("missing");
-    let out = h.qex(&["wait", "3f5a1c2e-0000-4000-8000-000000000000"]);
+    let out = h.fairq(&["wait", "3f5a1c2e-0000-4000-8000-000000000000"]);
     assert_eq!(out.status.code(), Some(127));
 }
 
@@ -2440,7 +2444,7 @@ fn many_submissions_at_once_start_one_coordinator_only() {
         children.push(
             h.command(&["submit", "--", "true"])
                 .spawn()
-                .expect("qex did not start"),
+                .expect("fairq did not start"),
         );
     }
     for mut c in children {
@@ -2448,10 +2452,10 @@ fn many_submissions_at_once_start_one_coordinator_only() {
         assert!(status.success(), "one submission failed during the race");
     }
 
-    assert_eq!(h.list_json().len(), 20, "qex lost a job during the race");
+    assert_eq!(h.list_json().len(), 20, "fairq lost a job during the race");
 
     // Count the job directories. Each submission must have exactly one.
-    let dirs = std::fs::read_dir(h.root.join("state/qex/jobs"))
+    let dirs = std::fs::read_dir(h.root.join("state/fairq/jobs"))
         .unwrap()
         .count();
     assert_eq!(dirs, 20);
@@ -2460,19 +2464,19 @@ fn many_submissions_at_once_start_one_coordinator_only() {
 /// A second submission with one key must give the first job and start nothing.
 ///
 /// This is the fault that `--dedupe-key` removes. An agent that loses its
-/// context runs its script again. Without the key, qex starts a second copy of
+/// context runs its script again. Without the key, fairq starts a second copy of
 /// a four-hour run beside the first copy, and both copies hold the machine.
 #[test]
 fn a_second_submission_with_one_key_gives_the_first_job_and_starts_no_job() {
     let h = Harness::with_default_config("dedupe");
     let first = h.submit(&["submit", "--dedupe-key", "build:/x", "--", "sleep", "30"]);
 
-    let out = h.qex(&["submit", "--dedupe-key", "build:/x", "--", "sleep", "30"]);
+    let out = h.fairq(&["submit", "--dedupe-key", "build:/x", "--", "sleep", "30"]);
     assert_eq!(
         out.status.code(),
         Some(0),
         "the second submission must exit with the code 0, so that \
-         `ID=$(qex submit ...)` operates"
+         `ID=$(fairq submit ...)` operates"
     );
     let second = String::from_utf8_lossy(&out.stdout).trim().to_string();
     assert_eq!(
@@ -2495,22 +2499,22 @@ fn a_second_submission_with_one_key_gives_the_first_job_and_starts_no_job() {
     );
 
     // The count of jobs must not go up.
-    assert_eq!(h.list_json().len(), 1, "qex started a second job");
+    assert_eq!(h.list_json().len(), 1, "fairq started a second job");
     assert_eq!(
-        std::fs::read_dir(h.root.join("state/qex/jobs"))
+        std::fs::read_dir(h.root.join("state/fairq/jobs"))
             .unwrap()
             .count(),
         1,
-        "qex wrote a second job record"
+        "fairq wrote a second job record"
     );
 
     // The key is in the record, so a reader can see which key gave the id. It
-    // reaches the reader in its safe form, like every other name that qex
+    // reaches the reader in its safe form, like every other name that fairq
     // shows.
     assert_eq!(h.status_json(&first)["dedupe_key"], "build_x");
 
     // A key that holds an ESC byte must never reach a terminal as it stands.
-    // Without this rule, `qex status` of a job that a different agent
+    // Without this rule, `fairq status` of a job that a different agent
     // submitted moves the cursor of the reader and writes over the text
     // around it.
     let evil = h.submit(&["submit", "--dedupe-key", "x\u{1b}[2Jy", "--", "true"]);
@@ -2542,7 +2546,7 @@ fn many_submissions_with_one_key_at_once_make_one_job() {
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
-                .expect("qex did not start"),
+                .expect("fairq did not start"),
         );
     }
 
@@ -2564,7 +2568,7 @@ fn many_submissions_with_one_key_at_once_make_one_job() {
     );
     assert_eq!(h.list_json().len(), 1, "the race made more than one job");
     assert_eq!(
-        std::fs::read_dir(h.root.join("state/qex/jobs"))
+        std::fs::read_dir(h.root.join("state/fairq/jobs"))
             .unwrap()
             .count(),
         1,
@@ -2610,7 +2614,7 @@ fn a_job_that_stopped_frees_its_key_and_a_window_keeps_it() {
     // A job that did NOT succeed frees its key inside the window also. The one
     // remedy for a failure is another run, so the key must never stop it.
     let failed = h.submit(&["submit", "--dedupe-key", "bad", "--", "false"]);
-    h.qex(&["wait", &failed]);
+    h.fairq(&["wait", &failed]);
     let again = h.submit(&[
         "submit",
         "--dedupe-key",
@@ -2624,7 +2628,7 @@ fn a_job_that_stopped_frees_its_key_and_a_window_keeps_it() {
         again, failed,
         "a job that failed must not hold its key, or a second run is not possible"
     );
-    h.qex(&["wait", &again]);
+    h.fairq(&["wait", &again]);
 }
 
 /// A job that stopped one moment ago must free its key at once.
@@ -2634,8 +2638,8 @@ fn a_job_that_stopped_frees_its_key_and_a_window_keeps_it() {
 /// that still says `running`, and it gives the caller the id of a job that has
 /// already stopped, while starting no job.
 ///
-/// The test waits on the status file ON THE DISK, and it sends no qex command
-/// while it waits. A qex command would make the coordinator read the records,
+/// The test waits on the status file ON THE DISK, and it sends no fairq command
+/// while it waits. A fairq command would make the coordinator read the records,
 /// which is the very thing under test. The scheduler also reads them every
 /// 500ms, so ONE attempt is not proof: measured over 30 attempts, the fault
 /// appeared 22 times with the line removed and 0 times with it. Ten attempts
@@ -2653,7 +2657,7 @@ fn a_key_is_free_the_moment_that_its_job_stops() {
         // records for that command and the test proves nothing.
         let file = h
             .root
-            .join("state/qex/jobs")
+            .join("state/fairq/jobs")
             .join(&first)
             .join("status.json");
         let limit = Instant::now() + Duration::from_secs(30);
@@ -2679,16 +2683,16 @@ fn a_key_is_free_the_moment_that_its_job_stops() {
     }
 }
 
-/// Deleting the record must free the key. `qex clean` deletes both together.
+/// Deleting the record must free the key. `fairq clean` deletes both together.
 ///
 /// The reason this test exists: the one line that frees the key lives in
 /// `lifecycle::clean`, and the whole suite passed with that line deleted. The
 /// live fault is worse than a lost key. The key kept naming the deleted job,
 /// so every later submission with that key was answered with an id that
-/// `qex status` then refused with the code 127, and no submission with that
+/// `fairq status` then refused with the code 127, and no submission with that
 /// key could ever start work again.
 #[test]
-fn qex_clean_frees_the_key_with_the_record() {
+fn fairq_clean_frees_the_key_with_the_record() {
     let h = Harness::with_default_config("dedupe-clean");
 
     let first = h.submit(&["submit", "--dedupe-key", "c", "--", "true"]);
@@ -2701,20 +2705,20 @@ fn qex_clean_frees_the_key_with_the_record() {
         "the key still names the deleted job, so no later submission can start the work"
     );
     // The id that a submission gives must answer. This is the fault that the
-    // caller meets: `qex status` refused the id with the code 127, and the
+    // caller meets: `fairq status` refused the id with the code 127, and the
     // caller could learn nothing about the work that it asked for.
-    let out = h.qex(&["status", &second, "--json"]);
+    let out = h.fairq(&["status", &second, "--json"]);
     assert!(
         out.status.success(),
-        "`qex status` cannot answer the id that the submission gave: {}",
+        "`fairq status` cannot answer the id that the submission gave: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     h.ok(&["wait", &second]);
 }
 
-/// The same rule for `qex gc`, which deletes a record by age.
+/// The same rule for `fairq gc`, which deletes a record by age.
 #[test]
-fn qex_gc_frees_the_key_with_the_record() {
+fn fairq_gc_frees_the_key_with_the_record() {
     let h = Harness::with_default_config("dedupe-gc");
 
     let first = h.submit(&["submit", "--dedupe-key", "g", "--", "true"]);
@@ -2726,14 +2730,14 @@ fn qex_gc_frees_the_key_with_the_record() {
     h.ok(&["wait", &second]);
 }
 
-/// `qex rerun` must start a job, and the key of the first job must not stop it.
+/// `fairq rerun` must start a job, and the key of the first job must not stop it.
 ///
 /// The reason this test exists: the one line that clears the key in `rerun`
 /// was deleted and the whole suite passed. The live fault is a command that
-/// reports work that it did not start — `qex rerun` printed "the job 8902039f
+/// reports work that it did not start — `fairq rerun` printed "the job 8902039f
 /// runs again as 8902039f", the same id twice, and nothing ran.
 #[test]
-fn qex_rerun_of_a_keyed_job_starts_a_new_job() {
+fn fairq_rerun_of_a_keyed_job_starts_a_new_job() {
     let h = Harness::with_default_config("dedupe-rerun");
 
     let first = h.submit(&["submit", "--dedupe-key", "rr", "--", "sleep", "30"]);
@@ -2797,12 +2801,12 @@ fn a_restart_gives_the_key_to_the_job_that_still_operates() {
     let again = h.submit(&["submit", "--dedupe-key", "two", "--", "sleep", "30"]);
     assert_eq!(
         again, live,
-        "the key went to the job that stopped, so qex started a second copy of the work"
+        "the key went to the job that stopped, so fairq started a second copy of the work"
     );
     assert_eq!(
         h.list_json().len(),
         2,
-        "qex started a third job, so the key did not hold the job that operates"
+        "fairq started a third job, so the key did not hold the job that operates"
     );
 
     h.stop(&live);
@@ -2861,7 +2865,7 @@ fn a_key_goes_at_the_end_of_the_window_and_not_after_it() {
     h.ok(&["wait", &second]);
 }
 
-/// `qex submit --json` must say if THIS command started the work.
+/// `fairq submit --json` must say if THIS command started the work.
 ///
 /// The plain command writes the id alone, so a caller that needs this answer
 /// must have a way to ask for it.
@@ -2882,9 +2886,9 @@ fn submit_json_says_if_this_command_started_the_work() {
     h.stop(&id);
 }
 
-/// A signal to `qex run` must not stop a job that a different caller started.
+/// A signal to `fairq run` must not stop a job that a different caller started.
 ///
-/// A dedupe key gives `qex run` the job of somebody else. Before this rule, a
+/// A dedupe key gives `fairq run` the job of somebody else. Before this rule, a
 /// SIGTERM to that command stopped the job of the first agent: the job went
 /// from `running` to `killed`, and the first agent lost a run of four hours
 /// with no cause that it could see.
@@ -2905,13 +2909,13 @@ fn a_signal_to_a_deduplicated_run_stops_the_wait_and_not_the_job() {
         .stdout(std::process::Stdio::null())
         .stderr(std::fs::File::create(&err_path).unwrap())
         .spawn()
-        .expect("qex did not start");
+        .expect("fairq did not start");
 
-    // Wait for the message that says the rule is active. qex writes it after it
+    // Wait for the message that says the rule is active. fairq writes it after it
     // installs the handler, so this text is proof that a signal now meets the
     // rule and not the default behaviour of the system.
     h.until(
-        "qex run attaches to the job",
+        "fairq run attaches to the job",
         Duration::from_secs(45),
         || {
             std::fs::read_to_string(&err_path)
@@ -2939,16 +2943,16 @@ fn a_signal_to_a_deduplicated_run_stops_the_wait_and_not_the_job() {
 
     let message = std::fs::read_to_string(&err_path).unwrap();
     assert!(
-        message.contains(&format!("qex kill {owner}")),
+        message.contains(&format!("fairq kill {owner}")),
         "the message must give the way to stop the job: {message}"
     );
 
     h.stop(&owner);
 }
 
-/// A signal to `qex run` that OWNS its job must still stop that job.
+/// A signal to `fairq run` that OWNS its job must still stop that job.
 ///
-/// This is the behaviour that a user expects, because `qex run` goes in front
+/// This is the behaviour that a user expects, because `fairq run` goes in front
 /// of a command that Ctrl-C stops. The rule for a deduplicated job must not
 /// change it.
 #[test]
@@ -2961,7 +2965,7 @@ fn a_signal_to_a_run_that_started_its_job_stops_the_job() {
         .stdout(std::fs::File::create(&out_path).unwrap())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .expect("qex did not start");
+        .expect("fairq did not start");
 
     // The output of the job arrives from the loop that follows the log file,
     // and that loop starts after the handler exists. This text is thus proof
@@ -3018,7 +3022,7 @@ fn a_key_stays_with_its_job_after_the_coordinator_stops() {
 }
 
 /// The budget must limit the number of jobs that operate together. This rule is
-/// the reason for qex: it stops two agents from starting too much work.
+/// the reason for fairq: it stops two agents from starting too much work.
 #[test]
 fn the_budget_limits_the_jobs_that_operate_together() {
     let h = Harness::new(
@@ -3072,12 +3076,12 @@ fn the_budget_limits_the_jobs_that_operate_together() {
     // Stop each job. Two of them operate and one waits, so this uses both
     // commands and it tests neither.
     for id in &ids {
-        h.qex(&["kill", id, "--grace", "1s"]);
-        h.qex(&["cancel", id]);
+        h.fairq(&["kill", id, "--grace", "1s"]);
+        h.fairq(&["cancel", id]);
     }
 }
 
-/// A job that is larger than the budget must not wait for ever. qex starts it
+/// A job that is larger than the budget must not wait for ever. fairq starts it
 /// alone when no other job operates, so the agent receives a result.
 #[test]
 fn a_job_that_is_too_large_runs_when_the_queue_is_empty() {
@@ -3101,18 +3105,18 @@ fn a_job_that_is_too_large_runs_when_the_queue_is_empty() {
         h.state_of(&small) == "running"
     });
 
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit", "--cpu", "64", "--mem", "64GB", "--", TESTJOB, "print", "big",
     ]);
     assert!(out.status.success());
     let big = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
     // The warning must go to stderr. The id must stay alone on stdout, so the
-    // command `ID=$(qex submit ...)` continues to operate.
+    // command `ID=$(fairq submit ...)` continues to operate.
     let warning = String::from_utf8_lossy(&out.stderr);
     assert!(
         warning.contains("64 cores") && warning.contains("budget"),
-        "qex must warn at the submission: {warning}"
+        "fairq must warn at the submission: {warning}"
     );
     assert!(
         big.parse::<uuid::Uuid>().is_ok(),
@@ -3125,7 +3129,10 @@ fn a_job_that_is_too_large_runs_when_the_queue_is_empty() {
         .as_str()
         .unwrap_or("")
         .to_string();
-    assert!(!reason.is_empty(), "qex must give the reason for the wait");
+    assert!(
+        !reason.is_empty(),
+        "fairq must give the reason for the wait"
+    );
 
     // The large job must start after the queue becomes empty. Stop the small
     // job, so this happens at a moment that the test chooses.
@@ -3135,7 +3142,7 @@ fn a_job_that_is_too_large_runs_when_the_queue_is_empty() {
     });
 
     let status = h.status_json(&big);
-    assert_eq!(status["forced"], true, "qex must mark a forced job");
+    assert_eq!(status["forced"], true, "fairq must mark a forced job");
     assert!(
         status["forced_reason"]
             .as_str()
@@ -3156,8 +3163,8 @@ fn the_reject_policy_refuses_a_job_that_is_too_large() {
          [queue]\noversized = \"reject\"\n",
     );
 
-    let out = h.qex(&["submit", "--cpu", "64", "--", "true"]);
-    assert!(!out.status.success(), "qex must refuse this job");
+    let out = h.fairq(&["submit", "--cpu", "64", "--", "true"]);
+    assert!(!out.status.success(), "fairq must refuse this job");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("64 cores"),
@@ -3166,7 +3173,7 @@ fn the_reject_policy_refuses_a_job_that_is_too_large() {
 }
 
 /// A job that starts children must stop completely. A process that stays holds
-/// memory that qex counted, and the next job then meets a smaller machine.
+/// memory that fairq counted, and the next job then meets a smaller machine.
 #[test]
 fn a_kill_stops_every_process_of_a_job() {
     let h = Harness::with_default_config("kill");
@@ -3206,7 +3213,7 @@ fn a_kill_stops_every_process_of_a_job() {
     );
 }
 
-/// `qex kill` checks the record's pid before its first signal, as its grace KILL does: a group
+/// `fairq kill` checks the record's pid before its first signal, as its grace KILL does: a group
 /// whose leader is another process than the job gets no signal (#163).
 #[test]
 #[cfg(unix)]
@@ -3246,7 +3253,7 @@ fn a_kill_leaves_alone_a_group_whose_leader_is_not_the_job() {
     );
     h.plant_in_status(&id, |v| v["pid"] = serde_json::Value::from(decoy.0));
 
-    let out = h.qex(&["kill", &id, "--grace", "1s"]);
+    let out = h.fairq(&["kill", &id, "--grace", "1s"]);
     std::thread::sleep(Duration::from_millis(1500));
     assert!(
         Harness::runs(decoy.0),
@@ -3257,7 +3264,7 @@ fn a_kill_leaves_alone_a_group_whose_leader_is_not_the_job() {
     assert_no_process_reply(&out);
 }
 
-/// What a `qex kill` printed, stdout and stderr.
+/// What a `fairq kill` printed, stdout and stderr.
 #[cfg(unix)]
 fn kill_said(out: &Output) -> String {
     format!(
@@ -3267,7 +3274,7 @@ fn kill_said(out: &Output) -> String {
     )
 }
 
-/// Checks that a `qex kill` refused with the "has no process" reply.
+/// Checks that a `fairq kill` refused with the "has no process" reply.
 #[cfg(unix)]
 fn assert_no_process_reply(out: &Output) {
     assert!(
@@ -3279,12 +3286,12 @@ fn assert_no_process_reply(out: &Output) {
     );
 }
 
-/// Checks that a `qex kill` refused with the reply for group members qex could not verify.
+/// Checks that a `fairq kill` refused with the reply for group members fairq could not verify.
 #[cfg(unix)]
 fn assert_unconfirmed_reply(out: &Output, id: &str) {
     let id: uuid::Uuid = id.parse().unwrap();
     let sentence = format!(
-        "qex could not confirm that the processes left in the group of the job {id} are its own, \
+        "fairq could not confirm that the processes left in the group of the job {id} are its own, \
          so it sent no signal. The log of the coordinator says why."
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -3298,7 +3305,7 @@ fn assert_unconfirmed_reply(out: &Output, id: &str) {
     );
 }
 
-/// Checks that a `qex kill` signalled the job's group.
+/// Checks that a `fairq kill` signalled the job's group.
 #[cfg(unix)]
 fn assert_signalled_reply(out: &Output) {
     assert!(
@@ -3397,7 +3404,7 @@ fn a_collected_leaders_group() -> (i32, u64, Leftover) {
     (leader, token, sleep)
 }
 
-/// `qex kill` leaves alone what an ended leader left when the leader, a zombie, has another
+/// `fairq kill` leaves alone what an ended leader left when the leader, a zombie, has another
 /// start than the record names (#163).
 #[test]
 #[cfg(unix)]
@@ -3410,7 +3417,7 @@ fn a_kill_leaves_alone_what_an_ended_leader_left_when_the_start_time_differs() {
     });
 
     // KILL: the leftover ignores TERM, so a TERM would leave it running on the base too.
-    let out = h.qex(&["kill", &job.id, "--signal", "KILL"]);
+    let out = h.fairq(&["kill", &job.id, "--signal", "KILL"]);
     std::thread::sleep(Duration::from_millis(1500));
     assert!(
         Harness::runs(leftover.0),
@@ -3421,7 +3428,7 @@ fn a_kill_leaves_alone_what_an_ended_leader_left_when_the_start_time_differs() {
     assert_no_process_reply(&out);
 }
 
-/// `qex kill` still signals what an ended leader left while the leader is a zombie with the
+/// `fairq kill` still signals what an ended leader left while the leader is a zombie with the
 /// recorded start (#163).
 #[test]
 #[cfg(target_os = "linux")]
@@ -3434,14 +3441,14 @@ fn a_kill_reaches_what_an_ended_leader_left_when_the_start_time_matches() {
         "the record names the zombie leader's start"
     );
 
-    let out = h.qex(&["kill", &job.id, "--signal", "KILL"]);
+    let out = h.fairq(&["kill", &job.id, "--signal", "KILL"]);
     Harness::poll_until("the leftover is killed", Duration::from_secs(10), || {
         Harness::stopped(leftover.0)
     });
     assert_signalled_reply(&out);
 }
 
-/// `qex kill` still signals what a collected leader left when its group passes reap's check
+/// `fairq kill` still signals what a collected leader left when its group passes reap's check
 /// (#163).
 #[test]
 #[cfg(unix)]
@@ -3466,14 +3473,14 @@ fn a_kill_reaches_what_a_collected_leader_left() {
     #[cfg(target_os = "linux")]
     assert_the_record_names_this_namespace(&h.record(&id));
 
-    let out = h.qex(&["kill", &id, "--signal", "KILL"]);
+    let out = h.fairq(&["kill", &id, "--signal", "KILL"]);
     Harness::poll_until("the sleep is killed", Duration::from_secs(10), || {
         !Harness::runs(sleep.0)
     });
     assert_signalled_reply(&out);
 }
 
-/// `qex kill` leaves alone a collected leader's group whose members the check could not verify,
+/// `fairq kill` leaves alone a collected leader's group whose members the check could not verify,
 /// says so, and the coordinator log names the reason (#163).
 #[test]
 #[cfg(unix)]
@@ -3494,7 +3501,7 @@ fn a_kill_leaves_alone_a_collected_leaders_group_it_cannot_verify() {
     #[cfg(target_os = "linux")]
     assert_the_record_names_this_namespace(&h.record(&id));
 
-    let out = h.qex(&["kill", &id, "--signal", "KILL"]);
+    let out = h.fairq(&["kill", &id, "--signal", "KILL"]);
     std::thread::sleep(Duration::from_millis(1500));
     assert!(
         Harness::runs(sleep.0),
@@ -3505,7 +3512,7 @@ fn a_kill_leaves_alone_a_collected_leaders_group_it_cannot_verify() {
     assert_unconfirmed_reply(&out, &id);
     let uuid: uuid::Uuid = id.parse().unwrap();
     let line = format!(
-        "job {uuid}: qex leaves the process group {leader} alone: its member {} may have started \
+        "job {uuid}: fairq leaves the process group {leader} alone: its member {} may have started \
          before the job",
         sleep.0
     );
@@ -3517,7 +3524,7 @@ fn a_kill_leaves_alone_a_collected_leaders_group_it_cannot_verify() {
     );
 }
 
-/// `qex kill` leaves alone group N when the job's leader runs with the recorded start but has
+/// `fairq kill` leaves alone group N when the job's leader runs with the recorded start but has
 /// moved to another group, says so, and the coordinator log says why (#163).
 #[test]
 #[cfg(unix)]
@@ -3561,7 +3568,7 @@ fn a_kill_leaves_alone_a_group_whose_leader_left_it() {
     assert_eq!(unsafe { libc::killpg(leader.0, 0) }, 0, "group N exists");
     assert!(Harness::runs(sleep.0), "the sleep runs");
 
-    let out = h.qex(&["kill", &job.id, "--signal", "KILL"]);
+    let out = h.fairq(&["kill", &job.id, "--signal", "KILL"]);
     std::thread::sleep(Duration::from_millis(1500));
     assert!(
         Harness::runs(sleep.0),
@@ -3574,7 +3581,7 @@ fn a_kill_leaves_alone_a_group_whose_leader_left_it() {
     let uuid: uuid::Uuid = job.id.parse().unwrap();
     let n = leader.0;
     let line = format!(
-        "job {uuid}: qex leaves the process group {n} alone: the job's leader {n} runs with the \
+        "job {uuid}: fairq leaves the process group {n} alone: the job's leader {n} runs with the \
          recorded start but leads another group"
     );
     let lines = h.refusal_lines();
@@ -3613,7 +3620,7 @@ fn count_in_group(pgid: i32) -> usize {
 ///
 /// This function read `/proc` on both systems before, so it gave 0 on macOS.
 /// The first assertion of the test then failed, and the LAST one — that no
-/// process of the job continues after `qex kill` — passed with no work, because
+/// process of the job continues after `fairq kill` — passed with no work, because
 /// 0 is also the correct answer for a job that stopped. A test that cannot fail
 /// gives no information.
 #[cfg(not(target_os = "linux"))]
@@ -3657,8 +3664,8 @@ fn a_job_survives_the_failure_of_the_coordinator() {
     std::thread::sleep(Duration::from_millis(300));
     assert!(Harness::stopped(pid), "the coordinator did not stop");
 
-    // `qex wait` must read the status file when no coordinator operates.
-    let out = h.qex(&["wait", &id, "--timeout", "30s"]);
+    // `fairq wait` must read the status file when no coordinator operates.
+    let out = h.fairq(&["wait", &id, "--timeout", "30s"]);
     assert_eq!(out.status.code(), Some(7), "the job exits with the code 7");
 
     let status = h.status_json(&id);
@@ -3730,7 +3737,7 @@ fn the_time_limits_kill_stops_a_job_that_ignores_term() {
     );
 }
 
-/// The driver of the freed-pid rows, run as pid 1 of a new user and pid namespace: `$1` qex, `$2`
+/// The driver of the freed-pid rows, run as pid 1 of a new user and pid namespace: `$1` fairq, `$2`
 /// the seconds to wait after the hook's mark, the rest the job. It prints `key=value` lines.
 #[cfg(target_os = "linux")]
 const FREED_PID_DRIVER: &str = r#"q="$1"; delay="$2"; shift 2
@@ -3740,7 +3747,7 @@ p=$(sh -c 'echo $$')
 echo probe=ok
 echo "sigign=$(sed -n 's/^SigIgn:[[:space:]]*//p' /proc/self/status)"
 id=$("$q" submit --timeout 1s -- "$@") || { echo "submit=failed"; exit 0; }
-dir="$XDG_STATE_HOME/qex/jobs/$id"
+dir="$XDG_STATE_HOME/fairq/jobs/$id"
 i=0; while [ ! -e "$dir/hook-started" ] && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done
 echo "record=$(tr -d '\n' < "$dir/status.json")"
 [ -e "$dir/hook-started" ] || { echo mark=no; exit 0; }
@@ -3777,10 +3784,10 @@ if [ "$st" = Z ] || [ "$st" = gone ]; then wait "$d"; echo "decoy_status=$?"; fi
 #[cfg(target_os = "linux")]
 const FREED_PID_CONFIG: &str = "[peers]\nenabled = false\n[budget]\ncpu = \"3\"\n\
      [defaults]\nmem = \"256MB\"\n[system]\nreserve_mem = \"0\"\nmax_pressure = 100\n[hooks]\n\
-     on_stop = [\"sh\", \"-c\", 'touch \"$QEX_JOB_DIR/hook-started\"; exec sleep 20']\n";
+     on_stop = [\"sh\", \"-c\", 'touch \"$FAIRQ_JOB_DIR/hook-started\"; exec sleep 20']\n";
 
 /// Runs `driver` (`FREED_PID_DRIVER` or `HOOK_FREED_PID_DRIVER`) in a new user and pid namespace,
-/// with qex, `delay` and `job` as its arguments, in the harness `h`.
+/// with fairq, `delay` and `job` as its arguments, in the harness `h`.
 #[cfg(target_os = "linux")]
 fn run_the_freed_pid_driver(
     h: &Harness,
@@ -3792,7 +3799,7 @@ fn run_the_freed_pid_driver(
     cmd.args(["--kill-child", "-Urpf", "--mount-proc", "sh", "-c"])
         .arg(driver)
         .arg("sh")
-        .arg(env!("CARGO_BIN_EXE_qex"))
+        .arg(env!("CARGO_BIN_EXE_fairq"))
         .arg(delay)
         .args(job);
     isolate(&mut cmd, &h.root, &h.peers_dir);
@@ -3867,7 +3874,7 @@ fn the_time_limits_kill_spares_a_new_group_on_the_jobs_freed_pid() {
     let out = &r["output"];
     let sup = r.get("supervisor").map(String::as_str).unwrap_or("");
     assert!(
-        sup.starts_with("(qex) ") && !sup.ends_with(" Z"),
+        sup.starts_with("(fairq) ") && !sup.ends_with(" Z"),
         "the supervisor must outlive the timer's KILL, 12 s after the mark: {out}"
     );
     assert!(
@@ -3887,14 +3894,16 @@ fn the_time_limits_term_spares_a_new_group_on_the_jobs_freed_pid() {
         return;
     }
     let mut h = Harness::new("timerfreedterm", FREED_PID_CONFIG);
-    h.extra_env
-        .push(("QEX_TEST_PAUSE_BEFORE_TIMER_TERM_MS".into(), "4000".into()));
+    h.extra_env.push((
+        "FAIRQ_TEST_PAUSE_BEFORE_TIMER_TERM_MS".into(),
+        "4000".into(),
+    ));
     let r = run_the_freed_pid_driver(&h, FREED_PID_DRIVER, "5", &["sh", "-c", "sleep 2; exit 3"]);
     check_the_freed_pid(&r, "exit_code", 3);
     let out = &r["output"];
     let sup = r.get("supervisor").map(String::as_str).unwrap_or("");
     assert!(
-        sup.starts_with("(qex) ") && !sup.ends_with(" Z"),
+        sup.starts_with("(fairq) ") && !sup.ends_with(" Z"),
         "the supervisor must outlive the timer's TERM, 5 s after the mark: {out}"
     );
     assert!(
@@ -3903,7 +3912,7 @@ fn the_time_limits_term_spares_a_new_group_on_the_jobs_freed_pid() {
     );
 }
 
-/// The driver of the hook's freed-pid row, run as pid 1 of a new user and pid namespace: `$1` qex,
+/// The driver of the hook's freed-pid row, run as pid 1 of a new user and pid namespace: `$1` fairq,
 /// `$2` the seconds to wait after the hook's verdict. It prints `key=value` lines.
 #[cfg(target_os = "linux")]
 const HOOK_FREED_PID_DRIVER: &str = r#"q="$1"; delay="$2"
@@ -3912,7 +3921,7 @@ p=$(sh -c 'echo $$')
 [ "$p" = 300 ] || { echo "probe=no: the forced pid is $p"; exit 0; }
 echo probe=ok
 id=$("$q" submit -- true) || { echo "submit=failed"; exit 0; }
-dir="$XDG_STATE_HOME/qex/jobs/$id"
+dir="$XDG_STATE_HOME/fairq/jobs/$id"
 i=0; while [ ! -s "$dir/hook-pid" ] && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done
 n=$(tr -d '\n' < "$dir/hook-pid" 2>/dev/null)
 echo "n=$n"
@@ -3935,7 +3944,7 @@ i=0
 while [ "$(cut -d' ' -f5 /proc/$d/stat)" != "$d" ] && [ $i -lt 20 ]; do sleep 0.1; i=$((i+1)); done
 echo "pgid=$(cut -d' ' -f5 /proc/$d/stat)"
 start=$(cut -d' ' -f22 /proc/$d/stat)
-v="qex: the stop hook"
+v="fairq: the stop hook"
 l="$dir/hook.log"
 if grep -q "$v" "$l" 2>/dev/null; then echo early=yes; else echo early=no; fi
 i=0; while ! grep -q "$v" "$l" 2>/dev/null && [ $i -lt 150 ]; do sleep 0.1; i=$((i+1)); done
@@ -3961,10 +3970,10 @@ fn the_hooks_failed_state_test_spares_a_new_group_on_its_freed_pid() {
         "hookfreedpid",
         "[peers]\nenabled = false\n[budget]\ncpu = \"3\"\n\
          [defaults]\nmem = \"256MB\"\n[system]\nreserve_mem = \"0\"\nmax_pressure = 100\n[hooks]\n\
-         on_stop = [\"sh\", \"-c\", 'echo $$ > \"$QEX_JOB_DIR/hook-pid\"']\n",
+         on_stop = [\"sh\", \"-c\", 'echo $$ > \"$FAIRQ_JOB_DIR/hook-pid\"']\n",
     );
     h.extra_env.push((
-        "QEX_TEST_REAP_HOOK_BEFORE_ITS_TEST_MS".into(),
+        "FAIRQ_TEST_REAP_HOOK_BEFORE_ITS_TEST_MS".into(),
         "3000".into(),
     ));
     let r = run_the_freed_pid_driver(&h, HOOK_FREED_PID_DRIVER, "1", &[]);
@@ -3992,8 +4001,8 @@ fn the_hooks_failed_state_test_spares_a_new_group_on_its_freed_pid() {
         "the hook's KILL reached the decoy on its freed pid: {out}"
     );
     assert!(
-        log.contains("qex sent no signal to its process group"),
-        "the verdict must say that qex sent no signal: {out}"
+        log.contains("fairq sent no signal to its process group"),
+        "the verdict must say that fairq sent no signal: {out}"
     );
 }
 
@@ -4056,9 +4065,9 @@ fn a_job_that_never_starts_gives_up_and_says_why() {
         "the text must name the wait: {error}"
     );
 
-    // `qex wait` must give the code of a job that never started, and not the
+    // `fairq wait` must give the code of a job that never started, and not the
     // code 125 of a job that something stopped.
-    let out = h.qex(&["wait", &id, "--timeout", "30s"]);
+    let out = h.fairq(&["wait", &id, "--timeout", "30s"]);
     assert_eq!(
         out.status.code(),
         Some(123),
@@ -4070,7 +4079,7 @@ fn a_job_that_never_starts_gives_up_and_says_why() {
     // A job that needed this one must NOT be told to read a log file.
     //
     // An expired job never started, so it wrote no output. A reader who obeys
-    // that instruction finds an empty file, `qex logs` gives the code 0, and
+    // that instruction finds an empty file, `fairq logs` gives the code 0, and
     // the reader learns nothing. The same rule already holds for a job that a
     // user cancelled.
     let after = h.submit(&["submit", "--needs", &id, "--", "echo", "after"]);
@@ -4090,12 +4099,12 @@ fn a_job_that_never_starts_gives_up_and_says_why() {
         "the text must name the state of the job that it needed: {text}"
     );
     assert!(
-        !text.contains("qex logs"),
+        !text.contains("fairq logs"),
         "an expired job wrote no log, so the text must not name one: {text}"
     );
 }
 
-/// qex must record the environment and the directory of the shell that
+/// fairq must record the environment and the directory of the shell that
 /// submitted the job.
 #[test]
 fn a_job_receives_the_environment_and_the_directory_of_the_shell() {
@@ -4104,8 +4113,14 @@ fn a_job_receives_the_environment_and_the_directory_of_the_shell() {
     std::fs::create_dir_all(&dir).unwrap();
 
     let out = h
-        .command(&["submit", "--", "sh", "-c", "pwd; echo MARK=$QEX_TEST_MARK"])
-        .env("QEX_TEST_MARK", "captured")
+        .command(&[
+            "submit",
+            "--",
+            "sh",
+            "-c",
+            "pwd; echo MARK=$FAIRQ_TEST_MARK",
+        ])
+        .env("FAIRQ_TEST_MARK", "captured")
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -4137,9 +4152,9 @@ fn the_environment_mode_none_removes_the_variables_of_the_shell() {
             "--",
             "sh",
             "-c",
-            "echo MARK=$QEX_TEST_MARK KEPT=$KEPT",
+            "echo MARK=$FAIRQ_TEST_MARK KEPT=$KEPT",
         ])
-        .env("QEX_TEST_MARK", "leaked")
+        .env("FAIRQ_TEST_MARK", "leaked")
         .output()
         .unwrap();
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -4185,7 +4200,7 @@ fn the_job_files_are_private() {
     );
 }
 
-/// `qex logs --follow` can make the log file of a job. It must make it with
+/// `fairq logs --follow` can make the log file of a job. It must make it with
 /// the same mode as the supervisor: 0600.
 ///
 /// # The fault that this test prevents
@@ -4226,7 +4241,7 @@ fn a_follower_that_makes_the_log_file_makes_it_private() {
                 Ok(())
             });
         }
-        cmd.spawn().expect("qex logs --follow did not start")
+        cmd.spawn().expect("fairq logs --follow did not start")
     };
 
     h.until(
@@ -4294,7 +4309,7 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
     let run = |args: &[&str]| with_umask_002(h.command(args));
     let q = |args: &[&str]| {
         let out = run(args);
-        assert!(out.status.success(), "qex {args:?}: {out:?}");
+        assert!(out.status.success(), "fairq {args:?}: {out:?}");
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
 
@@ -4309,7 +4324,7 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
         "census",
     ]);
     q(&["wait", &done, "--timeout", "30s"]);
-    let state = h.root.join("state/qex");
+    let state = h.root.join("state/fairq");
     h.until("the stop hook ran", Duration::from_secs(30), || {
         h.job_dir(&done).join("hook.log").exists()
     });
@@ -4330,7 +4345,7 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
         || h.job_dir(&aborted).join("hook.log").exists(),
     );
     q(&["pause", "queue"]);
-    // An abort writes the record of a queued job with write_status_unsynced (job.rs:842).
+    // An abort writes the record of a queued job with write_status_unsynced (src/job.rs).
     let cancelled = q(&["submit", "--", TESTJOB, "print", "never"]);
     q(&["abort", "--all", "--keep-running"]);
     h.until(
@@ -4341,7 +4356,7 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
 
     let mut seen = std::collections::BTreeMap::new();
     let state_mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o7777;
-    seen.insert("state/qex".to_string(), format!("dir {state_mode:o}"));
+    seen.insert("state/fairq".to_string(), format!("dir {state_mode:o}"));
     let mut todo = vec![state.clone()];
     while let Some(dir) = todo.pop() {
         for entry in std::fs::read_dir(&dir).unwrap().flatten() {
@@ -4389,23 +4404,23 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
     ];
     let mut expected: std::collections::BTreeMap<String, String> = [
         ("job.id", "file 644"),
-        ("state/qex", "dir 700"),
-        ("state/qex/history.jsonl", "file 600"),
-        ("state/qex/jobs", "dir 700"),
-        ("state/qex/jobs/<aborted>/killed-by-user", "file 600"),
-        ("state/qex/jobs/<cancelled>", "dir 700"),
-        ("state/qex/jobs/<cancelled>/spec.json", "file 600"),
-        ("state/qex/jobs/<cancelled>/status.json", "file 600"),
-        ("state/qex/run", "dir 700"),
-        ("state/qex/run/daemon.log", "file 600"),
-        ("state/qex/run/paused.json", "file 600"),
-        ("state/qex/run/pid", "file 600"),
-        ("state/qex/run/s", "socket 600"),
-        ("state/qex/run/spawn.lock", "file 600"),
-        ("state/qex/update.json", "file 600"),
-        ("state/qex/update.lock", "file 600"),
-        ("state/qex/usage.json", "file 600"),
-        ("state/qex/usage.lock", "file 600"),
+        ("state/fairq", "dir 700"),
+        ("state/fairq/history.jsonl", "file 600"),
+        ("state/fairq/jobs", "dir 700"),
+        ("state/fairq/jobs/<aborted>/killed-by-user", "file 600"),
+        ("state/fairq/jobs/<cancelled>", "dir 700"),
+        ("state/fairq/jobs/<cancelled>/spec.json", "file 600"),
+        ("state/fairq/jobs/<cancelled>/status.json", "file 600"),
+        ("state/fairq/run", "dir 700"),
+        ("state/fairq/run/daemon.log", "file 600"),
+        ("state/fairq/run/paused.json", "file 600"),
+        ("state/fairq/run/pid", "file 600"),
+        ("state/fairq/run/s", "socket 600"),
+        ("state/fairq/run/spawn.lock", "file 600"),
+        ("state/fairq/update.json", "file 600"),
+        ("state/fairq/update.lock", "file 600"),
+        ("state/fairq/usage.json", "file 600"),
+        ("state/fairq/usage.lock", "file 600"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -4413,7 +4428,7 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
     for job in ["<done>", "<aborted>"] {
         for (kind, file, mode) in job_files {
             expected.insert(
-                format!("state/qex/jobs/{job}{file}"),
+                format!("state/fairq/jobs/{job}{file}"),
                 format!("{kind} {mode}"),
             );
         }
@@ -4427,30 +4442,30 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
 fn the_state_directory_of_a_first_start_is_private() {
     let h = Harness::with_default_config("statemode");
     let out = with_umask_002(h.command(&["info"]));
-    assert!(out.status.success(), "qex info: {out:?}");
+    assert!(out.status.success(), "fairq info: {out:?}");
 
     assert_eq!(
-        mode_of(&h.root.join("state/qex")),
+        mode_of(&h.root.join("state/fairq")),
         0o700,
         "made as a parent of the runtime directory"
     );
-    assert_eq!(mode_of(&h.root.join("state/qex/run")), 0o700);
+    assert_eq!(mode_of(&h.root.join("state/fairq/run")), 0o700);
 }
 
 /// An earlier version made these files with no mode; opening a file that exists keeps
-/// its mode, so qex must also set it on the open file.
+/// its mode, so fairq must also set it on the open file.
 #[test]
 fn the_coordinator_files_an_earlier_version_left_wide_become_private() {
     use std::os::unix::fs::PermissionsExt;
 
     let h = Harness::with_default_config("widefiles");
-    let run = h.root.join("state/qex/run");
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let files = [
         run.join("daemon.log"),
         run.join("pid"),
         run.join("spawn.lock"),
-        h.root.join("state/qex/usage.lock"),
+        h.root.join("state/fairq/usage.lock"),
     ];
     for file in &files {
         std::fs::write(file, b"").unwrap();
@@ -4458,11 +4473,11 @@ fn the_coordinator_files_an_earlier_version_left_wide_become_private() {
     }
 
     let out = with_umask_002(h.command(&["submit", "--", TESTJOB, "print", "x"]));
-    assert!(out.status.success(), "qex submit: {out:?}");
+    assert!(out.status.success(), "fairq submit: {out:?}");
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     with_umask_002(h.command(&["wait", &id, "--timeout", "30s"]));
     h.until("the usage record", Duration::from_secs(30), || {
-        h.root.join("state/qex/usage.json").exists()
+        h.root.join("state/fairq/usage.json").exists()
     });
 
     for file in &files {
@@ -4490,10 +4505,10 @@ fn mode_of(path: &Path) -> u32 {
 fn the_runtime_directory_of_a_coordinator_started_alone_is_private() {
     let mut h = Harness::with_default_config("daemonmode");
     h.extra_env
-        .push(("QEX_IDLE_EXIT_SECS".to_string(), "1".to_string()));
+        .push(("FAIRQ_IDLE_EXIT_SECS".to_string(), "1".to_string()));
     let out = with_umask_002(h.command(&["daemon"]));
-    assert!(out.status.success(), "qex daemon: {out:?}");
-    assert_eq!(mode_of(&h.root.join("state/qex/run")), 0o700);
+    assert!(out.status.success(), "fairq daemon: {out:?}");
+    assert_eq!(mode_of(&h.root.join("state/fairq/run")), 0o700);
 }
 
 #[test]
@@ -4505,10 +4520,10 @@ fn the_runtime_directory_the_client_makes_is_private() {
         "the coordinator must refuse this config: {out:?}"
     );
     assert!(
-        !h.root.join("state/qex/jobs").exists(),
+        !h.root.join("state/fairq/jobs").exists(),
         "the coordinator must stop before it makes its directories"
     );
-    assert_eq!(mode_of(&h.root.join("state/qex/run")), 0o700);
+    assert_eq!(mode_of(&h.root.join("state/fairq/run")), 0o700);
 }
 
 #[test]
@@ -4523,8 +4538,8 @@ fn the_state_directory_after_an_update_check_is_private() {
         answer.display()
     ));
     let out = with_umask_002(h.command(&["info"]));
-    assert!(out.status.success(), "qex info: {out:?}");
-    let state = h.root.join("state/qex");
+    assert!(out.status.success(), "fairq info: {out:?}");
+    let state = h.root.join("state/fairq");
     h.until("the update record", Duration::from_secs(45), || {
         state.join("update.json").exists()
     });
@@ -4535,9 +4550,9 @@ fn the_state_directory_after_an_update_check_is_private() {
 fn the_state_directory_after_one_job_is_private() {
     let h = Harness::with_default_config("usagemode");
     let out = with_umask_002(h.command(&["submit", "--", TESTJOB, "print", "x"]));
-    assert!(out.status.success(), "qex submit: {out:?}");
+    assert!(out.status.success(), "fairq submit: {out:?}");
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let state = h.root.join("state/qex");
+    let state = h.root.join("state/fairq");
     h.until("the usage record", Duration::from_secs(45), || {
         state.join("usage.json").exists()
     });
@@ -4549,7 +4564,7 @@ fn the_state_directory_after_one_job_is_private() {
 fn a_pruned_history_is_rewritten_private() {
     use std::os::unix::fs::PermissionsExt;
     let h = Harness::with_default_config("prunemode");
-    let state = h.root.join("state/qex");
+    let state = h.root.join("state/fairq");
     std::fs::create_dir_all(&state).unwrap();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -4566,7 +4581,7 @@ fn a_pruned_history_is_rewritten_private() {
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
 
     let out = with_umask_002(h.command(&["info"]));
-    assert!(out.status.success(), "qex info: {out:?}");
+    assert!(out.status.success(), "fairq info: {out:?}");
     h.until(
         "the start prunes the history",
         Duration::from_secs(30),
@@ -4595,7 +4610,7 @@ fn the_tail_file_of_a_long_log_is_private() {
         });
     }
     let out = cmd.output().unwrap();
-    assert!(out.status.success(), "qex submit: {out:?}");
+    assert!(out.status.success(), "fairq submit: {out:?}");
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     let tail = h.job_dir(&id).join("stdout.log.tail");
     h.until(
@@ -4608,7 +4623,7 @@ fn the_tail_file_of_a_long_log_is_private() {
     h.stop(&id);
 }
 
-/// Opening a file that exists keeps its mode, so qex also sets 0600 on each open job file.
+/// Opening a file that exists keeps its mode, so fairq also sets 0600 on each open job file.
 /// The hook prints the mode that `run` left, before `note` opens the file again.
 #[test]
 fn the_job_files_an_earlier_version_left_wide_become_private() {
@@ -4621,7 +4636,7 @@ fn the_job_files_an_earlier_version_left_wide_become_private() {
             "[system]\nreserve_mem = \"0\"\nmax_pressure = 100\n",
             "[logs]\nmax_bytes = \"64KB\"\n",
             "[hooks]\n",
-            r#"on_stop = ["sh", "-c", 'ls -l "$QEX_JOB_DIR/hook.log"']"#,
+            r#"on_stop = ["sh", "-c", 'ls -l "$FAIRQ_JOB_DIR/hook.log"']"#,
             "\n",
         ),
     );
@@ -4657,7 +4672,7 @@ fn the_job_files_an_earlier_version_left_wide_become_private() {
     h.until("the verdict of the hook", Duration::from_secs(30), || {
         std::fs::read_to_string(&log)
             .unwrap_or_default()
-            .contains("qex: the stop hook")
+            .contains("fairq: the stop hook")
     });
     let text = std::fs::read_to_string(&log).unwrap();
     let seen = text.lines().find(|line| line.contains("hook.log"));
@@ -4688,7 +4703,7 @@ fn a_follower_narrows_a_wide_log_file_of_a_waiting_job() {
     let mut cmd = h.command(&["logs", &id, "--follow"]);
     cmd.stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
-    let mut child = cmd.spawn().expect("qex logs --follow did not start");
+    let mut child = cmd.spawn().expect("fairq logs --follow did not start");
 
     // The queue is paused, so no supervisor has opened these files.
     h.until(
@@ -4715,7 +4730,7 @@ fn a_follower_narrows_a_wide_log_file_of_a_waiting_job() {
     }
 }
 
-/// Starts `qex logs <id> --follow --stdout` and returns once it has printed `line`,
+/// Starts `fairq logs <id> --follow --stdout` and returns once it has printed `line`,
 /// which it reads only after it opened the file and set its mode.
 fn follow_until(h: &Harness, id: &str, line: &str) -> std::process::Child {
     use std::io::BufRead;
@@ -4723,7 +4738,7 @@ fn follow_until(h: &Harness, id: &str, line: &str) -> std::process::Child {
     let mut cmd = h.command(&["logs", id, "--follow", "--stdout"]);
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null());
-    let mut child = cmd.spawn().expect("qex logs --follow did not start");
+    let mut child = cmd.spawn().expect("fairq logs --follow did not start");
     let out = child.stdout.take().unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -4763,7 +4778,7 @@ fn a_follower_refuses_a_symlinked_log_file() {
     let mut cmd = h.command(&["logs", &id, "--follow", "--stdout"]);
     cmd.stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
-    let mut child = cmd.spawn().expect("qex logs --follow did not start");
+    let mut child = cmd.spawn().expect("fairq logs --follow did not start");
     let deadline = Instant::now() + Duration::from_secs(15);
     let status = loop {
         match child.try_wait().unwrap() {
@@ -4846,7 +4861,7 @@ fn the_history_an_earlier_version_left_wide_becomes_private() {
     let h = Harness::with_default_config("widestate");
 
     // A young line, so the start-up prune keeps the file and does not rewrite it.
-    let state = h.root.join("state/qex");
+    let state = h.root.join("state/fairq");
     std::fs::create_dir_all(&state).unwrap();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -4874,7 +4889,7 @@ fn the_history_an_earlier_version_left_wide_becomes_private() {
 
 /// Finds the socket directory in TMPDIR whose pid file names the coordinator `pid`.
 fn tmpdir_socket_dir(pid: i64) -> Option<PathBuf> {
-    let prefix = format!("qex-{}-", unsafe { libc::getuid() });
+    let prefix = format!("fairq-{}-", unsafe { libc::getuid() });
     let pid = pid.to_string();
     std::fs::read_dir(std::env::temp_dir())
         .unwrap()
@@ -4915,7 +4930,7 @@ fn the_socket_directory_in_tmpdir_is_private() {
         });
     }
     let out = cmd.output().unwrap();
-    assert!(out.status.success(), "qex info: {out:?}");
+    assert!(out.status.success(), "fairq info: {out:?}");
     let info: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let pid = info["pid"].as_i64().expect("info gives the pid");
     let dir = tmpdir_socket_dir(pid).expect("the socket directory of this coordinator in TMPDIR");
@@ -4931,18 +4946,18 @@ fn the_socket_directory_in_tmpdir_is_private() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// qex must not use a command line to find a job. This test submits a job whose
-/// command holds the letters `qex daemon`, which is the pattern that a person
+/// fairq must not use a command line to find a job. This test submits a job whose
+/// command holds the letters `fairq daemon`, which is the pattern that a person
 /// writes for `pgrep -f`. Every command must still operate.
 #[test]
-fn a_command_line_that_holds_the_word_qex_does_not_confuse_qex() {
+fn a_command_line_that_holds_the_word_fairq_does_not_confuse_fairq() {
     let h = Harness::with_default_config("selfmatch");
     let id = h.submit(&[
         "submit",
         "--",
         "sh",
         "-c",
-        "echo pretending to be qex daemon supervise; sleep 30",
+        "echo pretending to be fairq daemon supervise; sleep 30",
     ]);
 
     h.until("the job starts", Duration::from_secs(45), || {
@@ -4988,7 +5003,7 @@ fn cancel_removes_a_job_from_the_queue() {
     assert_eq!(h.state_of(&second), "cancelled");
 
     // A job that operates must not accept `cancel`.
-    let out = h.qex(&["cancel", &first]);
+    let out = h.fairq(&["cancel", &first]);
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -4999,7 +5014,7 @@ fn cancel_removes_a_job_from_the_queue() {
     h.ok(&["kill", &first, "--grace", "1s"]);
 }
 
-/// `qex clean` deletes the record of a job that stopped.
+/// `fairq clean` deletes the record of a job that stopped.
 #[test]
 fn clean_deletes_the_record_of_a_job_that_stopped() {
     let h = Harness::with_default_config("clean");
@@ -5008,11 +5023,14 @@ fn clean_deletes_the_record_of_a_job_that_stopped() {
     assert!(h.job_dir(&id).exists());
 
     h.ok(&["clean", &id]);
-    assert!(!h.job_dir(&id).exists(), "qex did not delete the directory");
+    assert!(
+        !h.job_dir(&id).exists(),
+        "fairq did not delete the directory"
+    );
     assert!(h.list_json().is_empty());
 }
 
-/// `qex clean` must not delete the record of a job that operates.
+/// `fairq clean` must not delete the record of a job that operates.
 #[test]
 fn clean_refuses_a_job_that_operates() {
     let h = Harness::with_default_config("cleanrun");
@@ -5021,8 +5039,8 @@ fn clean_refuses_a_job_that_operates() {
         h.state_of(&id) == "running"
     });
 
-    let out = h.qex(&["clean", &id]);
-    assert!(!out.status.success(), "qex must refuse this command");
+    let out = h.fairq(&["clean", &id]);
+    assert!(!out.status.success(), "fairq must refuse this command");
     assert!(h.job_dir(&id).exists(), "the record must stay");
 
     h.ok(&["kill", &id, "--grace", "1s"]);
@@ -5059,7 +5077,7 @@ fn a_command_that_does_not_exist_gives_a_clear_message() {
     );
 }
 
-/// A short id is easier to copy from `qex list`, so each command accepts one.
+/// A short id is easier to copy from `fairq list`, so each command accepts one.
 #[test]
 fn a_command_accepts_the_first_characters_of_an_id() {
     let h = Harness::with_default_config("shortid");
@@ -5077,7 +5095,7 @@ fn the_first_screen_points_to_the_topic_for_agents() {
     let h = Harness::with_default_config("help");
     let text = h.ok(&[]);
     assert!(
-        text.contains("qex help agents"),
+        text.contains("fairq help agents"),
         "the first screen must name the topic for agents"
     );
 
@@ -5087,7 +5105,7 @@ fn the_first_screen_points_to_the_topic_for_agents() {
         "the topic must warn about the pgrep fault"
     );
     assert!(
-        agents.contains("qex wait"),
+        agents.contains("fairq wait"),
         "the topic must give the solution"
     );
 }
@@ -5103,21 +5121,21 @@ fn the_schemas_are_valid_json() {
     }
 }
 
-/// THE SCHEMA MUST ACCEPT EVERY RECORD THAT QEX WRITES.
+/// THE SCHEMA MUST ACCEPT EVERY RECORD THAT FAIRQ WRITES.
 ///
 /// An agent reads the shipped schema to know what a field can hold, and some
-/// agents refuse a record that the schema does not permit. A value that qex
-/// writes and the schema refuses thus makes qex look broken to the reader that
+/// agents refuse a record that the schema does not permit. A value that fairq
+/// writes and the schema refuses thus makes fairq look broken to the reader that
 /// this schema exists for.
 ///
-/// `claim_source` is the field that carries this risk: qex writes `fan-out` for
+/// `claim_source` is the field that carries this risk: fairq writes `fan-out` for
 /// a job of a fan-out, because such a job learns against its template and not
 /// against the command of its own line.
 ///
 /// The test reads the value from a REAL job and the list from the SHIPPED
 /// schema. A test that named the four values itself would agree with itself.
 #[test]
-fn the_schema_accepts_every_claim_source_that_qex_writes() {
+fn the_schema_accepts_every_claim_source_that_fairq_writes() {
     let h = Harness::with_default_config("claimsource");
 
     let schema: serde_json::Value = serde_json::from_str(&h.ok(&["schema", "status"])).unwrap();
@@ -5165,7 +5183,7 @@ fn the_schema_accepts_every_claim_source_that_qex_writes() {
     for source in &seen {
         assert!(
             permitted.contains(source),
-            "qex writes the claim source `{source}`, and the shipped schema permits {permitted:?} \
+            "fairq writes the claim source `{source}`, and the shipped schema permits {permitted:?} \
              only. An agent that tests a record against this schema refuses a record that is \
              correct."
         );
@@ -5249,7 +5267,7 @@ fn the_claim_word_guess_gives_one_half_of_the_budget() {
     h.ok(&["wait", &c, "--timeout", "30s"]);
 }
 
-/// The word `full` gives the whole budget, so the job operates alone. qex must
+/// The word `full` gives the whole budget, so the job operates alone. fairq must
 /// treat it as a normal job, and it must not mark the job as forced.
 #[test]
 fn the_claim_word_full_gives_the_whole_budget() {
@@ -5268,7 +5286,7 @@ fn the_claim_word_full_gives_the_whole_budget() {
     assert_eq!(status["mem"], 2u64 * 1024 * 1024 * 1024);
     assert_eq!(
         status["forced"], false,
-        "a job that asks for the budget is a normal job, and qex must not force it"
+        "a job that asks for the budget is a normal job, and fairq must not force it"
     );
 
     h.until("the full job starts", Duration::from_secs(45), || {
@@ -5312,7 +5330,7 @@ fn a_job_file_accepts_the_claim_words() {
 /// A supervisor that stops must not leave the job process alive.
 ///
 /// Without this rule, a job continues and uses memory and cores, the budget
-/// shows that memory as free, and no qex command can stop the job, because its
+/// shows that memory as free, and no fairq command can stop the job, because its
 /// record says that the job stopped.
 #[test]
 fn a_dead_supervisor_does_not_leave_the_job_alive() {
@@ -5364,7 +5382,7 @@ fn a_dead_supervisor_does_not_leave_the_job_alive() {
 /// Before this rule, the next coordinator kept such a job and watched nothing:
 /// the supervisor was the only process that could write the result, so the
 /// record never changed, the job held its claim and its locks for ever, and
-/// `qex wait` on it never returned.
+/// `fairq wait` on it never returned.
 #[test]
 fn a_recovered_job_without_a_supervisor_does_not_stay_running() {
     let h = Harness::with_default_config("recoverorphan");
@@ -5428,7 +5446,7 @@ fn a_recovered_job_without_a_supervisor_does_not_stay_running() {
     let info = h.ok(&["info", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&info).unwrap();
     assert_eq!(v["cpu_claimed"].as_u64(), Some(0));
-    let out = h.qex(&["wait", &id]);
+    let out = h.fairq(&["wait", &id]);
     assert_eq!(
         out.status.code(),
         Some(121),
@@ -5460,7 +5478,7 @@ impl Harness {
         let mut cmd = Command::new("sh");
         cmd.arg("-c")
             .arg(script)
-            .arg(env!("CARGO_BIN_EXE_qex"))
+            .arg(env!("CARGO_BIN_EXE_fairq"))
             .arg(&id_file)
             .args(job)
             .stdin(std::process::Stdio::null())
@@ -5565,7 +5583,7 @@ fn a_zombie_supervisor_does_not_keep_a_recovered_job() {
     let info = h.ok(&["info", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&info).unwrap();
     assert_eq!(v["cpu_claimed"].as_u64(), Some(0));
-    assert_eq!(h.qex(&["wait", &id]).status.code(), Some(121));
+    assert_eq!(h.fairq(&["wait", &id]).status.code(), Some(121));
 }
 
 /// A supervisor that dies as a zombie under a recovered coordinator must end the watch (#85).
@@ -5648,7 +5666,7 @@ fn recovery_counts_a_zombie_job_process_as_ended() {
     let coordinator = h.coordinator_pid();
     let held = holder.0.id() as i32;
 
-    // No qex command runs until the job process is a zombie: the next one starts recovery.
+    // No fairq command runs until the job process is a zombie: the next one starts recovery.
     unsafe { libc::kill(coordinator, libc::SIGKILL) };
     h.until(
         "the holder adopts the supervisor",
@@ -5687,7 +5705,7 @@ fn recovery_counts_a_zombie_job_process_as_ended() {
         error, "the coordinator stopped, and neither the job nor its supervisor continued",
         "recovery must count the zombie job process as ended"
     );
-    assert_eq!(h.qex(&["wait", &id]).status.code(), Some(121));
+    assert_eq!(h.fairq(&["wait", &id]).status.code(), Some(121));
 }
 
 /// `reap` counts a zombie job process as ended, and does not stop it (#97).
@@ -5728,7 +5746,7 @@ fn reap_counts_a_zombie_job_process_as_ended() {
         .to_string();
     assert!(
         error.starts_with("the supervisor stopped without a result")
-            && !error.contains("qex stopped the job process"),
+            && !error.contains("fairq stopped the job process"),
         "reap must count the zombie job process as ended: {error}"
     );
 }
@@ -5821,7 +5839,7 @@ impl Harness {
     }
 
     /// Kills the coordinator, then the supervisor, so the holder adopts the live job leader.
-    /// Runs no qex command: the next one starts recovery.
+    /// Runs no fairq command: the next one starts recovery.
     fn orphan_the_job(&self, job: &LeftoverJob) {
         let coordinator = self.coordinator_pid();
         unsafe { libc::kill(coordinator, libc::SIGKILL) };
@@ -5895,7 +5913,7 @@ fn recovery_stops_leftovers_that_ignore_term_when_the_job_process_ends() {
         .unwrap_or_default()
         .to_string();
     assert!(
-        error.contains("; qex stopped the job process"),
+        error.contains("; fairq stopped the job process"),
         "recovery must stop the live job process: {error}"
     );
     h.until("the leftover is killed", Duration::from_secs(20), || {
@@ -5994,7 +6012,7 @@ fn reap_stops_the_leftovers_of_a_zombie_job_process_whose_name_is_not_utf8() {
         .to_string();
     assert!(
         error.starts_with("the supervisor stopped without a result")
-            && !error.contains("qex stopped the job process"),
+            && !error.contains("fairq stopped the job process"),
         "reap must count the zombie job process as ended: {error}"
     );
     Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
@@ -6026,7 +6044,7 @@ fn recovery_leaves_the_group_alone_for_a_record_from_an_earlier_start() {
         "the earlier-start branch must run: {error}"
     );
     // Recovery signals before it writes the failed record, so a sweep would have run by now.
-    assert_eq!(h.qex(&["wait", &job.id]).status.code(), Some(121));
+    assert_eq!(h.fairq(&["wait", &job.id]).status.code(), Some(121));
     assert!(
         !Harness::stopped(leftover.0),
         "a record from an earlier start must not have its group signalled"
@@ -6058,14 +6076,14 @@ fn recovery_leaves_the_group_alone_when_the_start_time_differs() {
         "the same-boot final branch must run"
     );
     // Recovery signals before it writes the failed record, so a sweep would have run by now.
-    assert_eq!(h.qex(&["wait", &job.id]).status.code(), Some(121));
+    assert_eq!(h.fairq(&["wait", &job.id]).status.code(), Some(121));
     assert!(
         !Harness::stopped(leftover.0),
         "a leader with another start time must not have its group signalled"
     );
 }
 
-/// A running `LEFTOVER_JOB` with no holder: the system's own reaper collects what qex orphans.
+/// A running `LEFTOVER_JOB` with no holder: the system's own reaper collects what fairq orphans.
 #[cfg(unix)]
 struct UnheldJob {
     id: String,
@@ -6084,7 +6102,7 @@ impl Harness {
         (job, guard)
     }
 
-    /// Rewrites one field of a job record without a qex command.
+    /// Rewrites one field of a job record without a fairq command.
     fn plant_in_status(&self, id: &str, edit: impl FnOnce(&mut serde_json::Value)) {
         let path = self.job_dir(id).join("status.json");
         let text = std::fs::read_to_string(&path).unwrap();
@@ -6093,7 +6111,7 @@ impl Harness {
         std::fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
     }
 
-    /// The job record on disk, read without a qex command.
+    /// The job record on disk, read without a fairq command.
     fn record(&self, id: &str) -> serde_json::Value {
         let text = std::fs::read_to_string(self.job_dir(id).join("status.json")).unwrap();
         serde_json::from_str(&text).unwrap()
@@ -6104,7 +6122,7 @@ impl Harness {
         self.record(id)["pid_start_token"].as_u64()
     }
 
-    /// A process's start token, read from the sources qex reads, so a test can place a value
+    /// A process's start token, read from the sources fairq reads, so a test can place a value
     /// between two of them.
     fn start_token(pid: i32) -> Option<u64> {
         #[cfg(target_os = "linux")]
@@ -6134,7 +6152,7 @@ impl Harness {
     }
 
     /// Kills the coordinator and the supervisor, waiting for each to be gone, and gives the
-    /// coordinator's pid; runs no qex command after that, so the next one starts recovery.
+    /// coordinator's pid; runs no fairq command after that, so the next one starts recovery.
     fn kill_coordinator_and_supervisor(&self, job: &UnheldJob) -> i32 {
         let coordinator = self.coordinator_pid();
         unsafe { libc::kill(coordinator, libc::SIGKILL) };
@@ -6164,7 +6182,7 @@ impl Harness {
             self.state_of(id) == "failed"
         });
         // Recovery signals before it writes the failed record, so a KILL would have come by now.
-        assert_eq!(self.qex(&["wait", id]).status.code(), Some(121));
+        assert_eq!(self.fairq(&["wait", id]).status.code(), Some(121));
         self.status_json(id)["error"]
             .as_str()
             .unwrap_or_default()
@@ -6173,11 +6191,11 @@ impl Harness {
 
     /// The coordinator log's lines that leave a group alone.
     fn refusal_lines(&self) -> Vec<String> {
-        let log = std::fs::read_to_string(self.root.join("state/qex/run/daemon.log"))
+        let log = std::fs::read_to_string(self.root.join("state/fairq/run/daemon.log"))
             .expect("the coordinator writes its log");
         let lines: Vec<String> = log
             .lines()
-            .filter(|l| l.contains("qex leaves the process group"))
+            .filter(|l| l.contains("fairq leaves the process group"))
             .map(str::to_string)
             .collect();
         eprintln!("refusal lines: {lines:?}");
@@ -6186,7 +6204,7 @@ impl Harness {
 
     /// The coordinator log's lines that hold `phrase`.
     fn log_lines(&self, phrase: &str) -> Vec<String> {
-        let log = std::fs::read_to_string(self.root.join("state/qex/run/daemon.log"))
+        let log = std::fs::read_to_string(self.root.join("state/fairq/run/daemon.log"))
             .expect("the coordinator writes its log");
         log.lines()
             .filter(|l| l.contains(phrase))
@@ -6197,7 +6215,7 @@ impl Harness {
     /// How many lines of the coordinator log leave group `group` of job `id` alone.
     fn refusals_of(&self, id: &str, group: i32) -> usize {
         let id: uuid::Uuid = id.parse().unwrap();
-        let token = format!("job {id}: qex leaves the process group {group} alone: ");
+        let token = format!("job {id}: fairq leaves the process group {group} alone: ");
         self.refusal_lines()
             .iter()
             .filter(|l| l.contains(&token))
@@ -6251,7 +6269,7 @@ impl Harness {
             && !matches!(Harness::state_by_ps(pid), Some('Z') | None)
     }
 
-    /// Polls `test` every 10 ms and gives the time it took; runs no qex command, so it can wait
+    /// Polls `test` every 10 ms and gives the time it took; runs no fairq command, so it can wait
     /// while the coordinator is stopped, where `until`'s report would hang.
     fn poll_until(what: &str, limit: Duration, mut test: impl FnMut() -> bool) -> Duration {
         let start = Instant::now();
@@ -6291,7 +6309,7 @@ impl Harness {
     fn term_stop_job(&self) -> (UnheldJob, Leftover) {
         let path = |name: &str| self.root.join(name).to_str().unwrap().to_string();
         let file = path("leftover.pid");
-        let (got_term, go, pid_file) = (path("got-term"), path("go"), path("state/qex/run/pid"));
+        let (got_term, go, pid_file) = (path("got-term"), path("go"), path("state/fairq/run/pid"));
         let job = self.submit_unheld_job(&[
             "sh",
             "-c",
@@ -6325,13 +6343,15 @@ impl Harness {
         StoppedCoordinator { pid, child }
     }
 
-    /// Steps 2-5 of the TERM handshake once qex sent its TERM to a `TERM_STOP_JOB`: gives the
+    /// Steps 2-5 of the TERM handshake once fairq sent its TERM to a `TERM_STOP_JOB`: gives the
     /// coordinator that the leader stopped and when `got-term` appeared; the leader then ends.
     fn term_handshake(&self, job: &UnheldJob, leftover: i32) -> (i32, Instant) {
         let got_term = self.root.join("got-term");
-        Harness::poll_until("the leader got qex's TERM", Duration::from_secs(30), || {
-            got_term.exists()
-        });
+        Harness::poll_until(
+            "the leader got fairq's TERM",
+            Duration::from_secs(30),
+            || got_term.exists(),
+        );
         let ts = Instant::now();
 
         let read_pid =
@@ -6339,7 +6359,7 @@ impl Harness {
         let pid = read_pid(&got_term);
         assert_eq!(
             pid,
-            read_pid(&self.root.join("state/qex/run/pid")),
+            read_pid(&self.root.join("state/fairq/run/pid")),
             "the leader stopped the coordinator that the pid file names"
         );
         Harness::poll_until(
@@ -6367,7 +6387,7 @@ impl Harness {
         pid: i32,
         path_line: &str,
     ) {
-        let log = std::fs::read_to_string(self.root.join("state/qex/run/daemon.log")).unwrap();
+        let log = std::fs::read_to_string(self.root.join("state/fairq/run/daemon.log")).unwrap();
         assert!(
             log.contains(path_line),
             "the stopped coordinator logged: {path_line}"
@@ -6427,7 +6447,7 @@ impl Harness {
 #[cfg(unix)]
 const TERM_STOP_JOB: &str = r#"trap '' TERM; sleep 600 & echo $! > "$1"; trap 'p=$(cat "$4"); kill -STOP "$p"; echo "$p" > "$2.new"; mv "$2.new" "$2"; until [ -e "$3" ]; do sleep 0.1; done; exit 0' TERM; wait"#;
 
-/// A coordinator that the leader's TERM trap stopped, and the `qex list` child that started it.
+/// A coordinator that the leader's TERM trap stopped, and the `fairq list` child that started it.
 #[cfg(unix)]
 struct StoppedCoordinator {
     pid: i32,
@@ -6585,7 +6605,7 @@ fn recovery_stops_leftovers_that_ignore_term_once_the_leader_is_collected() {
         .unwrap_or_default()
         .to_string();
     assert!(
-        error.contains("; qex stopped the job process"),
+        error.contains("; fairq stopped the job process"),
         "recovery must stop the live job process: {error}"
     );
     let _ = stopped.child.wait();
@@ -6613,7 +6633,7 @@ fn a_coordinator_killed_in_recoverys_term_wait_leaves_the_job_to_the_next_recove
     let _ = stopped.child.wait();
     let id: uuid::Uuid = job.id.parse().unwrap();
     let line = format!(
-        "job {id} lost its supervisor, and the job process {} continues; qex stops the job now",
+        "job {id} lost its supervisor, and the job process {} continues; fairq stops the job now",
         job.leader
     );
     h.killed_in_term_wait_then_recovered(&job, leftover.0, stopped.pid, &line);
@@ -6635,7 +6655,7 @@ fn recoverys_term_wait_does_not_delay_the_first_answer() {
          [defaults]\nmem = \"256MB\"\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
          [hooks]\non_stop = [\"sh\", \"-c\", \
-         \"cp \\\"$QEX_JOB_DIR/status.json\\\" {}; echo \\\"$QEX_STATE\\\" >> {}\"]\n",
+         \"cp \\\"$FAIRQ_JOB_DIR/status.json\\\" {}; echo \\\"$FAIRQ_STATE\\\" >> {}\"]\n",
         copy.display(),
         mark.display()
     ));
@@ -6643,7 +6663,7 @@ fn recoverys_term_wait_does_not_delay_the_first_answer() {
     assert!(Harness::runs(job.leader), "the leader runs");
 
     let start = Instant::now();
-    let listed = h.qex(&["list"]);
+    let listed = h.fairq(&["list"]);
     let took = start.elapsed();
     let on_disk = h.record(&job.id)["state"].clone();
     eprintln!("restart-to-answer: {} ms", took.as_millis());
@@ -6680,7 +6700,7 @@ fn recoverys_term_wait_does_not_delay_the_first_answer() {
         .unwrap_or_default()
         .to_string();
     assert!(
-        error.contains("; qex stopped the job process"),
+        error.contains("; fairq stopped the job process"),
         "recovery must stop the live job process: {error}"
     );
     Harness::poll_until("the leader is killed", Duration::from_secs(20), || {
@@ -6720,12 +6740,12 @@ fn recovery_answers_after_its_term_reached_the_job() {
     h.kill_coordinator_and_supervisor(&job);
     assert!(Harness::runs(job.leader), "the leader runs");
 
-    h.qex(&["list"]);
+    h.fairq(&["list"]);
     Harness::poll_until("the job got the TERM", Duration::from_secs(20), || {
         std::fs::read_to_string(&mark).is_ok_and(|t| t.contains("term"))
     });
     let start = Instant::now();
-    let listed = h.qex(&["list"]);
+    let listed = h.fairq(&["list"]);
     let took = start.elapsed();
     let in_grace = Harness::runs(job.leader);
     eprintln!("term-to-answer: {} ms", took.as_millis());
@@ -6759,7 +6779,7 @@ fn pause_the_leftover_check(h: &mut Harness) -> bool {
         return false;
     }
     h.extra_env.push((
-        "QEX_TEST_PAUSE_BEFORE_LEFTOVER_KILL_MS".into(),
+        "FAIRQ_TEST_PAUSE_BEFORE_LEFTOVER_KILL_MS".into(),
         "3000".into(),
     ));
     true
@@ -6781,7 +6801,7 @@ fn recoverys_member_scan_does_not_delay_the_first_answer() {
          [defaults]\nmem = \"256MB\"\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
          [hooks]\non_stop = [\"sh\", \"-c\", \
-         \"cp \\\"$QEX_JOB_DIR/status.json\\\" {}; echo \\\"$QEX_STATE\\\" >> {}\"]\n",
+         \"cp \\\"$FAIRQ_JOB_DIR/status.json\\\" {}; echo \\\"$FAIRQ_STATE\\\" >> {}\"]\n",
         copy.display(),
         mark.display()
     ));
@@ -6791,7 +6811,7 @@ fn recoverys_member_scan_does_not_delay_the_first_answer() {
     }
 
     let start = Instant::now();
-    let listed = h.qex(&["list"]);
+    let listed = h.fairq(&["list"]);
     let took = start.elapsed();
     let on_disk = h.record(&job.id)["state"].clone();
     let leftover_ran = Harness::runs(leftover.0);
@@ -6857,7 +6877,7 @@ fn recoverys_member_scan_does_not_delay_the_first_answer() {
     );
 }
 
-/// A `qex kill` while recovery's check of what a job left is paused signals the job's group at
+/// A `fairq kill` while recovery's check of what a job left is paused signals the job's group at
 /// once, and the record still ends with recovery's text (#162).
 #[test]
 #[cfg(unix)]
@@ -6870,7 +6890,7 @@ fn recovery_takes_a_kill_before_it_kills_what_the_job_left() {
     }
 
     let start = Instant::now();
-    let out = h.qex(&["kill", &job.id]);
+    let out = h.fairq(&["kill", &job.id]);
     let took = start.elapsed();
     let on_disk = h.record(&job.id)["state"].clone();
     let leftover_ran = Harness::runs(leftover.0);
@@ -6881,7 +6901,7 @@ fn recovery_takes_a_kill_before_it_kills_what_the_job_left() {
     );
     assert!(leftover_ran, "(b) the leftover ignores the TERM and runs");
     assert_signalled_reply(&out);
-    let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log")).unwrap();
+    let log = std::fs::read_to_string(h.root.join("state/fairq/run/daemon.log")).unwrap();
     let id: uuid::Uuid = job.id.parse().unwrap();
     assert!(
         log.contains(&format!("job {id} received the signal 15")),
@@ -6908,7 +6928,7 @@ fn recovery_takes_a_kill_before_it_kills_what_the_job_left() {
     assert_eq!(h.refusals_of(&job.id, job.leader), 0, "(g) no refusal");
 }
 
-/// A `qex kill` while recovery's check is paused leaves a group it cannot verify alone, and so
+/// A `fairq kill` while recovery's check is paused leaves a group it cannot verify alone, and so
 /// does recovery's own check (#162).
 #[test]
 #[cfg(unix)]
@@ -6927,7 +6947,7 @@ fn a_kill_in_recoverys_window_leaves_an_unverified_group_alone() {
     }
 
     let start = Instant::now();
-    let out = h.qex(&["kill", &job.id, "--signal", "KILL"]);
+    let out = h.fairq(&["kill", &job.id, "--signal", "KILL"]);
     let took = start.elapsed();
     eprintln!("unverified-kill: {} ms", took.as_millis());
     assert_unconfirmed_reply(&out, &job.id);
@@ -6996,7 +7016,7 @@ fn a_rerun_before_recovery_kills_what_the_job_left_gets_the_lost_jobs_id() {
         "(a) the re-run gets the id of the job that still operates"
     );
     assert!(leftover_ran, "(b) the re-run came before the KILL");
-    let waited = h.qex(&["wait", &rerun]);
+    let waited = h.fairq(&["wait", &rerun]);
     assert_eq!(
         waited.status.code(),
         Some(121),
@@ -7029,7 +7049,7 @@ fn a_lost_job_with_an_empty_group_is_failed_at_the_first_answer() {
         return;
     }
 
-    let listed = h.qex(&["list"]);
+    let listed = h.fairq(&["list"]);
     let stdout = String::from_utf8_lossy(&listed.stdout);
     let row = stdout.lines().find(|l| l.starts_with(&job.id[..8]));
     assert!(
@@ -7041,7 +7061,7 @@ fn a_lost_job_with_an_empty_group_is_failed_at_the_first_answer() {
     assert_eq!(record["error"].as_str(), Some(FINAL_BRANCH), "(c) the text");
 }
 
-/// A `qex kill` that arrives while recovery waits out the grace for a leader that ignores TERM
+/// A `fairq kill` that arrives while recovery waits out the grace for a leader that ignores TERM
 /// signals the group at once, and the record of recovery stays its own (#162).
 #[test]
 #[cfg(unix)]
@@ -7052,7 +7072,7 @@ fn recovery_takes_a_kill_during_the_term_wait() {
     assert!(Harness::runs(job.leader), "the leader runs");
 
     let start = Instant::now();
-    let out = h.qex(&["kill", &job.id]);
+    let out = h.fairq(&["kill", &job.id]);
     let took = start.elapsed();
     eprintln!("kill-during-recovery: {} ms", took.as_millis());
     assert!(
@@ -7069,7 +7089,7 @@ fn recovery_takes_a_kill_during_the_term_wait() {
         "kill must succeed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log")).unwrap();
+    let log = std::fs::read_to_string(h.root.join("state/fairq/run/daemon.log")).unwrap();
     let id: uuid::Uuid = job.id.parse().unwrap();
     assert!(
         log.contains(&format!("job {id} received the signal 15")),
@@ -7086,7 +7106,7 @@ fn recovery_takes_a_kill_during_the_term_wait() {
     assert!(
         error.starts_with(
             "the coordinator stopped, and the supervisor of this job did not continue"
-        ) && error.contains("; qex stopped the job process"),
+        ) && error.contains("; fairq stopped the job process"),
         "the stop thread finishes with recovery's text after a kill: {error}"
     );
     Harness::poll_until("the leader is killed", Duration::from_secs(20), || {
@@ -7136,7 +7156,7 @@ fn a_rerun_during_recoverys_term_wait_gets_the_lost_jobs_id() {
         in_grace,
         "the re-run must come inside the grace, before the KILL"
     );
-    let waited = h.qex(&["wait", &rerun]);
+    let waited = h.fairq(&["wait", &rerun]);
     assert_eq!(
         waited.status.code(),
         Some(121),
@@ -7163,8 +7183,10 @@ fn a_fault_in_recoverys_signal_step_ends_the_coordinator_and_the_next_recovery_f
     h.kill_coordinator_and_supervisor(&job);
     assert!(Harness::runs(job.leader), "the leader runs");
 
-    h.extra_env
-        .push(("QEX_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP".into(), "1".into()));
+    h.extra_env.push((
+        "FAIRQ_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP".into(),
+        "1".into(),
+    ));
     let log_path = h.root.join("coordinator.log");
     let log = std::fs::File::create(&log_path).unwrap();
     let mut daemon = h
@@ -7172,7 +7194,7 @@ fn a_fault_in_recoverys_signal_step_ends_the_coordinator_and_the_next_recovery_f
         .stdout(log.try_clone().unwrap())
         .stderr(log)
         .spawn()
-        .expect("qex daemon did not start");
+        .expect("fairq daemon did not start");
     let mut status = None;
     Harness::poll_until("the coordinator ends", Duration::from_secs(30), || {
         status = daemon.try_wait().ok().flatten();
@@ -7186,13 +7208,13 @@ fn a_fault_in_recoverys_signal_step_ends_the_coordinator_and_the_next_recovery_f
     );
     let id: uuid::Uuid = job.id.parse().unwrap();
     let term_line = format!(
-        "job {id} lost its supervisor, and the job process {} continues; qex stops the job now",
+        "job {id} lost its supervisor, and the job process {} continues; fairq stops the job now",
         job.leader
     );
     let term_at = text.find(&term_line);
-    let panic_at = text.find("QEX_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP is set");
+    let panic_at = text.find("FAIRQ_TEST_PANIC_IN_RECOVERY_SIGNAL_STEP is set");
     let fault_at = text.find(&format!(
-        "job {id}: a fault in qex ended recovery's signal step"
+        "job {id}: a fault in fairq ended recovery's signal step"
     ));
     assert!(
         term_at.is_some() && term_at < panic_at && panic_at < fault_at,
@@ -7216,7 +7238,7 @@ fn a_fault_in_recoverys_signal_step_ends_the_coordinator_and_the_next_recovery_f
     assert!(
         error.starts_with(
             "the coordinator stopped, and the supervisor of this job did not continue"
-        ) && error.contains("; qex stopped the job process"),
+        ) && error.contains("; fairq stopped the job process"),
         "the next recovery must stop the live job process: {error}"
     );
     assert_eq!(h.refusals_of(&job.id, job.leader), 0);
@@ -7233,7 +7255,7 @@ fn a_coordinator_killed_in_reaps_term_wait_leaves_the_job_to_the_next_recovery()
     let h = Harness::with_default_config("twreap");
     let (job, leftover) = h.term_stop_job();
     let coordinator = h.coordinator_pid();
-    // No qex command until the kill: the leader's TERM trap stops the coordinator, which then
+    // No fairq command until the kill: the leader's TERM trap stops the coordinator, which then
     // answers nothing.
     unsafe { libc::kill(job.supervisor, libc::SIGKILL) };
     let (pid, _) = h.term_handshake(&job, leftover.0);
@@ -7243,7 +7265,7 @@ fn a_coordinator_killed_in_reaps_term_wait_leaves_the_job_to_the_next_recovery()
     );
     let id: uuid::Uuid = job.id.parse().unwrap();
     let line = format!(
-        "the supervisor of the job {id} stopped, and the job {} continues; qex stops the job now",
+        "the supervisor of the job {id} stopped, and the job {} continues; fairq stops the job now",
         job.leader
     );
     h.killed_in_term_wait_then_recovered(&job, leftover.0, pid, &line);
@@ -7288,7 +7310,7 @@ fn reap_stops_the_leftovers_of_a_collected_job_process() {
     });
 }
 
-/// A leader that qex's TERM makes a zombie: its group gets the rest of the grace before the KILL
+/// A leader that fairq's TERM makes a zombie: its group gets the rest of the grace before the KILL
 /// (#115).
 #[test]
 #[cfg(target_os = "linux")]
@@ -7324,7 +7346,7 @@ fn recovery_gives_the_group_of_a_zombie_leader_the_rest_of_the_grace() {
         .unwrap_or_default()
         .to_string();
     assert!(
-        error.contains("; qex stopped the job process"),
+        error.contains("; fairq stopped the job process"),
         "recovery must stop the live job process: {error}"
     );
     let _ = child.wait();
@@ -7334,7 +7356,7 @@ fn recovery_gives_the_group_of_a_zombie_leader_the_rest_of_the_grace() {
 #[cfg(unix)]
 const TERM_IGNORING_JOB: &str = r#"trap '' TERM; sleep 600 & echo $! > "$1"; wait"#;
 
-/// A leader that outlives qex's TERM gets the KILL at the end of the grace, its group with it
+/// A leader that outlives fairq's TERM gets the KILL at the end of the grace, its group with it
 /// (#115).
 #[test]
 #[cfg(unix)]
@@ -7356,7 +7378,7 @@ fn recovery_kills_a_leader_that_ignores_term_at_the_end_of_the_grace() {
     assert!(!Harness::stopped(job.leader), "the leader runs");
     assert!(!Harness::stopped(leftover.0), "the leftover runs");
 
-    h.qex(&["list"]);
+    h.fairq(&["list"]);
     h.until(
         "the leader and the leftover are stopped",
         Duration::from_secs(20),
@@ -7370,7 +7392,7 @@ fn recovery_kills_a_leader_that_ignores_term_at_the_end_of_the_grace() {
         .unwrap_or_default()
         .to_string();
     assert!(
-        error.contains("; qex stopped the job process"),
+        error.contains("; fairq stopped the job process"),
         "recovery must stop the live job process: {error}"
     );
 }
@@ -7387,7 +7409,7 @@ fn recovery_ends_the_term_wait_once_the_group_is_empty() {
 
     // The first command starts recovery; the record comes when recovery's signal step ends.
     let start = Instant::now();
-    h.qex(&["list"]);
+    h.fairq(&["list"]);
     Harness::poll_until("the job is failed", Duration::from_secs(20), || {
         h.record(&job.id)["state"].as_str() == Some("failed")
     });
@@ -7400,7 +7422,7 @@ fn recovery_ends_the_term_wait_once_the_group_is_empty() {
     assert_eq!(record["state"].as_str(), Some("failed"));
     let error = record["error"].as_str().unwrap_or_default();
     assert!(
-        error.contains("; qex stopped the job process"),
+        error.contains("; fairq stopped the job process"),
         "recovery must TERM the live job process: {error}"
     );
     // The rest of a 2 s grace takes 1900 ms or more after the first 100 ms check.
@@ -7433,7 +7455,7 @@ fn reap_ends_the_term_wait_once_the_group_is_empty() {
         .unwrap_or_default()
         .to_string();
     assert!(
-        error.contains("; qex stopped the job process"),
+        error.contains("; fairq stopped the job process"),
         "reap must TERM the live job process: {error}"
     );
     assert!(
@@ -7455,7 +7477,7 @@ fn reap_serves_commands_during_the_term_wait() {
         Harness::stopped(job.leader)
     });
     let start = Instant::now();
-    let out = h.qex(&["list"]);
+    let out = h.fairq(&["list"]);
     let took = start.elapsed();
     eprintln!("list-during-term-wait: {} ms", took.as_millis());
     assert!(
@@ -7490,13 +7512,13 @@ fn reap_serves_commands_during_the_term_wait() {
         .unwrap_or_default()
         .to_string();
     assert!(
-        error.contains("; qex stopped the job process"),
+        error.contains("; fairq stopped the job process"),
         "reap must TERM the live job process: {error}"
     );
 }
 
 /// Reap TERMs a leader that TERM ends while a leftover that ignores TERM holds the group: a
-/// `qex kill` during the rest of the grace signals the group at once (#140).
+/// `fairq kill` during the rest of the grace signals the group at once (#140).
 #[test]
 #[cfg(unix)]
 fn reap_takes_a_kill_during_the_term_wait() {
@@ -7508,7 +7530,7 @@ fn reap_takes_a_kill_during_the_term_wait() {
         Harness::stopped(job.leader)
     });
     let start = Instant::now();
-    let out = h.qex(&["kill", &job.id]);
+    let out = h.fairq(&["kill", &job.id]);
     let took = start.elapsed();
     eprintln!("kill-during-term-wait: {} ms", took.as_millis());
     assert!(
@@ -7525,7 +7547,7 @@ fn reap_takes_a_kill_during_the_term_wait() {
         "kill must succeed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log")).unwrap();
+    let log = std::fs::read_to_string(h.root.join("state/fairq/run/daemon.log")).unwrap();
     let id: uuid::Uuid = job.id.parse().unwrap();
     assert!(
         log.contains(&format!("job {id} received the signal 15")),
@@ -7541,7 +7563,7 @@ fn reap_takes_a_kill_during_the_term_wait() {
         .to_string();
     assert!(
         error.starts_with("the supervisor stopped without a result")
-            && error.contains("; qex stopped the job process"),
+            && error.contains("; fairq stopped the job process"),
         "reap's record must not change with the kill: {error}"
     );
     Harness::poll_until("the leftover is killed", Duration::from_secs(20), || {
@@ -7561,7 +7583,7 @@ fn a_fault_in_reaps_signal_step_ends_the_coordinator_and_recovery_finishes_the_j
     }
     let mut h = Harness::with_default_config("reapfault");
     h.extra_env
-        .push(("QEX_TEST_PANIC_IN_REAP_SIGNAL_STEP".into(), "1".into()));
+        .push(("FAIRQ_TEST_PANIC_IN_REAP_SIGNAL_STEP".into(), "1".into()));
     let log_path = h.root.join("coordinator.log");
     let log = std::fs::File::create(&log_path).unwrap();
     let mut daemon = h
@@ -7569,7 +7591,7 @@ fn a_fault_in_reaps_signal_step_ends_the_coordinator_and_recovery_finishes_the_j
         .stdout(log.try_clone().unwrap())
         .stderr(log)
         .spawn()
-        .expect("qex daemon did not start");
+        .expect("fairq daemon did not start");
     let read_log = || std::fs::read_to_string(&log_path).unwrap_or_default();
     Harness::poll_until("the coordinator starts", Duration::from_secs(30), || {
         read_log().contains("the coordinator started") || !matches!(daemon.try_wait(), Ok(None))
@@ -7596,13 +7618,13 @@ fn a_fault_in_reaps_signal_step_ends_the_coordinator_and_recovery_finishes_the_j
     );
     let id: uuid::Uuid = job.id.parse().unwrap();
     let term_line = format!(
-        "the supervisor of the job {id} stopped, and the job {} continues; qex stops the job now",
+        "the supervisor of the job {id} stopped, and the job {} continues; fairq stops the job now",
         job.leader
     );
     let term_at = text.find(&term_line);
-    let panic_at = text.find("QEX_TEST_PANIC_IN_REAP_SIGNAL_STEP is set");
+    let panic_at = text.find("FAIRQ_TEST_PANIC_IN_REAP_SIGNAL_STEP is set");
     let fault_at = text.find(&format!(
-        "job {id}: a fault in qex ended reap's signal step"
+        "job {id}: a fault in fairq ended reap's signal step"
     ));
     assert!(
         term_at.is_some() && term_at < panic_at && panic_at < fault_at,
@@ -7626,7 +7648,7 @@ fn a_fault_in_reaps_signal_step_ends_the_coordinator_and_recovery_finishes_the_j
     assert!(
         error.starts_with(
             "the coordinator stopped, and the supervisor of this job did not continue"
-        ) && error.contains("; qex stopped the job process"),
+        ) && error.contains("; fairq stopped the job process"),
         "recovery must stop the live job process: {error}"
     );
     assert_eq!(h.refusals_of(&job.id, job.leader), 0);
@@ -7803,10 +7825,10 @@ fn reap_leaves_a_collected_leaders_group_alone_when_the_record_names_a_later_sta
         .to_string();
     assert!(
         error.starts_with("the supervisor stopped without a result")
-            && !error.contains("; qex stopped the job process"),
+            && !error.contains("; fairq stopped the job process"),
         "reap's branch for an ended leader must run: {error}"
     );
-    h.qex(&["wait", &job.id]);
+    h.fairq(&["wait", &job.id]);
     assert!(
         Harness::runs(leftover.0),
         "a later recorded start leaves the group alone"
@@ -7834,7 +7856,7 @@ fn recovery_leaves_a_collected_leaders_group_alone_when_one_member_started_befor
     assert_eq!(
         Some(token(job.leader)),
         h.recorded_start(&job.id),
-        "the test reads the token as qex does"
+        "the test reads the token as fairq does"
     );
     let (ta, tb) = (token(a.0), token(b.0));
     assert!(ta + 2 <= tb, "A started well before B: {ta} {tb}");
@@ -7854,7 +7876,7 @@ fn recovery_leaves_a_collected_leaders_group_alone_when_one_member_started_befor
     );
 }
 
-/// After qex's TERM, a collected leader's group with no recorded start gets no KILL at the end
+/// After fairq's TERM, a collected leader's group with no recorded start gets no KILL at the end
 /// of the grace, and the coordinator log says so (#115).
 #[test]
 #[cfg(unix)]
@@ -7882,7 +7904,7 @@ fn recovery_leaves_a_collected_leaders_group_alone_after_term_without_a_recorded
         .unwrap_or_default()
         .to_string();
     assert!(
-        error.contains("; qex stopped the job process"),
+        error.contains("; fairq stopped the job process"),
         "recovery must TERM the live job process: {error}"
     );
     assert!(
@@ -8024,7 +8046,7 @@ fn recovery_leaves_a_live_group_alone_when_the_record_pid_names_a_later_process(
     );
 }
 
-/// `reap` finds a zombie leader that qex never TERMed and kills its group at once, with no
+/// `reap` finds a zombie leader that fairq never TERMed and kills its group at once, with no
 /// wait for a grace (#97, #115).
 #[test]
 #[cfg(target_os = "linux")]
@@ -8248,7 +8270,7 @@ fn a_new_process_with_the_supervisor_pid_is_not_the_supervisor() {
     }
 }
 
-/// A record of an earlier version of qex, found after a restart of the
+/// A record of an earlier version of fairq, found after a restart of the
 /// machine, must not take live processes for the job.
 ///
 /// Such a record holds no `boot_id` and no start times — only raw pids.
@@ -8279,7 +8301,7 @@ fn an_old_record_from_before_the_boot_is_dead() {
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    // Make the record one that an earlier version of qex wrote, in an earlier
+    // Make the record one that an earlier version of fairq wrote, in an earlier
     // start of the machine: no identity fields, and a file time before the
     // boot. The supervisor and the job stay alive as the live strangers that
     // the recycled numbers would point at.
@@ -8347,7 +8369,7 @@ fn a_job_that_stops_at_its_time_limit_keeps_its_result() {
         // finishes first and the code is 0. Both are correct, and the test is
         // about the RECORD, which must never say `timeout` and `exit code 0`
         // together.
-        h.qex(&["wait", id, "--timeout", "60s"]);
+        h.fairq(&["wait", id, "--timeout", "60s"]);
         let s = h.status_json(id);
         let state = s["state"].as_str().unwrap();
         let code = s["exit_code"].as_i64();
@@ -8370,7 +8392,7 @@ fn a_job_that_stops_at_its_time_limit_keeps_its_result() {
     }
 }
 
-/// `qex wait` MUST RETURN WHEN THE JOB GIVES UP, AND NOT 30 SECONDS LATER.
+/// `fairq wait` MUST RETURN WHEN THE JOB GIVES UP, AND NOT 30 SECONDS LATER.
 ///
 /// This test starts the wait BEFORE the limit ends. That order is the whole
 /// point: a wait that begins after the job expired returns at once, whatever
@@ -8378,7 +8400,7 @@ fn a_job_that_stops_at_its_time_limit_keeps_its_result() {
 ///
 /// The fault that this test holds: the scheduler wrote the state `expired` and
 /// signalled no waiter. Every waiter then slept on the 30 second fallback in
-/// `handle_wait`. The record said 3s and `qex wait` returned at 30.0s, so the
+/// `handle_wait`. The record said 3s and `fairq wait` returned at 30.0s, so the
 /// promise "this gives an answer inside 30 minutes" was false by 30 seconds for
 /// every user of the option.
 #[test]
@@ -8404,7 +8426,7 @@ fn a_wait_returns_when_the_job_reaches_its_queue_limit() {
 
     // Wait from HERE, while the job is still in the queue.
     let start = std::time::Instant::now();
-    let out = h.qex(&["wait", &id, "--timeout", "60s"]);
+    let out = h.fairq(&["wait", &id, "--timeout", "60s"]);
     let elapsed = start.elapsed();
 
     assert_eq!(
@@ -8420,14 +8442,14 @@ fn a_wait_returns_when_the_job_reaches_its_queue_limit() {
     // the speed of the machine.
     assert!(
         elapsed < Duration::from_secs(10),
-        "`qex wait` returned after {elapsed:?}, and the limit is 3s. The \
+        "`fairq wait` returned after {elapsed:?}, and the limit is 3s. The \
          scheduler expired the job and signalled no waiter."
     );
 }
 
-/// `qex config show` MUST NAME THE QUEUE LIMIT, AND NAME IT ALWAYS.
+/// `fairq config show` MUST NAME THE QUEUE LIMIT, AND NAME IT ALWAYS.
 ///
-/// This command says what qex uses NOW. A value that it never prints is a value
+/// This command says what fairq uses NOW. A value that it never prints is a value
 /// that a reader cannot confirm, and "no limit" is the answer that most users
 /// get: it says that a job waits for capacity with no end. A user who asks why
 /// a job waited for hours needs to read that line and see that no limit
@@ -8460,7 +8482,7 @@ fn the_config_summary_names_the_queue_limit() {
     let out = h.ok(&["config", "show"]);
     assert!(
         out.contains("queue limit:") && out.contains("30m"),
-        "the summary must give the value that qex uses: {out}"
+        "the summary must give the value that fairq uses: {out}"
     );
     assert!(
         out.contains("expired"),
@@ -8478,12 +8500,12 @@ fn the_config_summary_names_the_queue_limit() {
 /// The fault that this test holds: a scheduling pass counted the EXPIRED jobs
 /// only. A skipped job also has no supervisor and no request thread to announce
 /// it, so the pass signalled nobody and every waiter slept on the 30 second
-/// fallback in `handle_wait`. Measured with that count: `qex wait` on the
+/// fallback in `handle_wait`. Measured with that count: `fairq wait` on the
 /// second job returned at 33.0s, 3 of 3 runs, with a limit of 3s. With the
 /// count it returned at 3.5s.
 ///
 /// THE TEST MEASURES THE PROMISE, AND NOT THE RECORD. A test that waits for the
-/// status file to say `skipped` passes while `qex wait` sleeps, because the
+/// status file to say `skipped` passes while `fairq wait` sleeps, because the
 /// file holds the answer that the waiter did not receive.
 #[test]
 fn a_wait_returns_when_the_job_that_it_needs_gives_up_in_the_queue() {
@@ -8511,7 +8533,7 @@ fn a_wait_returns_when_the_job_that_it_needs_gives_up_in_the_queue() {
 
     // Wait from HERE, while both jobs are still in the queue.
     let start = std::time::Instant::now();
-    let out = h.qex(&["wait", &second, "--timeout", "60s"]);
+    let out = h.fairq(&["wait", &second, "--timeout", "60s"]);
     let elapsed = start.elapsed();
 
     assert_eq!(
@@ -8528,7 +8550,7 @@ fn a_wait_returns_when_the_job_that_it_needs_gives_up_in_the_queue() {
     // the speed of the machine.
     assert!(
         elapsed < Duration::from_secs(10),
-        "`qex wait` returned after {elapsed:?}, and the limit of the job that \
+        "`fairq wait` returned after {elapsed:?}, and the limit of the job that \
          this job needs is 3s. The scheduler skipped this job and signalled no \
          waiter."
     );
@@ -8538,7 +8560,7 @@ fn a_wait_returns_when_the_job_that_it_needs_gives_up_in_the_queue() {
 ///
 /// The scheduler chooses a job, releases the lock, and the start of that job
 /// writes `starting`. A scheduling pass that removed a job in that moment would
-/// write `expired` over a job that ran, and `qex wait` would then report a
+/// write `expired` over a job that ran, and `fairq wait` would then report a
 /// failure for a job that succeeded.
 ///
 /// These jobs run one at a time on a budget of one core, and their queue limit
@@ -8571,7 +8593,7 @@ fn a_job_that_started_at_its_queue_limit_keeps_its_result() {
     for id in &ids {
         // Not `ok`: a job that reaches its queue limit gives the code 123, and
         // that is one of the two correct results here.
-        h.qex(&["wait", id, "--timeout", "60s"]);
+        h.fairq(&["wait", id, "--timeout", "60s"]);
         let s = h.status_json(id);
         let state = s["state"].as_str().unwrap();
 
@@ -8596,7 +8618,7 @@ fn a_job_that_started_at_its_queue_limit_keeps_its_result() {
     }
 }
 
-/// `qex logs` must show the output of a job that writes bytes which are not
+/// `fairq logs` must show the output of a job that writes bytes which are not
 /// UTF-8. A build in a different language, or a program that writes a byte from
 /// a binary file, gives such output.
 ///
@@ -8700,7 +8722,7 @@ fn the_status_records_the_command_and_the_directory() {
     assert!(!s["cwd"].as_str().unwrap().is_empty());
 }
 
-/// `qex info --no-start` must not start a coordinator.
+/// `fairq info --no-start` must not start a coordinator.
 ///
 /// A script that stops the coordinator needs this option. Without it, the
 /// command starts the process that the script wants to stop.
@@ -8708,33 +8730,33 @@ fn the_status_records_the_command_and_the_directory() {
 fn info_can_test_for_a_coordinator_without_starting_one() {
     let h = Harness::with_default_config("nostart");
 
-    let out = h.qex(&["info", "--no-start", "--json"]);
+    let out = h.fairq(&["info", "--no-start", "--json"]);
     assert!(!out.status.success(), "there is no coordinator yet");
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["running"], false);
 
     // No coordinator may exist after that command.
     assert!(
-        !h.root.join("state/qex/run/s").exists(),
+        !h.root.join("state/fairq/run/s").exists(),
         "the command started a coordinator"
     );
 
     // With a coordinator, the same command reports it.
     let id = h.submit(&["submit", "--", "true"]);
     h.ok(&["wait", &id, "--timeout", "30s"]);
-    let out = h.qex(&["info", "--no-start", "--json"]);
+    let out = h.fairq(&["info", "--no-start", "--json"]);
     assert!(out.status.success());
 }
 
-/// A claim of zero cores must give an error. qex must not change the number in
-/// silence, and a claim of zero would let qex start jobs with no limit.
+/// A claim of zero cores must give an error. fairq must not change the number in
+/// silence, and a claim of zero would let fairq start jobs with no limit.
 #[test]
 fn a_claim_of_zero_cores_is_refused() {
     let h = Harness::with_default_config("zeroclaim");
-    let out = h.qex(&["submit", "--cpu", "0", "--", "true"]);
+    let out = h.fairq(&["submit", "--cpu", "0", "--", "true"]);
     assert!(
         !out.status.success(),
-        "qex must refuse a claim of zero cores"
+        "fairq must refuse a claim of zero cores"
     );
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -8749,11 +8771,11 @@ fn an_unknown_job_gives_the_same_code_for_each_form_of_the_name() {
     let h = Harness::with_default_config("codes");
     for name in ["3f5a1c2e-0000-4000-8000-000000000000", "not-a-uuid"] {
         for command in ["status", "wait"] {
-            let out = h.qex(&[command, name]);
+            let out = h.fairq(&[command, name]);
             assert_eq!(
                 out.status.code(),
                 Some(127),
-                "`qex {command} {name}` must give the code 127"
+                "`fairq {command} {name}` must give the code 127"
             );
         }
     }
@@ -8783,7 +8805,7 @@ fn a_failed_stage_stops_the_stages_after_it() {
     let ship = h.submit(&["submit", "--name", "ship", "--needs", &test, "--", "true"]);
 
     // The last stage must give the code 126: it did not run.
-    let out = h.qex(&["wait", &ship, "--timeout", "60s"]);
+    let out = h.fairq(&["wait", &ship, "--timeout", "60s"]);
     assert_eq!(out.status.code(), Some(126));
 
     assert_eq!(h.state_of(&build), "failed");
@@ -8837,7 +8859,7 @@ fn a_pipeline_that_succeeds_runs_each_stage_in_order() {
         "echo three",
     ]);
 
-    let out = h.qex(&["wait", &ship, "--timeout", "60s"]);
+    let out = h.fairq(&["wait", &ship, "--timeout", "60s"]);
     assert_eq!(out.status.code(), Some(0));
 
     for id in [&build, &test, &ship] {
@@ -8852,7 +8874,7 @@ fn a_pipeline_that_succeeds_runs_each_stage_in_order() {
         "the last stage started before the first stage stopped"
     );
 
-    // `qex list` must show the stages in the order of submission.
+    // `fairq list` must show the stages in the order of submission.
     let names: Vec<String> = h
         .list_json()
         .iter()
@@ -8880,7 +8902,7 @@ fn an_after_job_runs_when_the_job_before_it_fails() {
         "echo cleaned",
     ]);
 
-    let out = h.qex(&["wait", &cleanup, "--timeout", "60s"]);
+    let out = h.fairq(&["wait", &cleanup, "--timeout", "60s"]);
     assert_eq!(out.status.code(), Some(0), "an --after job must run");
     assert_eq!(h.state_of(&build), "failed");
     assert_eq!(h.state_of(&cleanup), "completed");
@@ -8909,7 +8931,7 @@ fn a_job_that_waits_for_another_job_does_not_hold_capacity() {
 
     // A job with no dependency must not wait for the job above it.
     let free = h.submit(&["submit", "--cpu", "1", "--mem", "64MB", "--", "true"]);
-    let out = h.qex(&["wait", &free, "--timeout", "20s"]);
+    let out = h.fairq(&["wait", &free, "--timeout", "20s"]);
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -8927,7 +8949,7 @@ fn a_job_that_waits_for_another_job_does_not_hold_capacity() {
 #[test]
 fn a_dependency_that_does_not_exist_is_refused() {
     let h = Harness::with_default_config("nodep");
-    let out = h.qex(&["submit", "--needs", "no-such-job", "--", "true"]);
+    let out = h.fairq(&["submit", "--needs", "no-such-job", "--", "true"]);
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -8936,7 +8958,7 @@ fn a_dependency_that_does_not_exist_is_refused() {
     );
 }
 
-/// `qex clean` must keep a job that a job in the queue needs. Without that
+/// `fairq clean` must keep a job that a job in the queue needs. Without that
 /// record, the job that waits cannot report why it did not run.
 #[test]
 fn clean_keeps_a_job_that_another_job_needs() {
@@ -8953,17 +8975,17 @@ fn clean_keeps_a_job_that_another_job_needs() {
     ]);
     let second = h.submit(&["submit", "--needs", &first, "--", "true"]);
 
-    let out = h.qex(&["clean", &first]);
-    assert!(!out.status.success(), "qex must keep this job");
+    let out = h.fairq(&["clean", &first]);
+    assert!(!out.status.success(), "fairq must keep this job");
 
     // The second job does not run, so `wait` gives the code 126.
-    let out = h.qex(&["wait", &second, "--timeout", "60s"]);
+    let out = h.fairq(&["wait", &second, "--timeout", "60s"]);
     assert_eq!(out.status.code(), Some(126));
     assert_eq!(h.state_of(&second), "skipped");
 }
 
-/// A state name must operate in place of a job id, so `qex clean completed`
-/// gives the same result as `qex clean --state completed`.
+/// A state name must operate in place of a job id, so `fairq clean completed`
+/// gives the same result as `fairq clean --state completed`.
 #[test]
 fn clean_accepts_a_state_name() {
     let h = Harness::with_default_config("cleanword");
@@ -8971,7 +8993,7 @@ fn clean_accepts_a_state_name() {
     let good = h.submit(&["submit", "--", "true"]);
     let bad = h.submit(&["submit", "--", "false"]);
     h.ok(&["wait", &good, "--timeout", "30s"]);
-    h.qex(&["wait", &bad, "--timeout", "30s"]);
+    h.fairq(&["wait", &bad, "--timeout", "30s"]);
 
     h.ok(&["clean", "completed"]);
 
@@ -8980,7 +9002,7 @@ fn clean_accepts_a_state_name() {
         .iter()
         .map(|j| j["state"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(states, vec!["failed"], "qex deleted the wrong jobs");
+    assert_eq!(states, vec!["failed"], "fairq deleted the wrong jobs");
 }
 
 /// Gives the command of a job that waits until the test releases it.
@@ -8991,7 +9013,7 @@ fn clean_accepts_a_state_name() {
 ///
 /// A job that ends on a timer is therefore a race. A slow machine finishes the
 /// job before the test reads the answer, and the failure then names the test
-/// and not a fault of qex. This job waits for a FILE, so it stays unfinished
+/// and not a fault of fairq. This job waits for a FILE, so it stays unfinished
 /// until the test makes that file, however slow the machine is.
 ///
 /// Use `release` to end every job that waits for the same file.
@@ -9074,7 +9096,7 @@ fn clean_keeps_every_record_of_a_pipeline_that_operates() {
 /// A queue holds jobs that have no relation to each other. A message that
 /// lists every job which has not stopped says that each one needs the records
 /// that stayed, and that relation does not exist. A reader acts on the output
-/// of qex as fact, so a message may state only the relation that qex computed.
+/// of fairq as fact, so a message may state only the relation that fairq computed.
 #[test]
 fn the_message_names_the_work_that_holds_a_record() {
     // THREE jobs must be unfinished in one moment, so the budget must admit
@@ -9144,11 +9166,11 @@ fn the_message_names_the_work_that_holds_a_record() {
     release(&gate);
 }
 
-/// `qex gc` counts a record as held only when the age selected it.
+/// `fairq gc` counts a record as held only when the age selected it.
 ///
 /// `gc` deletes a record when it is old enough. A record that is too young is
 /// not a record that a job holds back, and a count that mixes the two tells the
-/// reader that qex refused a deletion which the reader never asked for.
+/// reader that fairq refused a deletion which the reader never asked for.
 #[test]
 fn gc_counts_only_the_records_that_the_age_selected() {
     let h = Harness::with_default_config("gccount");
@@ -9176,7 +9198,7 @@ fn gc_counts_only_the_records_that_the_age_selected() {
     release(&gate);
 }
 
-/// The JSON of `qex gc` says what qex tested: work that has not stopped holds
+/// The JSON of `fairq gc` says what fairq tested: work that has not stopped holds
 /// the record.
 ///
 /// An agent parses a key. The earlier key said that a job NEEDS each record
@@ -9184,7 +9206,7 @@ fn gc_counts_only_the_records_that_the_age_selected() {
 /// which is not a need. An agent that read the earlier key looked for a job
 /// that does not exist.
 #[test]
-fn the_json_of_gc_names_the_relation_that_qex_tested() {
+fn the_json_of_gc_names_the_relation_that_fairq_tested() {
     let h = Harness::with_default_config("gckey");
     let gate = h.root.join("gate");
     let waiting = waits_for_the_test(&gate);
@@ -9200,7 +9222,7 @@ fn the_json_of_gc_names_the_relation_that_qex_tested() {
 
     let out = h.ok(&["gc", "--dry-run", "--older-than", "0s", "--json"]);
     let answer: serde_json::Value = serde_json::from_str(&out)
-        .unwrap_or_else(|e| panic!("`qex gc --json` must be JSON: {e}: {out}"));
+        .unwrap_or_else(|e| panic!("`fairq gc --json` must be JSON: {e}: {out}"));
     assert_eq!(
         answer["kept_because_work_has_not_stopped"], 1,
         "the record of `k-a` is old enough, and a job that operates holds it: {answer}"
@@ -9215,13 +9237,13 @@ fn the_json_of_gc_names_the_relation_that_qex_tested() {
 
 /// The coordinator refuses a deletion that breaks a chain.
 ///
-/// `qex clean <id>` names one record, and the coordinator decides every
+/// `fairq clean <id>` names one record, and the coordinator decides every
 /// deletion. That decision must use the same rule as the selection, and it must
 /// look through the WHOLE chain: a record two steps behind a job that operates
 /// is still a record that the work needs.
 ///
 /// The refusal must carry an exit code and name the job to wait for. A reader
-/// who names one record must learn that qex kept it.
+/// who names one record must learn that fairq kept it.
 #[test]
 fn the_coordinator_refuses_a_deletion_that_a_chain_needs() {
     let h = Harness::with_default_config("cleandeep");
@@ -9240,12 +9262,12 @@ fn the_coordinator_refuses_a_deletion_that_a_chain_needs() {
     });
 
     // `a` is TWO steps behind the job that operates.
-    let out = h.qex(&["clean", &a]);
+    let out = h.fairq(&["clean", &a]);
     let text = String::from_utf8_lossy(&out.stderr).to_string();
 
     assert!(
         !out.status.success(),
-        "qex must refuse this deletion and say so with a code: {text}"
+        "fairq must refuse this deletion and say so with a code: {text}"
     );
     assert!(
         text.contains("is needed by"),
@@ -9300,12 +9322,12 @@ fn the_coordinator_keeps_a_stage_of_a_pipeline_that_operates() {
         .expect("the branch stage has a record");
 
     // Nothing waits for `s2b`, and its pipeline has work left.
-    let out = h.qex(&["clean", &branch]);
+    let out = h.fairq(&["clean", &branch]);
     let text = String::from_utf8_lossy(&out.stderr).to_string();
 
     assert!(
         !out.status.success(),
-        "qex must refuse to delete a stage of a pipeline that operates: {text}"
+        "fairq must refuse to delete a stage of a pipeline that operates: {text}"
     );
     assert!(
         h.list_json().iter().any(|j| j["id"] == branch),
@@ -9317,10 +9339,10 @@ fn the_coordinator_keeps_a_stage_of_a_pipeline_that_operates() {
 
 /// The count of a deletion says what the command did.
 ///
-/// `qex clean` keeps a record that a job which has not stopped needs, and it
+/// `fairq clean` keeps a record that a job which has not stopped needs, and it
 /// says how many records stayed. That count must hold the records that the
 /// reader ASKED for. A count that holds a record which no option selected tells
-/// the reader that qex refused a deletion that the reader never requested.
+/// the reader that fairq refused a deletion that the reader never requested.
 #[test]
 fn clean_counts_only_the_records_that_the_reader_asked_for() {
     let h = Harness::with_default_config("cleancount");
@@ -9338,7 +9360,7 @@ fn clean_counts_only_the_records_that_the_reader_asked_for() {
 
     // The reader asks about ONE job that operates. The record of `a` stays,
     // and the reader did not ask for it.
-    let out = h.qex(&["clean", &b]);
+    let out = h.fairq(&["clean", &b]);
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
@@ -9355,8 +9377,8 @@ fn clean_counts_only_the_records_that_the_reader_asked_for() {
 
 /// A word that names WORK and a state must give an error, and delete nothing.
 ///
-/// `qex clean completed` deletes every job that succeeded, and a job or a
-/// pipeline can carry the name `completed`. qex must not choose one of the two
+/// `fairq clean completed` deletes every job that succeeded, and a job or a
+/// pipeline can carry the name `completed`. fairq must not choose one of the two
 /// readings: one reading deletes one record, and the other deletes every record
 /// that the user kept.
 #[test]
@@ -9369,7 +9391,7 @@ fn clean_refuses_a_word_that_names_work_and_a_state() {
     h.ok(&["wait", &named, "--timeout", "45s"]);
     h.ok(&["wait", &other, "--timeout", "45s"]);
 
-    let out = h.qex(&["clean", "completed"]);
+    let out = h.fairq(&["clean", "completed"]);
     assert_eq!(
         out.status.code(),
         Some(127),
@@ -9400,7 +9422,7 @@ fn clean_refuses_a_word_that_names_work_and_a_state() {
     //
     // The job named `completed` goes first. While that job is there the JOB
     // reading is true, and the pipeline reading is never reached: a test that
-    // keeps the job passes with the pipeline reading deleted, and `qex clean
+    // keeps the job passes with the pipeline reading deleted, and `fairq clean
     // completed` would then delete every record that succeeded.
     h.ok(&["clean", &named]);
     h.ok(&["clean", &other]);
@@ -9409,8 +9431,8 @@ fn clean_refuses_a_word_that_names_work_and_a_state() {
     let file = h.root.join("completed.toml");
     std::fs::write(&file, "[[jobs]]\nname = \"stage\"\ncommand = [\"true\"]\n").unwrap();
     let group = h.ok(&["pipeline", file.to_str().unwrap()]);
-    h.qex(&["wait", &group, "--timeout", "45s"]);
-    let out = h.qex(&["clean", "completed"]);
+    h.fairq(&["wait", &group, "--timeout", "45s"]);
+    let out = h.fairq(&["clean", "completed"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("name of a pipeline"),
@@ -9442,7 +9464,7 @@ fn a_job_file_accepts_dependencies() {
     .unwrap();
 
     let second = h.submit(&["submit", "--job", file.to_str().unwrap()]);
-    let out = h.qex(&["wait", &second, "--timeout", "60s"]);
+    let out = h.fairq(&["wait", &second, "--timeout", "60s"]);
     assert_eq!(out.status.code(), Some(126));
     assert_eq!(h.state_of(&second), "skipped");
     assert_eq!(
@@ -9453,13 +9475,13 @@ fn a_job_file_accepts_dependencies() {
 
 /// A dependency that names no job must be refused.
 ///
-/// A value with the form of a UUID gave no error before, and qex dropped the
+/// A value with the form of a UUID gave no error before, and fairq dropped the
 /// dependency. The job then started with no wait and no warning, and a pipeline
 /// reported success although the order was wrong.
 #[test]
 fn a_dependency_with_an_unknown_uuid_is_refused() {
     let h = Harness::with_default_config("depuuid");
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--needs",
         "11111111-2222-3333-4444-555555555555",
@@ -9468,9 +9490,9 @@ fn a_dependency_with_an_unknown_uuid_is_refused() {
     ]);
     assert!(
         !out.status.success(),
-        "qex must refuse an unknown dependency"
+        "fairq must refuse an unknown dependency"
     );
-    assert!(h.list_json().is_empty(), "qex must not accept the job");
+    assert!(h.list_json().is_empty(), "fairq must not accept the job");
 }
 
 /// An id and a name have different rules.
@@ -9489,7 +9511,7 @@ fn a_name_must_be_live_but_an_id_need_only_exist() {
 
     // By NAME: refused, because the name can give a job of an earlier run.
     for option in ["--needs", "--after"] {
-        let out = h.qex(&["submit", option, "build", "--", "true"]);
+        let out = h.fairq(&["submit", option, "build", "--", "true"]);
         assert!(
             !out.status.success(),
             "{option} with a name that gives a job which stopped must be refused"
@@ -9507,7 +9529,7 @@ fn a_name_must_be_live_but_an_id_need_only_exist() {
 
     // By ID: accepted, because an id names one job for ever.
     for option in ["--needs", "--after"] {
-        let out = h.qex(&["submit", option, &first, "--", "true"]);
+        let out = h.fairq(&["submit", option, &first, "--", "true"]);
         assert!(
             out.status.success(),
             "{option} with an id must be accepted: {}",
@@ -9526,12 +9548,12 @@ fn a_name_must_be_live_but_an_id_need_only_exist() {
 fn a_dependency_that_failed_is_accepted_and_makes_the_job_skipped() {
     let h = Harness::with_default_config("depfailed");
     let first = h.submit(&["submit", "--name", "first", "--", "false"]);
-    h.qex(&["wait", &first, "--timeout", "30s"]);
+    h.fairq(&["wait", &first, "--timeout", "30s"]);
     assert_eq!(h.state_of(&first), "failed");
 
     // Use the id. A name would be refused, because the job already stopped.
     let second = h.submit(&["submit", "--needs", &first, "--", "true"]);
-    let out = h.qex(&["wait", &second, "--timeout", "45s"]);
+    let out = h.fairq(&["wait", &second, "--timeout", "45s"]);
     assert_eq!(out.status.code(), Some(126));
     assert_eq!(h.state_of(&second), "skipped");
     assert_eq!(
@@ -9546,7 +9568,7 @@ fn a_dependency_that_failed_is_accepted_and_makes_the_job_skipped() {
 /// The dependency test and the capacity test are separate passes for this
 /// reason. In one pass, the walk stops at the first job that waits for
 /// capacity, and a job behind it is never tested. Such a job stays in the queue
-/// for ever and `qex wait` never gives an answer.
+/// for ever and `fairq wait` never gives an answer.
 #[test]
 fn a_failed_dependency_is_seen_behind_a_blocked_queue() {
     let h = Harness::new(
@@ -9603,7 +9625,7 @@ fn a_failed_dependency_is_seen_behind_a_blocked_queue() {
         h.state_of(&skipped) == "skipped"
     });
 
-    let out = h.qex(&["wait", &skipped, "--timeout", "10s"]);
+    let out = h.fairq(&["wait", &skipped, "--timeout", "10s"]);
     assert_eq!(out.status.code(), Some(126));
 
     h.ok(&["kill", &blocker, "--grace", "1s"]);
@@ -9620,9 +9642,9 @@ fn a_failed_dependency_is_seen_behind_a_blocked_queue() {
 /// the record to `starting`.
 ///
 /// The supervisor does not write again until the job stops, so a job of five
-/// minutes said `starting` for five minutes. `qex top` could measure nothing,
-/// `qex kill` refused the job with "the job starts now. Try the command again.",
-/// and the tests of qex failed on a busy machine about one time in six.
+/// minutes said `starting` for five minutes. `fairq top` could measure nothing,
+/// `fairq kill` refused the job with "the job starts now. Try the command again.",
+/// and the tests of fairq failed on a busy machine about one time in six.
 ///
 /// The record now has ONE writer at each moment.
 #[test]
@@ -9660,12 +9682,12 @@ fn a_job_that_operates_says_running_and_gives_its_pid() {
             "the record must not return to an earlier state"
         );
 
-        // `qex kill` must accept the job. It refused a job with no pid.
+        // `fairq kill` must accept the job. It refused a job with no pid.
         h.ok(&["kill", id, "--grace", "1s"]);
     }
 }
 
-/// `qex logs` with a job that does not exist must not give the code 0 with no
+/// `fairq logs` with a job that does not exist must not give the code 0 with no
 /// output. A reader could not separate "this job wrote nothing" from "this job
 /// does not exist".
 #[test]
@@ -9674,22 +9696,22 @@ fn every_command_gives_one_code_for_a_job_that_does_not_exist() {
     let unknown = "11111111-2222-3333-4444-555555555555";
 
     for command in ["status", "wait", "logs", "kill", "cancel"] {
-        let out = h.qex(&[command, unknown]);
+        let out = h.fairq(&[command, unknown]);
         assert_eq!(
             out.status.code(),
             Some(127),
-            "`qex {command}` must give the code 127 for a job that does not exist"
+            "`fairq {command}` must give the code 127 for a job that does not exist"
         );
     }
 }
 
 /// A command that WAITS must answer at once for a job that does not exist.
 ///
-/// A wait that nothing can satisfy is the fault that qex exists to remove. An
+/// A wait that nothing can satisfy is the fault that fairq exists to remove. An
 /// agent that meets one holds a terminal until a person looks. It has no exit
 /// code to act on, and no message that says the wait cannot end.
 ///
-/// The limit of qex and the limit of `qex_within` bound each form together. A
+/// The limit of fairq and the limit of `fairq_within` bound each form together. A
 /// guard that goes away thus gives a failure, and never a suite that stops.
 #[test]
 fn a_command_that_waits_answers_at_once_for_a_job_that_does_not_exist() {
@@ -9697,13 +9719,13 @@ fn a_command_that_waits_answers_at_once_for_a_job_that_does_not_exist() {
     let unknown = "11111111-2222-3333-4444-666666666666";
 
     // Each form that takes a time limit carries one BELOW the limit of
-    // `qex_within`, because the two limits catch two faults.
+    // `fairq_within`, because the two limits catch two faults.
     //
-    // A fault that qex can bound ends at the limit of qex and gives 124, and
-    // that code names the cause. A fault BEFORE qex resolves the id ends at
-    // `qex_within`, which reports only that no answer arrived.
+    // A fault that fairq can bound ends at the limit of fairq and gives 124, and
+    // that code names the cause. A fault BEFORE fairq resolves the id ends at
+    // `fairq_within`, which reports only that no answer arrived.
     //
-    // `logs --follow` takes no time limit, so `qex_within` alone stops it.
+    // `logs --follow` takes no time limit, so `fairq_within` alone stops it.
     let forms: [&[&str]; 5] = [
         &["wait", unknown, "--timeout", "10s"],
         &["wait", unknown, "--next", "--timeout", "10s"],
@@ -9721,30 +9743,30 @@ fn a_command_that_waits_answers_at_once_for_a_job_that_does_not_exist() {
 
     for form in forms {
         let started = Instant::now();
-        let out = h.qex_within(form, Duration::from_secs(30));
+        let out = h.fairq_within(form, Duration::from_secs(30));
         let took = started.elapsed();
         assert_eq!(
             out.status.code(),
             Some(127),
-            "`qex {}` must give the code 127, and it gave this: {}",
+            "`fairq {}` must give the code 127, and it gave this: {}",
             form.join(" "),
             String::from_utf8_lossy(&out.stderr)
         );
         assert!(
             took < Duration::from_secs(8),
-            "`qex {}` took {took:?}, and the answer was ready at once",
+            "`fairq {}` took {took:?}, and the answer was ready at once",
             form.join(" ")
         );
     }
 }
 
-/// A wait for a job whose RECORD a `qex clean` deleted must end, and it must
+/// A wait for a job whose RECORD a `fairq clean` deleted must end, and it must
 /// say that the work happened.
 ///
 /// The two states need two answers. A job that never existed is a fault of the
-/// id that the reader gave. A record that qex deleted names work that RAN, so
+/// id that the reader gave. A record that fairq deleted names work that RAN, so
 /// an agent that submits it again repeats it. Both give the code 127, because
-/// the code answers one question: qex holds no job with that id now.
+/// the code answers one question: fairq holds no job with that id now.
 #[test]
 fn a_wait_for_a_record_that_clean_deleted_says_the_work_happened() {
     let h = Harness::with_default_config("waitcleaned");
@@ -9755,7 +9777,7 @@ fn a_wait_for_a_record_that_clean_deleted_says_the_work_happened() {
     h.ok(&["clean", &id]);
 
     let started = Instant::now();
-    let out = h.qex_within(&["wait", &id, "--timeout", "10s"], Duration::from_secs(30));
+    let out = h.fairq_within(&["wait", &id, "--timeout", "10s"], Duration::from_secs(30));
     let took = started.elapsed();
     let said = String::from_utf8_lossy(&out.stderr).to_string();
 
@@ -9809,13 +9831,13 @@ fn clean_keeps_the_cause_readable_for_the_jobs_that_it_leaves() {
         "the record must still name the job that failed: {error}"
     );
     assert!(
-        !error.contains("qex logs"),
+        !error.contains("fairq logs"),
         "the record must not send the reader to a log that is deleted: {error}"
     );
     assert!(s["caused_by"].is_null(), "the id points at nothing now");
 }
 
-/// `qex logs` must not write a very large file to the terminal by default.
+/// `fairq logs` must not write a very large file to the terminal by default.
 /// The reader is frequently an agent with a limited context.
 #[test]
 fn logs_shows_the_last_lines_by_default() {
@@ -9829,7 +9851,7 @@ fn logs_shows_the_last_lines_by_default() {
     ]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
 
-    let result = h.qex(&["logs", &id, "--stdout"]);
+    let result = h.fairq(&["logs", &id, "--stdout"]);
     let out = String::from_utf8_lossy(&result.stdout);
     let notice = String::from_utf8_lossy(&result.stderr);
     assert!(
@@ -9841,7 +9863,7 @@ fn logs_shows_the_last_lines_by_default() {
     // The notice goes to stderr, so stdout holds the log lines only.
     assert!(
         notice.contains("not shown"),
-        "qex must say that it hid the earlier lines: {notice}"
+        "fairq must say that it hid the earlier lines: {notice}"
     );
 
     // The option `--all` must give every line.
@@ -9850,7 +9872,7 @@ fn logs_shows_the_last_lines_by_default() {
     assert!(full.lines().count() >= 2000);
 }
 
-/// `qex status` of a job that failed must also give the last lines of its
+/// `fairq status` of a job that failed must also give the last lines of its
 /// standard error, with no option at all.
 ///
 /// A reader of a failure always wants those lines. Without them, every failure
@@ -9869,7 +9891,7 @@ fn the_status_of_a_job_that_failed_holds_its_error_output() {
         "-c",
         "echo normal; echo 'BOOM: it broke' >&2; exit 3",
     ]);
-    h.qex(&["wait", &id, "--timeout", "45s"]);
+    h.fairq(&["wait", &id, "--timeout", "45s"]);
 
     // No option at all.
     let text = h.ok(&["status", &id]);
@@ -9915,7 +9937,7 @@ fn the_status_of_a_failure_gives_both_streams() {
         "-c",
         "echo 'exact 27793/27793 OK'; echo 'FAIL: 64087 mismatched' >&2; exit 1",
     ]);
-    h.qex(&["wait", &id, "--timeout", "45s"]);
+    h.fairq(&["wait", &id, "--timeout", "45s"]);
 
     let text = h.ok(&["status", &id]);
     assert!(
@@ -9973,7 +9995,7 @@ fn the_log_options_select_the_lines() {
 
     // A search reports the number of matches, so a wide pattern is visible.
     // The report goes to stderr, and the lines go to stdout.
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "logs",
         &id,
         "--stdout",
@@ -10042,10 +10064,10 @@ fn follow_leads_with_the_last_lines_only() {
     );
 }
 
-/// qex must use the measurement of an earlier job of the same command as the
+/// fairq must use the measurement of an earlier job of the same command as the
 /// claim for the next one.
 ///
-/// This behaviour is the reason that qex measures each job. `guess` is safe and
+/// This behaviour is the reason that fairq measures each job. `guess` is safe and
 /// frequently far too large, and an agent should not have to tune a claim.
 #[test]
 fn a_second_job_of_one_command_uses_the_measurement_of_the_first() {
@@ -10095,7 +10117,7 @@ fn a_second_job_of_one_command_uses_the_measurement_of_the_first() {
 /// Admission for memory asks the machine, so a large claim makes the result
 /// follow the free memory of the runner and not the code.
 ///
-/// The first job has a small claim for the same reason. qex records the peak of
+/// The first job has a small claim for the same reason. fairq records the peak of
 /// each job that completed, whatever gave the claim, so that job is still the
 /// measurement that the second claim must win over.
 #[test]
@@ -10123,7 +10145,7 @@ fn a_job_that_did_not_complete_is_not_a_measurement() {
     let program = ["sh", "-c", "exit 1"];
 
     let first = h.submit(&[&["submit", "--"], &program[..]].concat());
-    h.qex(&["wait", &first, "--timeout", "45s"]);
+    h.fairq(&["wait", &first, "--timeout", "45s"]);
     assert_eq!(h.state_of(&first), "failed");
 
     let second = h.submit(&[&["submit", "--"], &program[..]].concat());
@@ -10132,10 +10154,10 @@ fn a_job_that_did_not_complete_is_not_a_measurement() {
         "default",
         "a job that failed must not become a measurement"
     );
-    h.qex(&["wait", &second, "--timeout", "45s"]);
+    h.fairq(&["wait", &second, "--timeout", "45s"]);
 }
 
-/// A replacement of the qex program must not stop the jobs.
+/// A replacement of the fairq program must not stop the jobs.
 ///
 /// A coordinator can operate for hours. During development, a new build
 /// replaces the program file. The kernel then adds ` (deleted)` to the name in
@@ -10167,20 +10189,20 @@ fn a_replacement_of_the_program_does_not_stop_the_jobs() {
     );
 
     // Start a coordinator with a copy of the program.
-    let copy = h.root.join("qex-copy");
+    let copy = h.root.join("fairq-copy");
     copy_program(&copy);
 
     let run = |args: &[&str], exe: &std::path::Path| -> Output {
         let mut cmd = Command::new(exe);
         cmd.args(args);
         isolate(&mut cmd, &h.root, &h.peers_dir);
-        cmd.output().expect("qex did not start")
+        cmd.output().expect("fairq did not start")
     };
     let info = || -> serde_json::Value {
         let out = run(&["info", "--no-start", "--json"], &copy);
         serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
             panic!(
-                "`qex info` gave no JSON: {e}: {}",
+                "`fairq info` gave no JSON: {e}: {}",
                 String::from_utf8_lossy(&out.stderr)
             )
         })
@@ -10222,7 +10244,7 @@ fn a_replacement_of_the_program_does_not_stop_the_jobs() {
     let before = info()["pid"].as_i64().expect("a coordinator operates");
 
     // Replace the program file while the coordinator operates.
-    let new = h.root.join("qex-new");
+    let new = h.root.join("fairq-new");
     copy_program(&new);
     std::fs::rename(&new, &copy).unwrap();
 
@@ -10247,11 +10269,11 @@ fn a_replacement_of_the_program_does_not_stop_the_jobs() {
         String::from_utf8_lossy(&waited.stderr)
     );
 
-    // `qex info` must report the replacement, so a reader learns the cause.
+    // `fairq info` must report the replacement, so a reader learns the cause.
     //
     // The test for the replacement reads `/proc/self/exe`, which gives the path
     // and the words `(deleted)` after somebody replaces the file. macOS has no
-    // equivalent, so qex cannot report the replacement there. The part above —
+    // equivalent, so fairq cannot report the replacement there. The part above —
     // THE JOB CONTINUES — is the part that matters, and it operates on both.
     let v = info();
     assert_eq!(
@@ -10272,9 +10294,9 @@ fn a_replacement_of_the_program_does_not_stop_the_jobs() {
     );
 }
 
-/// Puts a copy of the qex program at a path, for a test that starts that copy.
+/// Puts a copy of the fairq program at a path, for a test that starts that copy.
 fn copy_program(to: &Path) {
-    copy_for_a_start(Path::new(env!("CARGO_BIN_EXE_qex")), to);
+    copy_for_a_start(Path::new(env!("CARGO_BIN_EXE_fairq")), to);
 }
 
 /// Makes `dir/<name>` a link to `program` from /bin or /usr/bin; a process started through it
@@ -10332,10 +10354,10 @@ fn copy_for_a_start(from: &Path, to: &Path) {
 
 /// A closed pipe must not give a Rust panic.
 ///
-/// An agent writes `qex list | head` frequently. Rust ignores SIGPIPE, so a
+/// An agent writes `fairq list | head` frequently. Rust ignores SIGPIPE, so a
 /// write to a closed pipe gives an error and the print macros panic on it. The
 /// output then holds a panic and a note about a backtrace, which reads as a
-/// fault in qex.
+/// fault in fairq.
 #[test]
 fn a_closed_pipe_does_not_give_a_panic() {
     let h = Harness::with_default_config("pipe");
@@ -10345,10 +10367,10 @@ fn a_closed_pipe_does_not_give_a_panic() {
 
     let out = Command::new("sh")
         .arg("-c")
-        .arg(format!("{} list | head -2", env!("CARGO_BIN_EXE_qex")))
+        .arg(format!("{} list | head -2", env!("CARGO_BIN_EXE_fairq")))
         .env("XDG_CONFIG_HOME", h.root.join("cfg"))
         .env("XDG_STATE_HOME", h.root.join("state"))
-        .env("QEX_IDLE_EXIT_SECS", "120")
+        .env("FAIRQ_IDLE_EXIT_SECS", "120")
         .output()
         .unwrap();
 
@@ -10388,7 +10410,7 @@ fn an_id_file_in_a_temporary_directory_gives_a_warning() {
     let h = Harness::with_default_config("idtmp");
 
     // The root of this harness is under the temporary directory of the machine.
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--id-file",
         h.root.join("job.id").to_str().unwrap(),
@@ -10402,7 +10424,7 @@ fn an_id_file_in_a_temporary_directory_gives_a_warning() {
         "an id file in a temporary directory must give a warning; got: {err}"
     );
 
-    // The warning must not reach stdout. `ID=$(qex submit ...)` must still give
+    // The warning must not reach stdout. `ID=$(fairq submit ...)` must still give
     // the id and nothing else.
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     assert!(
@@ -10412,9 +10434,9 @@ fn an_id_file_in_a_temporary_directory_gives_a_warning() {
 
     // A directory that lasts must give no warning. A warning that appears each
     // time teaches a reader to ignore it.
-    let lasting = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("qex-id-file-test");
+    let lasting = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("fairq-id-file-test");
     std::fs::create_dir_all(&lasting).unwrap();
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--id-file",
         lasting.join("job.id").to_str().unwrap(),
@@ -10483,9 +10505,9 @@ fn the_id_file_of_a_pipeline_holds_every_stage() {
 
 /// The group id of a pipeline is a handle that every command accepts.
 ///
-/// `qex pipeline` writes that id to stdout, so it is the value that a user
-/// keeps. It answered "there is no job with the id ..." in `qex wait`, `qex
-/// status` and `qex kill` with the code 127, and in `qex clean` with the code
+/// `fairq pipeline` writes that id to stdout, so it is the value that a user
+/// keeps. It answered "there is no job with the id ..." in `fairq wait`, `fairq
+/// status` and `fairq kill` with the code 127, and in `fairq clean` with the code
 /// one. The code 127 also says that a value names nothing, so a script could
 /// separate neither the two readings nor the two commands, and the documented
 /// way to use a pipeline ended with the user finding the last stage by hand.
@@ -10504,7 +10526,7 @@ fn the_group_id_of_a_pipeline_is_a_handle() {
     let group = h.ok(&["pipeline", pipeline.to_str().unwrap()]);
     assert!(group.parse::<uuid::Uuid>().is_ok(), "got: {group}");
 
-    // `qex wait` waits for every stage, and it succeeds because both stages
+    // `fairq wait` waits for every stage, and it succeeds because both stages
     // succeed.
     let out = h.ok(&["wait", &group, "--timeout", "60s"]);
     assert!(out.contains("completed"), "got: {out}");
@@ -10521,7 +10543,7 @@ fn the_group_id_of_a_pipeline_is_a_handle() {
         "the pipeline and one of its stages give two jobs, not three: {out}"
     );
 
-    // `qex status --json` gives an array for a pipeline, and one object for one
+    // `fairq status --json` gives an array for a pipeline, and one object for one
     // job. A script that reads one job must not become a script that reads an
     // array.
     let text = h.ok(&["status", &group, "--json"]);
@@ -10535,7 +10557,7 @@ fn the_group_id_of_a_pipeline_is_a_handle() {
     // ONE pipeline of several stages is one run, and it gets no warning. The
     // warning counts RUNS, and not stages, so a pipeline of two stages must
     // not read as two pipelines.
-    let out = h.qex(&["list", "--group", &group]);
+    let out = h.fairq(&["list", "--group", &group]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         !err.contains("pipelines"),
@@ -10553,7 +10575,7 @@ fn the_group_id_of_a_pipeline_is_a_handle() {
     // Read the output that the command WROTE. `Harness::ok` trims, and a
     // trimmed answer cannot show a leading empty line, so an assertion on it
     // would pass whatever the command wrote.
-    let out = h.qex(&["status", &group]);
+    let out = h.fairq(&["status", &group]);
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout).to_string();
     assert!(
@@ -10561,15 +10583,15 @@ fn the_group_id_of_a_pipeline_is_a_handle() {
         "an empty line must separate the stages: {text}"
     );
     // The separator goes BETWEEN the stages. An empty first line wastes the
-    // first line of the answer, and `qex status $ID` for one job never had one.
+    // first line of the answer, and `fairq status $ID` for one job never had one.
     assert!(
         text.starts_with("id:"),
         "the answer must not open with an empty line: {text:?}"
     );
 
-    // `qex logs` reads one job. It must refuse a pipeline and name the stages,
-    // because qex must not choose a stage for the reader.
-    let out = h.qex(&["logs", &group]);
+    // `fairq logs` reads one job. It must refuse a pipeline and name the stages,
+    // because fairq must not choose a stage for the reader.
+    let out = h.fairq(&["logs", &group]);
     assert_eq!(out.status.code(), Some(127), "a pipeline is not one job");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -10581,7 +10603,7 @@ fn the_group_id_of_a_pipeline_is_a_handle() {
         "the message must name every stage: {err}"
     );
 
-    // A pipeline of ONE stage is still a pipeline, so `qex logs` refuses it
+    // A pipeline of ONE stage is still a pipeline, so `fairq logs` refuses it
     // too. A rule that changed on the day a pipeline has one stage would give
     // a reader the logs of a stage that the reader did not name.
     let solo = h.root.join("solo.toml");
@@ -10591,7 +10613,7 @@ fn the_group_id_of_a_pipeline_is_a_handle() {
     )
     .unwrap();
     let one_stage = h.ok(&["pipeline", solo.to_str().unwrap()]);
-    let out = h.qex(&["logs", &one_stage]);
+    let out = h.fairq(&["logs", &one_stage]);
     assert_eq!(
         out.status.code(),
         Some(127),
@@ -10604,14 +10626,14 @@ fn the_group_id_of_a_pipeline_is_a_handle() {
         "the message must name the stage: {err}"
     );
 
-    // `qex clean` takes the group and deletes every stage.
+    // `fairq clean` takes the group and deletes every stage.
     h.ok(&["clean", &group]);
     let left = h.ok(&["list", "--group", &group]);
     assert!(left.contains("no jobs"), "got: {left}");
 
-    // `qex status $GROUP --wait` reports the FIRST fault of the pipeline.
+    // `fairq status $GROUP --wait` reports the FIRST fault of the pipeline.
     //
-    // A stage that qex skipped would otherwise hide the stage that failed: the
+    // A stage that fairq skipped would otherwise hide the stage that failed: the
     // last stage of a pipeline is nearly always the skipped one, and its code
     // 126 tells the reader that an earlier job failed without saying that THIS
     // pipeline holds the failure.
@@ -10624,11 +10646,11 @@ fn the_group_id_of_a_pipeline_is_a_handle() {
     )
     .unwrap();
     let bad_group = h.ok(&["pipeline", broken.to_str().unwrap()]);
-    let out = h.qex(&["status", &bad_group, "--wait", "--timeout", "60s"]);
+    let out = h.fairq(&["status", &bad_group, "--wait", "--timeout", "60s"]);
     assert_eq!(
         out.status.code(),
         Some(1),
-        "the code must name the stage that FAILED, and not the stage that qex \
+        "the code must name the stage that FAILED, and not the stage that fairq \
          skipped\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
@@ -10636,7 +10658,7 @@ fn the_group_id_of_a_pipeline_is_a_handle() {
 
     // A value that names nothing still gives the code 127, and the message now
     // says that a pipeline is also a handle.
-    let out = h.qex(&["status", "no-such-thing"]);
+    let out = h.fairq(&["status", "no-such-thing"]);
     assert_eq!(out.status.code(), Some(127));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("pipeline"), "got: {err}");
@@ -10645,7 +10667,7 @@ fn the_group_id_of_a_pipeline_is_a_handle() {
 /// One word must never reach two pipelines.
 ///
 /// A pipeline takes its name from its file, so a second run of the same file
-/// carries the same name. `qex kill ci` thus stopped the work of two separate
+/// carries the same name. `fairq kill ci` thus stopped the work of two separate
 /// runs when the user named one. A command that stops or deletes must refuse
 /// the word and name the runs.
 #[test]
@@ -10671,28 +10693,28 @@ fn a_word_that_names_two_pipelines_is_refused() {
         vec!["clean", "twice"],
         vec!["wait", "twice", "--timeout", "5s"],
     ] {
-        let out = h.qex(&command);
+        let out = h.fairq(&command);
         assert_eq!(
             out.status.code(),
             Some(127),
-            "`qex {}` must refuse the word",
+            "`fairq {}` must refuse the word",
             command.join(" ")
         );
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(
             err.contains("2 pipelines"),
-            "`qex {}` must say how many runs the word names, and it said: {err}",
+            "`fairq {}` must say how many runs the word names, and it said: {err}",
             command.join(" ")
         );
     }
 
-    // `qex list --group` is where the user looks after that refusal. It reads
+    // `fairq list --group` is where the user looks after that refusal. It reads
     // and deletes nothing, so it shows every run; but a reader who does not
     // know that the table holds two runs reads ONE pipeline that ran each
     // stage two times. It must thus say how many runs the word names, and give
     // the group id of each.
-    let out = h.qex(&["list", "--group", "twice"]);
-    assert!(out.status.success(), "`qex list --group` must not refuse");
+    let out = h.fairq(&["list", "--group", "twice"]);
+    assert!(out.status.success(), "`fairq list --group` must not refuse");
     let table = String::from_utf8_lossy(&out.stdout);
     assert_eq!(
         table.lines().filter(|l| l.contains("one")).count(),
@@ -10712,7 +10734,7 @@ fn a_word_that_names_two_pipelines_is_refused() {
     // `--json` is read by a machine, and that reader needs no sentence: the
     // `group` field of each job already separates the runs. The warning is for
     // a person, so it does not go with the JSON.
-    let out = h.qex(&["list", "--group", "twice", "--json"]);
+    let out = h.fairq(&["list", "--group", "twice", "--json"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         !err.contains("2 pipelines"),
@@ -10721,7 +10743,7 @@ fn a_word_that_names_two_pipelines_is_refused() {
 
     // One run only gives no warning. A sentence that appears every time is a
     // sentence that a reader stops reading.
-    let out = h.qex(&["list", "--group", &first]);
+    let out = h.fairq(&["list", "--group", &first]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         !err.contains("pipelines"),
@@ -10742,7 +10764,7 @@ fn a_word_that_names_two_pipelines_is_refused() {
     // Wait for the stage to hold a process first. Between "the state is
     // running" and "the coordinator recorded the pid" a kill answers `the job
     // starts now. Try the command again.`, which is the same answer that
-    // `qex kill $ID` gives for that moment. This step stops the work of the
+    // `fairq kill $ID` gives for that moment. This step stops the work of the
     // test, so it must not race with the start of that work.
     for group in [&first, &second] {
         h.until(
@@ -10765,14 +10787,14 @@ fn a_word_that_names_two_pipelines_is_refused() {
     }
 }
 
-/// `qex kill $GROUP` must stop a stage that WAITS, and not leave it to start.
+/// `fairq kill $GROUP` must stop a stage that WAITS, and not leave it to start.
 ///
 /// The documentation says that the command stops every stage. An early version
 /// reported the refusal for a queued stage as information and gave the code 0,
 /// so a script read that the pipeline stopped, and the queued stage then
 /// started and did its work.
 ///
-/// `qex cancel $GROUP` must not do the opposite: a stage that OPERATES cannot
+/// `fairq cancel $GROUP` must not do the opposite: a stage that OPERATES cannot
 /// leave the queue, and that refusal keeps its code.
 #[test]
 fn a_kill_of_a_group_stops_a_stage_that_waits_in_the_queue() {
@@ -10809,7 +10831,7 @@ fn a_kill_of_a_group_stops_a_stage_that_waits_in_the_queue() {
     }
     assert!(ready, "one stage must operate and one must wait");
 
-    // `qex kill $ID` for ONE job that waits keeps its fault and names `qex
+    // `fairq kill $ID` for ONE job that waits keeps its fault and names `fairq
     // cancel`. That user asked about that one job, and the answer is that a
     // job in the queue has no process to signal. Only a user who named the
     // whole pipeline asked for the queue to be emptied.
@@ -10819,16 +10841,16 @@ fn a_kill_of_a_group_stops_a_stage_that_waits_in_the_queue() {
         .as_str()
         .unwrap()
         .to_string();
-    let out = h.qex(&["kill", &queued]);
+    let out = h.fairq(&["kill", &queued]);
     assert_ne!(
         out.status.code(),
         Some(0),
-        "`qex kill $ID` for one job that waits must give a fault"
+        "`fairq kill $ID` for one job that waits must give a fault"
     );
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("cancel"),
-        "the fault must name `qex cancel`: {err}"
+        "the fault must name `fairq cancel`: {err}"
     );
     assert_eq!(
         h.state_of(&queued),
@@ -10836,9 +10858,9 @@ fn a_kill_of_a_group_stops_a_stage_that_waits_in_the_queue() {
         "that job must stay in the queue"
     );
 
-    // `qex cancel $GROUP` must NOT report success: the stage that operates
+    // `fairq cancel $GROUP` must NOT report success: the stage that operates
     // cannot leave the queue.
-    let out = h.qex(&["cancel", &group]);
+    let out = h.fairq(&["cancel", &group]);
     assert_ne!(
         out.status.code(),
         Some(0),
@@ -10848,7 +10870,7 @@ fn a_kill_of_a_group_stops_a_stage_that_waits_in_the_queue() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let out = h.qex(&["kill", &group]);
+    let out = h.fairq(&["kill", &group]);
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -10857,7 +10879,7 @@ fn a_kill_of_a_group_stops_a_stage_that_waits_in_the_queue() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    // No stage must operate after this, now or later. A stage that qex left in
+    // No stage must operate after this, now or later. A stage that fairq left in
     // the queue would start when the first stage releases the core.
     for _ in 0..40 {
         let text = h.ok(&["list", "--group", &group, "--json"]);
@@ -10885,7 +10907,7 @@ fn a_kill_of_a_group_stops_a_stage_that_waits_in_the_queue() {
     }
 }
 
-/// `qex kill $GROUP` must succeed when a stage already stopped.
+/// `fairq kill $GROUP` must succeed when a stage already stopped.
 ///
 /// The stages of a pipeline stop in order, so at the moment that a user stops a
 /// pipeline the early stages have usually finished. An early version gave the
@@ -10921,7 +10943,7 @@ fn a_kill_of_a_group_accepts_a_stage_that_already_stopped() {
 
     // The command must succeed. The stage that stopped is information, and the
     // stage that operates receives the signal.
-    let out = h.qex(&["kill", &group]);
+    let out = h.fairq(&["kill", &group]);
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -10944,28 +10966,28 @@ fn a_kill_of_a_group_accepts_a_stage_that_already_stopped() {
         .as_str()
         .unwrap()
         .to_string();
-    let out = h.qex(&["kill", &quick]);
+    let out = h.fairq(&["kill", &quick]);
     assert_ne!(
         out.status.code(),
         Some(0),
         "one job that already stopped must still give a fault"
     );
 
-    // `qex cancel $ID` reads the same way. Only a user who named the WHOLE
+    // `fairq cancel $ID` reads the same way. Only a user who named the WHOLE
     // pipeline said "stop what is left"; this user asked about one job, and a
     // job that already stopped cannot leave the queue.
-    let out = h.qex(&["cancel", &quick]);
+    let out = h.fairq(&["cancel", &quick]);
     assert_ne!(
         out.status.code(),
         Some(0),
-        "`qex cancel $ID` for one job that already stopped must give a fault\n\
+        "`fairq cancel $ID` for one job that already stopped must give a fault\n\
          stdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
 }
 
-/// `qex kill` takes the group id and stops every stage that operates.
+/// `fairq kill` takes the group id and stops every stage that operates.
 #[test]
 fn a_kill_of_a_group_reaches_every_stage() {
     let h = Harness::with_default_config("groupkill");
@@ -10998,7 +11020,7 @@ fn a_kill_of_a_group_reaches_every_stage() {
     // arrives the command stops and says so ONE time. A limit that starts
     // again for each stage gives a pipeline of ten stages ten times the time
     // that the user gave, and it repeats the sentence for every stage.
-    let out = h.qex(&["status", &group, "--wait", "--timeout", "1s"]);
+    let out = h.fairq(&["status", &group, "--wait", "--timeout", "1s"]);
     assert_eq!(out.status.code(), Some(124), "the wait reached its limit");
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(
@@ -11009,9 +11031,9 @@ fn a_kill_of_a_group_reaches_every_stage() {
 
     h.ok(&["kill", &group]);
 
-    // Both stages must stop. `qex wait` gives a code that is not 0, because a
+    // Both stages must stop. `fairq wait` gives a code that is not 0, because a
     // job that something stopped did not succeed.
-    let out = h.qex(&["wait", &group, "--timeout", "60s"]);
+    let out = h.fairq(&["wait", &group, "--timeout", "60s"]);
     assert_ne!(out.status.code(), Some(0));
 
     let text = h.ok(&["list", "--group", &group, "--json"]);
@@ -11024,7 +11046,7 @@ fn a_kill_of_a_group_reaches_every_stage() {
 
 /// `--needs $GROUP` must wait for the WHOLE pipeline.
 ///
-/// The reference and `qex help pipelines` both say so. A job that named a
+/// The reference and `fairq help pipelines` both say so. A job that named a
 /// pipeline could otherwise start while a stage of that pipeline still
 /// operates, and the pipeline would report success although the order was
 /// wrong.
@@ -11063,7 +11085,7 @@ fn needs_a_group_waits_for_every_stage() {
     );
 
     // The NAME of the pipeline is accepted while one stage still operates.
-    let out = h.qex(&["submit", "--needs", "waves", "--", "true"]);
+    let out = h.fairq(&["submit", "--needs", "waves", "--", "true"]);
     assert!(
         out.status.success(),
         "`--needs <pipeline name>` must be accepted while a stage operates: {}",
@@ -11087,7 +11109,7 @@ fn needs_a_group_waits_for_every_stage() {
 
     // Every stage stops, and the job then leaves the queue.
     h.ok(&["kill", &group]);
-    h.qex(&["wait", &last, "--timeout", "60s"]);
+    h.fairq(&["wait", &last, "--timeout", "60s"]);
     assert_ne!(
         h.state_of(&last),
         "queued",
@@ -11096,7 +11118,7 @@ fn needs_a_group_waits_for_every_stage() {
 
     // A pipeline whose every stage stopped is a run of an earlier day, and the
     // NAME of it is refused.
-    let out = h.qex(&["submit", "--needs", "waves", "--", "true"]);
+    let out = h.fairq(&["submit", "--needs", "waves", "--", "true"]);
     assert!(
         !out.status.success(),
         "a pipeline that stopped must be refused by name"
@@ -11107,12 +11129,12 @@ fn needs_a_group_waits_for_every_stage() {
         "the error must say that the pipeline stopped: {err}"
     );
     assert!(
-        err.contains("GROUP=$(qex pipeline"),
+        err.contains("GROUP=$(fairq pipeline"),
         "the error must give the remedy: {err}"
     );
 
     // The group id is still accepted, because an id names one run for ever.
-    let out = h.qex(&["submit", "--needs", &group, "--", "true"]);
+    let out = h.fairq(&["submit", "--needs", &group, "--", "true"]);
     assert!(
         out.status.success(),
         "a group id must be accepted whatever the state of its stages: {}",
@@ -11189,7 +11211,7 @@ fn clean_auto_keeps_the_recent_jobs() {
     let id = h.submit(&["submit", "--", "true"]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
 
-    let out = h.qex(&["clean", "--auto"]);
+    let out = h.fairq(&["clean", "--auto"]);
     assert!(out.status.success());
     assert_eq!(
         h.list_json().len(),
@@ -11247,9 +11269,9 @@ fn a_dependency_of_a_queued_job_is_not_finished() {
     h.ok(&["kill", &blocker, "--grace", "1s"]);
 }
 
-/// `qex du` must say how much space qex holds.
+/// `fairq du` must say how much space fairq holds.
 #[test]
-fn du_reports_the_space_that_qex_holds() {
+fn du_reports_the_space_that_fairq_holds() {
     let h = Harness::with_default_config("du");
     let id = h.submit(&[
         "submit",
@@ -11267,7 +11289,7 @@ fn du_reports_the_space_that_qex_holds() {
     assert_eq!(v["largest"][0]["id"].as_str(), Some(id.as_str()));
 }
 
-/// Runs one job to its end and gives its id; `qex du` then reads a disk no coordinator writes.
+/// Runs one job to its end and gives its id; `fairq du` then reads a disk no coordinator writes.
 fn du_job_with_no_coordinator(h: &Harness) -> String {
     let id = h.submit(&["submit", "--", "sh", "-c", "echo du-subfolder"]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
@@ -11277,16 +11299,16 @@ fn du_job_with_no_coordinator(h: &Harness) -> String {
 
 fn du_json(h: &Harness) -> serde_json::Value {
     let text = h.ok(&["du", "--json"]);
-    serde_json::from_str(&text).unwrap_or_else(|e| panic!("`qex du --json`: {e}: {text}"))
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("`fairq du --json`: {e}: {text}"))
 }
 
 fn du_bytes(v: &serde_json::Value, key: &str) -> u64 {
     v[key]
         .as_u64()
-        .unwrap_or_else(|| panic!("`qex du --json` has no {key}: {v}"))
+        .unwrap_or_else(|| panic!("`fairq du --json` has no {key}: {v}"))
 }
 
-/// `qex du` counts the files in the subfolders of a job directory (issue #101).
+/// `fairq du` counts the files in the subfolders of a job directory (issue #101).
 #[test]
 fn du_counts_the_bytes_in_a_job_subfolder() {
     // du compares whole seconds, so `keep = "0.5s"` makes the job old at once; "0s" means none.
@@ -11360,7 +11382,7 @@ fn du_counts_each_byte_once_across_jobs_and_other() {
     let id = du_job_with_no_coordinator(&h);
     let before = du_json(&h);
 
-    let run_sub = h.root.join("state/qex/run/a-subfolder");
+    let run_sub = h.root.join("state/fairq/run/a-subfolder");
     std::fs::create_dir_all(&run_sub).unwrap();
     std::fs::write(run_sub.join("blob"), vec![b'x'; 50_000]).unwrap();
     let attempt = h.job_dir(&id).join("tmp/1");
@@ -11384,7 +11406,7 @@ fn du_counts_each_byte_once_across_jobs_and_other() {
     }
 }
 
-/// `qex gc --dry-run` counts the bytes in a job's subfolders among those it frees (#101).
+/// `fairq gc --dry-run` counts the bytes in a job's subfolders among those it frees (#101).
 #[test]
 fn gc_dry_run_counts_the_bytes_in_a_job_subfolder() {
     let h = Harness::with_default_config("gc-subfolder");
@@ -11392,7 +11414,7 @@ fn gc_dry_run_counts_the_bytes_in_a_job_subfolder() {
     h.ok(&["wait", &id, "--timeout", "45s"]);
     let gc = |h: &Harness| -> serde_json::Value {
         let out = h.ok(&["gc", "--dry-run", "--older-than", "0s", "--json"]);
-        serde_json::from_str(&out).unwrap_or_else(|e| panic!("`qex gc --json`: {e}: {out}"))
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("`fairq gc --json`: {e}: {out}"))
     };
     let before = gc(&h);
     assert_eq!(before["jobs"][0]["id"].as_str(), Some(id.as_str()));
@@ -11409,8 +11431,8 @@ fn gc_dry_run_counts_the_bytes_in_a_job_subfolder() {
     );
 }
 
-/// A symbolic link in `jobs/` to an outside folder is not walked by `qex du` or `qex gc`, and
-/// `qex gc` deletes nothing through it; the link itself may go (issue #101).
+/// A symbolic link in `jobs/` to an outside folder is not walked by `fairq du` or `fairq gc`, and
+/// `fairq gc` deletes nothing through it; the link itself may go (issue #101).
 #[test]
 fn du_and_gc_do_not_walk_or_delete_through_a_link_in_jobs() {
     let h = Harness::with_default_config("du-gc-jobs-link");
@@ -11441,14 +11463,14 @@ fn du_and_gc_do_not_walk_or_delete_through_a_link_in_jobs() {
     let du_before = du_json(&h);
     let gc = |h: &Harness| -> serde_json::Value {
         let out = h.ok(&["gc", "--dry-run", "--older-than", "0s", "--json"]);
-        serde_json::from_str(&out).unwrap_or_else(|e| panic!("`qex gc --json`: {e}: {out}"))
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("`fairq gc --json`: {e}: {out}"))
     };
     let gc_before = gc(&h);
 
     // A name shaped like a job id, so nothing skips it by its name.
     let link = h
         .root
-        .join("state/qex/jobs/00000000-0000-4000-8000-000000000101");
+        .join("state/fairq/jobs/00000000-0000-4000-8000-000000000101");
     std::os::unix::fs::symlink(&outside, &link).unwrap();
 
     let du_after = du_json(&h);
@@ -11456,7 +11478,7 @@ fn du_and_gc_do_not_walk_or_delete_through_a_link_in_jobs() {
         assert_eq!(
             du_bytes(&du_after, key),
             du_bytes(&du_before, key),
-            "`qex du` walked the link in jobs/: {key}: before {du_before}, after {du_after}"
+            "`fairq du` walked the link in jobs/: {key}: before {du_before}, after {du_after}"
         );
     }
     let gc_after = gc(&h);
@@ -11464,7 +11486,7 @@ fn du_and_gc_do_not_walk_or_delete_through_a_link_in_jobs() {
         assert_eq!(
             du_bytes(&gc_after, key),
             du_bytes(&gc_before, key),
-            "`qex gc --dry-run` walked the link in jobs/: {key}: {gc_before} then {gc_after}"
+            "`fairq gc --dry-run` walked the link in jobs/: {key}: {gc_before} then {gc_after}"
         );
     }
 
@@ -11476,7 +11498,7 @@ fn du_and_gc_do_not_walk_or_delete_through_a_link_in_jobs() {
     assert_eq!(
         listing(&outside),
         outside_before,
-        "`qex gc` changed the folder behind the link in jobs/"
+        "`fairq gc` changed the folder behind the link in jobs/"
     );
     assert_eq!(
         std::fs::read(outside.join("blob")).unwrap(),
@@ -11533,7 +11555,7 @@ fn code_and_streams(out: &Output) -> (Option<i32>, String, String) {
     )
 }
 
-/// `qex gc` names a directory with no record that it could not remove, counts in its summary
+/// `fairq gc` names a directory with no record that it could not remove, counts in its summary
 /// only what it removed, and gives the code 1; the dry run still counts what it found (#194).
 #[test]
 fn gc_names_a_directory_with_no_record_that_it_could_not_remove() {
@@ -11546,14 +11568,14 @@ fn gc_names_a_directory_with_no_record_that_it_could_not_remove() {
     let stuck = a_directory_with_no_record_that_cannot_go(&h, &uuid::Uuid::new_v4().to_string());
     let (stays, error) = (&stuck.dir, &stuck.error);
 
-    let would = h.qex(&["gc", "--dry-run", "--older-than", "0s"]);
-    let out = h.qex(&["gc", "--older-than", "0s"]);
+    let would = h.fairq(&["gc", "--dry-run", "--older-than", "0s"]);
+    let out = h.fairq(&["gc", "--older-than", "0s"]);
 
     assert_eq!(
         code_and_streams(&would),
         (
             Some(0),
-            "qex would delete 0 records, and 2 directories, with no record, and free 800B.\n\
+            "fairq would delete 0 records, and 2 directories, with no record, and free 800B.\n\
              Nothing changed. Run the command without `--dry-run` to delete them.\n"
                 .to_string(),
             String::new()
@@ -11564,10 +11586,11 @@ fn gc_names_a_directory_with_no_record_that_it_could_not_remove() {
         code_and_streams(&out),
         (
             Some(1),
-            "qex deleted 0 records, and 1 directory, with no record, and freed 300B.\n".to_string(),
+            "fairq deleted 0 records, and 1 directory, with no record, and freed 300B.\n"
+                .to_string(),
             format!(
-                "qex could not remove {}: {error}.\n\
-                 1 directory stayed. Fix the cause, then run qex gc again, \
+                "fairq could not remove {}: {error}.\n\
+                 1 directory stayed. Fix the cause, then run fairq gc again, \
                  or delete it by hand.\n",
                 stays.display()
             )
@@ -11578,7 +11601,7 @@ fn gc_names_a_directory_with_no_record_that_it_could_not_remove() {
     assert_eq!(std::fs::read(stays.join("blob")).unwrap().len(), 500);
 }
 
-/// The JSON of `qex gc` comes after the removals and lists each directory that stayed. The JSON
+/// The JSON of `fairq gc` comes after the removals and lists each directory that stayed. The JSON
 /// of the dry run keeps its keys, and a run after the cause went gives an empty list (#194).
 #[test]
 fn the_json_of_gc_lists_a_directory_that_it_could_not_remove() {
@@ -11593,10 +11616,10 @@ fn the_json_of_gc_lists_a_directory_that_it_could_not_remove() {
     let (stays, error) = (&stuck.dir, &stuck.error);
 
     let would = json_of(&h.ok(&["gc", "--dry-run", "--older-than", "0s", "--json"]));
-    let out = h.qex(&["gc", "--older-than", "0s", "--json"]);
+    let out = h.fairq(&["gc", "--older-than", "0s", "--json"]);
     // The cause goes, so the next run removes the directory.
     std::fs::set_permissions(stays, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let again = h.qex(&["gc", "--older-than", "0s", "--json"]);
+    let again = h.fairq(&["gc", "--older-than", "0s", "--json"]);
 
     let mut keys: Vec<&str> = would
         .as_object()
@@ -11645,8 +11668,8 @@ fn the_json_of_gc_lists_a_directory_that_it_could_not_remove() {
     assert_eq!(
         stderr,
         format!(
-            "qex could not remove {}: {error}.\n\
-             1 directory stayed. Fix the cause, then run qex gc again, \
+            "fairq could not remove {}: {error}.\n\
+             1 directory stayed. Fix the cause, then run fairq gc again, \
              or delete it by hand.\n",
             stays.display()
         )
@@ -11680,8 +11703,8 @@ fn gc_writes_no_control_byte_from_the_name_of_a_directory_that_stayed() {
     let plain = a_directory_with_no_record_that_cannot_go(&h, "stuck-plain");
     let (esc_error, plain_error) = (&esc.error, &plain.error);
 
-    let text = h.qex(&["gc", "--older-than", "0s"]);
-    let json = h.qex(&["gc", "--older-than", "0s", "--json"]);
+    let text = h.fairq(&["gc", "--older-than", "0s"]);
+    let json = h.fairq(&["gc", "--older-than", "0s", "--json"]);
     for out in [&text, &json] {
         assert_eq!(out.status.code(), Some(1), "{out:?}");
         for stream in [&out.stdout, &out.stderr] {
@@ -11694,13 +11717,13 @@ fn gc_writes_no_control_byte_from_the_name_of_a_directory_that_stayed() {
     let (_, stdout, stderr) = code_and_streams(&text);
     assert_eq!(
         stdout,
-        "qex deleted 0 records, and 0 directories, with no record, and freed 0B.\n"
+        "fairq deleted 0 records, and 0 directories, with no record, and freed 0B.\n"
     );
     let mut lines: Vec<&str> = stderr.lines().collect();
     assert_eq!(
         lines.pop(),
         Some(
-            "2 directories stayed. Fix the cause, then run qex gc again, \
+            "2 directories stayed. Fix the cause, then run fairq gc again, \
              or delete them by hand."
         ),
         "{stderr}"
@@ -11708,11 +11731,11 @@ fn gc_writes_no_control_byte_from_the_name_of_a_directory_that_stayed() {
     lines.sort();
     let mut named = [
         format!(
-            "qex could not remove {}: {esc_error}.",
+            "fairq could not remove {}: {esc_error}.",
             h.job_dir("stuck [2Jdir").display()
         ),
         format!(
-            "qex could not remove {}: {plain_error}.",
+            "fairq could not remove {}: {plain_error}.",
             plain.dir.display()
         ),
     ];
@@ -11732,7 +11755,7 @@ fn gc_writes_no_control_byte_from_the_name_of_a_directory_that_stayed() {
     assert_eq!(paths, on_disk, "{said}");
 }
 
-/// `qex gc` leaves the directory of a Submit that has not written its record yet, in the dry run
+/// `fairq gc` leaves the directory of a Submit that has not written its record yet, in the dry run
 /// too, and still removes a directory with no record that no submission holds (#200).
 #[test]
 fn gc_leaves_the_directory_of_a_submit_in_progress() {
@@ -11749,9 +11772,9 @@ fn gc_leaves_the_directory_of_a_submit_in_progress() {
     });
     // The switch pauses the first mkdir in jobs/, so a new coordinator takes it after the model.
     h.stop_coordinator();
-    let jobs = h.root.join("state/qex/jobs");
+    let jobs = h.root.join("state/fairq/jobs");
     h.extra_env.push((
-        "QEX_TEST_PAUSE_AFTER_MKDIR_IN".into(),
+        "FAIRQ_TEST_PAUSE_AFTER_MKDIR_IN".into(),
         format!("{} {}", PAUSE.as_millis(), jobs.display()),
     ));
     h.coordinator_pid();
@@ -11769,9 +11792,9 @@ fn gc_leaves_the_directory_of_a_submit_in_progress() {
         let first = scope.spawn(|| (raw_request(&h, &request), Instant::now()));
         let made = || dir.exists();
         Harness::poll_until("the submission makes its directory", PAUSE * 5, made);
-        let would = h.qex(&["gc", "--dry-run", "--older-than", "1h"]);
+        let would = h.fairq(&["gc", "--dry-run", "--older-than", "1h"]);
         let free = raw_request(&h, &ask);
-        let out = h.qex(&["gc", "--older-than", "1h"]);
+        let out = h.fairq(&["gc", "--older-than", "1h"]);
         let swept = Instant::now();
         // The record is written once, so its absence now covers both gc runs.
         let recordless = !dir.join("status.json").exists();
@@ -11789,14 +11812,14 @@ fn gc_leaves_the_directory_of_a_submit_in_progress() {
         (
             (
                 Some(0),
-                "qex would delete 0 records, and 1 directory, with no record, and free 300B.\n\
+                "fairq would delete 0 records, and 1 directory, with no record, and free 300B.\n\
                  Nothing changed. Run the command without `--dry-run` to delete them.\n"
                     .to_string(),
                 String::new()
             ),
             (
                 Some(0),
-                "qex deleted 0 records, and 1 directory, with no record, and freed 300B.\n"
+                "fairq deleted 0 records, and 1 directory, with no record, and freed 300B.\n"
                     .to_string(),
                 String::new()
             ),
@@ -11817,12 +11840,12 @@ fn gc_leaves_the_directory_of_a_submit_in_progress() {
     });
 }
 
-/// With a coordinator that cannot say which ids are free, `qex gc` leaves each directory with no
+/// With a coordinator that cannot say which ids are free, `fairq gc` leaves each directory with no
 /// record that is named like a job id, says so, and sends no request that it cannot read (#200).
 #[test]
 fn gc_leaves_what_an_earlier_coordinator_cannot_vouch_for() {
     let c = ARecordingCoordinator::new("gcold", &["locks", "retries"]);
-    let jobs = c.root.join("state/qex/jobs");
+    let jobs = c.root.join("state/fairq/jobs");
     let like_an_id = jobs.join(uuid::Uuid::new_v4().to_string());
     let other = jobs.join("not-an-id");
     for dir in [&like_an_id, &other] {
@@ -11830,15 +11853,16 @@ fn gc_leaves_what_an_earlier_coordinator_cannot_vouch_for() {
         std::fs::write(dir.join("blob"), vec![b'x'; 300]).unwrap();
     }
 
-    let out = c.qex(&["gc", "--older-than", "1h"]);
+    let out = c.fairq(&["gc", "--older-than", "1h"]);
 
     assert_eq!(
         code_and_streams(&out),
         (
             Some(0),
-            "qex deleted 0 records, and 1 directory, with no record, and freed 300B.\n".to_string(),
-            "qex left 1 directory with no record in place: this coordinator is older and cannot \
-             say whether a submission holds it. Run qex gc again after that coordinator stops; \
+            "fairq deleted 0 records, and 1 directory, with no record, and freed 300B.\n"
+                .to_string(),
+            "fairq left 1 directory with no record in place: this coordinator is older and cannot \
+             say whether a submission holds it. Run fairq gc again after that coordinator stops; \
              it stops when no job operates.\n"
                 .to_string()
         )
@@ -11851,7 +11875,7 @@ fn gc_leaves_what_an_earlier_coordinator_cannot_vouch_for() {
     );
 }
 
-/// `qex gc` asks about more directories than one request carries, and removes each one (#200).
+/// `fairq gc` asks about more directories than one request carries, and removes each one (#200).
 #[test]
 fn gc_asks_about_more_directories_than_one_request_carries() {
     let h = Harness::with_default_config("gcparts");
@@ -11861,39 +11885,39 @@ fn gc_asks_about_more_directories_than_one_request_carries() {
         std::fs::create_dir(h.job_dir(&uuid::Uuid::new_v4().to_string())).unwrap();
     }
 
-    let out = h.qex(&["gc", "--older-than", "1h"]);
+    let out = h.fairq(&["gc", "--older-than", "1h"]);
 
     assert_eq!(
         code_and_streams(&out),
         (
             Some(0),
-            "qex deleted 0 records, and 501 directories, with no record, and freed 0B.\n"
+            "fairq deleted 0 records, and 501 directories, with no record, and freed 0B.\n"
                 .to_string(),
             String::new()
         )
     );
-    let left = std::fs::read_dir(h.root.join("state/qex/jobs")).unwrap();
+    let left = std::fs::read_dir(h.root.join("state/fairq/jobs")).unwrap();
     assert_eq!(left.count(), 0);
 }
 
-/// When the coordinator's answer is not the list of free ids, `qex gc` stops and removes
+/// When the coordinator's answer is not the list of free ids, `fairq gc` stops and removes
 /// nothing (#200).
 #[test]
 fn gc_removes_nothing_when_the_coordinator_does_not_say_which_ids_are_free() {
     // This one says that it can answer, and then answers with an error.
     let c = ARecordingCoordinator::new("gcbad", &["free-ids"]);
-    let dir = c.root.join("state/qex/jobs");
+    let dir = c.root.join("state/fairq/jobs");
     let dir = dir.join(uuid::Uuid::new_v4().to_string());
     std::fs::create_dir_all(&dir).unwrap();
 
-    let out = c.qex(&["gc", "--older-than", "1h"]);
+    let out = c.fairq(&["gc", "--older-than", "1h"]);
 
     assert_eq!(
         code_and_streams(&out),
         (
             Some(1),
             String::new(),
-            "qex: qex could not read this request\n".to_string()
+            "fairq: fairq could not read this request\n".to_string()
         )
     );
     assert!(
@@ -11905,7 +11929,7 @@ fn gc_removes_nothing_when_the_coordinator_does_not_say_which_ids_are_free() {
 }
 
 /// A coordinator that dies between the directory and the record leaves a directory that no
-/// submission holds any more: the next `qex gc` removes it (#200).
+/// submission holds any more: the next `fairq gc` removes it (#200).
 #[test]
 fn gc_removes_the_directory_that_a_killed_coordinator_left() {
     use std::io::Write;
@@ -11923,9 +11947,9 @@ fn gc_removes_the_directory_that_a_killed_coordinator_left() {
     });
     // The switch pauses the first mkdir in jobs/, so a new coordinator takes it after the model.
     h.stop_coordinator();
-    let jobs = h.root.join("state/qex/jobs");
+    let jobs = h.root.join("state/fairq/jobs");
     h.extra_env.push((
-        "QEX_TEST_PAUSE_AFTER_MKDIR_IN".into(),
+        "FAIRQ_TEST_PAUSE_AFTER_MKDIR_IN".into(),
         format!("{} {}", PAUSE.as_millis(), jobs.display()),
     ));
     h.coordinator_pid();
@@ -11933,7 +11957,7 @@ fn gc_removes_the_directory_that_a_killed_coordinator_left() {
     let id = uuid::Uuid::new_v4().to_string();
     let request = submit_request(&h, &model, &id);
     let dir = h.job_dir(&id);
-    let socket = h.root.join("state/qex/run/s");
+    let socket = h.root.join("state/fairq/run/s");
     let mut stream = std::os::unix::net::UnixStream::connect(&socket).unwrap();
     stream.write_all(format!("{request}\n").as_bytes()).unwrap();
     let made = || dir.exists();
@@ -11943,13 +11967,13 @@ fn gc_removes_the_directory_that_a_killed_coordinator_left() {
     drop(stream);
     assert!(dir.exists() && !dir.join("status.json").exists());
 
-    let out = h.qex(&["gc", "--older-than", "1h"]);
+    let out = h.fairq(&["gc", "--older-than", "1h"]);
 
     assert_eq!(
         code_and_streams(&out),
         (
             Some(0),
-            "qex deleted 0 records, and 1 directory, with no record, and freed 0B.\n".to_string(),
+            "fairq deleted 0 records, and 1 directory, with no record, and freed 0B.\n".to_string(),
             String::new()
         )
     );
@@ -11965,7 +11989,7 @@ fn du_counts_the_other_files_of_a_state_directory_behind_a_link() {
     let h = Harness::with_default_config("du-state-link");
     let elsewhere = h.root.join("elsewhere");
     std::fs::create_dir(&elsewhere).unwrap();
-    std::os::unix::fs::symlink(&elsewhere, h.root.join("state/qex")).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, h.root.join("state/fairq")).unwrap();
     du_job_with_no_coordinator(&h);
     let before = du_json(&h);
 
@@ -11980,7 +12004,7 @@ fn du_counts_the_other_files_of_a_state_directory_behind_a_link() {
     );
 }
 
-/// A link in `jobs/` to an outside folder holding a job's records is no job: `qex du`,
+/// A link in `jobs/` to an outside folder holding a job's records is no job: `fairq du`,
 /// `__complete`, `list`, `status` and `logs` ignore it; nothing reads or writes through it (#129).
 #[test]
 fn a_link_in_jobs_to_an_outside_record_is_no_job() {
@@ -12017,45 +12041,45 @@ fn a_link_in_jobs_to_an_outside_record_is_no_job() {
         out
     };
     let outside_before = read_outside();
-    std::os::unix::fs::symlink(&outside, h.root.join("state/qex/jobs").join(link_id)).unwrap();
+    std::os::unix::fs::symlink(&outside, h.root.join("state/fairq/jobs").join(link_id)).unwrap();
 
     let du_after = du_json(&h);
     assert_eq!(
         du_bytes(&du_after, "job_count"),
         du_bytes(&du_before, "job_count"),
-        "`qex du` read a record through the link in jobs/: {du_before} then {du_after}"
+        "`fairq du` read a record through the link in jobs/: {du_before} then {du_after}"
     );
     let complete = h.ok(&["__complete", "ids"]);
     assert!(
         !complete.contains(link_id) && complete.contains(&id),
-        "`qex __complete ids` must offer the real job only: {complete}"
+        "`fairq __complete ids` must offer the real job only: {complete}"
     );
-    // No coordinator runs, so `qex list` starts one, and it reads jobs/ as it starts.
+    // No coordinator runs, so `fairq list` starts one, and it reads jobs/ as it starts.
     let list = h.ok(&["list", "--all", "--json"]);
     assert!(
         !list.contains(link_id) && list.contains(&id),
-        "`qex list` must show the real job only: {list}"
+        "`fairq list` must show the real job only: {list}"
     );
-    let status = h.qex(&["status", link_id]);
+    let status = h.fairq(&["status", link_id]);
     assert_eq!(
         status.status.code(),
         Some(127),
-        "`qex status <link id>`: {status:?}"
+        "`fairq status <link id>`: {status:?}"
     );
     h.stop_coordinator();
     // A real folder under the same id unhyphenated: a lookup by it must not reach the link.
     let unhyphenated = link_id.replace('-', "");
-    std::fs::create_dir(h.root.join("state/qex/jobs").join(&unhyphenated)).unwrap();
-    // With no coordinator, `qex logs` finds the job on the disk, by its id or a prefix of it.
+    std::fs::create_dir(h.root.join("state/fairq/jobs").join(&unhyphenated)).unwrap();
+    // With no coordinator, `fairq logs` finds the job on the disk, by its id or a prefix of it.
     for raw in [link_id, "00000000-0000-4000", &unhyphenated[..16]] {
-        let out = h.qex(&["logs", raw]);
+        let out = h.fairq(&["logs", raw]);
         let (stdout, stderr) = (
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr),
         );
         assert!(
             out.status.code() == Some(127) && stderr.contains("there is no job"),
-            "`qex logs {raw}` must say there is no such job: {out:?}"
+            "`fairq logs {raw}` must say there is no such job: {out:?}"
         );
         assert!(
             !stdout.contains("outside-log-129"),
@@ -12065,7 +12089,7 @@ fn a_link_in_jobs_to_an_outside_record_is_no_job() {
     assert_eq!(
         read_outside(),
         outside_before,
-        "qex changed the folder behind the link in jobs/"
+        "fairq changed the folder behind the link in jobs/"
     );
 }
 
@@ -12077,7 +12101,7 @@ fn a_record_whose_id_differs_from_its_folder_reads_nothing_through_a_link() {
     let h = Harness::with_default_config("record-id-mismatch");
     let real_id = du_job_with_no_coordinator(&h);
     let link_id = "00000000-0000-4000-8000-000000000135";
-    let jobs = h.root.join("state/qex/jobs");
+    let jobs = h.root.join("state/fairq/jobs");
 
     // The real folder's own records now name link_id; the job stays completed.
     for name in ["spec.json", "status.json"] {
@@ -12125,15 +12149,15 @@ fn a_record_whose_id_differs_from_its_folder_reads_nothing_through_a_link() {
     let complete = h.ok(&["__complete", "ids"]);
     assert!(
         !complete.contains(link_id),
-        "`qex __complete ids` must not offer {link_id}: {complete}"
+        "`fairq __complete ids` must not offer {link_id}: {complete}"
     );
-    // No coordinator runs, so `qex list` starts one, and its recovery reads jobs/.
+    // No coordinator runs, so `fairq list` starts one, and its recovery reads jobs/.
     let list = h.ok(&["list", "--all", "--json"]);
     assert!(
         !list.contains(link_id),
-        "`qex list` must not show {link_id}: {list}"
+        "`fairq list` must not show {link_id}: {list}"
     );
-    let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log")).unwrap();
+    let log = std::fs::read_to_string(h.root.join("state/fairq/run/daemon.log")).unwrap();
     let names = format!("status names the job {link_id} and its spec {link_id}");
     assert!(
         log.lines()
@@ -12148,42 +12172,42 @@ fn a_record_whose_id_differs_from_its_folder_reads_nothing_through_a_link() {
         vec!["status", link_id, "--json", "--show-env"],
         vec!["rerun", link_id],
     ] {
-        let out = h.qex(&args);
+        let out = h.fairq(&args);
         let (stdout, stderr) = (
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr),
         );
         assert!(
             out.status.code() == Some(127) && stderr.contains("there is no job"),
-            "`qex {}` must say there is no such job: {out:?}",
+            "`fairq {}` must say there is no such job: {out:?}",
             args.join(" ")
         );
         assert!(
             !stdout.contains("outside-") && !stderr.contains("outside-"),
-            "`qex {}` read through the link: {out:?}",
+            "`fairq {}` read through the link: {out:?}",
             args.join(" ")
         );
     }
     assert!(
         !marker.exists(),
-        "`qex rerun` ran the command behind the link"
+        "`fairq rerun` ran the command behind the link"
     );
 
     // gc deletes the real folder as one with no record, and nothing behind the link.
     let gc = h.ok(&["gc", "--older-than", "0s", "--json"]);
     assert!(
         !jobs.join(&real_id).exists(),
-        "`qex gc` must delete jobs/{real_id}: {gc}"
+        "`fairq gc` must delete jobs/{real_id}: {gc}"
     );
     assert_eq!(
         read_outside(),
         outside_before,
-        "qex changed the folder behind the link in jobs/"
+        "fairq changed the folder behind the link in jobs/"
     );
     assert!(!marker.exists(), "the command behind the link ran");
 }
 
-/// A deep directory must not stop qex. The socket path must fit in `sun_path`,
+/// A deep directory must not stop fairq. The socket path must fit in `sun_path`,
 /// and a test harness gives a long path. The socket follows the state directory.
 #[test]
 fn a_long_runtime_directory_still_works() {
@@ -12206,7 +12230,7 @@ fn a_long_runtime_directory_still_works() {
 
     assert!(
         out.status.success(),
-        "qex failed with a long state directory: {}",
+        "fairq failed with a long state directory: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 
@@ -12247,7 +12271,7 @@ fn the_status_gives_the_measured_use_of_a_job() {
 
     let status = h.status_json(&id);
     let rss = status["usage"]["max_rss"].as_u64().unwrap();
-    assert!(rss > 0, "qex must measure the memory of a job");
+    assert!(rss > 0, "fairq must measure the memory of a job");
     assert!(
         rss < 512 * 1024 * 1024,
         "the measurement {rss} is larger than the claim, so the unit is wrong"
@@ -12264,7 +12288,7 @@ fn the_status_gives_the_measured_use_of_a_job() {
 /// that continued, and it kept it for ever.
 ///
 /// The measured result was a coordinator that reported `failed` while the job
-/// operated, and `qex wait` that gave the result of an attempt that was not the
+/// operated, and `fairq wait` that gave the result of an attempt that was not the
 /// last one. Every rule that asks "did this job stop?" then receives the wrong
 /// answer.
 ///
@@ -12299,13 +12323,17 @@ fn a_job_that_starts_again_never_shows_the_attempt_that_failed() {
         "5",
     ]);
 
-    // Read the record FILE, and not `qex status`.
+    // Read the record FILE, and not `fairq status`.
     //
     // The window between the two writes is short. A reader that starts a
     // process for each sample takes far longer than the window, so it would
     // pass whether the fault is there or not. A file read takes microseconds
     // and it samples the same record that the coordinator reads.
-    let record = h.root.join("state/qex/jobs").join(&id).join("status.json");
+    let record = h
+        .root
+        .join("state/fairq/jobs")
+        .join(&id)
+        .join("status.json");
 
     let deadline = Instant::now() + Duration::from_secs(90);
     let mut saw_a_later_attempt = false;
@@ -12495,21 +12523,21 @@ fn a_job_with_retries_keeps_its_slot_until_it_stops() {
 /// command stopped at a terminal.
 ///
 /// The supervisor of a job must NOT ask for that form. It puts the fault in the
-/// record of the job, and `qex status` prints that record, so the long message
+/// record of the job, and `fairq status` prints that record, so the long message
 /// would fill the `error:` field of a job that already ran with advice about an
-/// upgrade — which reads as a fault in qex, and which hides the words that
+/// upgrade — which reads as a fault in fairq, and which hides the words that
 /// matter there: that no limit operates.
 ///
 /// A unit test on the message alone cannot hold this. The message is a pure
 /// function of its arguments, so a test of it passes whichever form the
 /// supervisor asks for. `src/supervisor.rs` calling `Config::load()` instead of
 /// `Config::load_short()` brings the fault back, and only a test that
-/// reads a real `qex status` sees it.
+/// reads a real `fairq status` sees it.
 ///
 /// # Why the job starts in this state at all
 ///
-/// `qex submit` reads the config file, so it stops while the file holds a field
-/// that qex does not know. The job must therefore be in the QUEUE before the
+/// `fairq submit` reads the config file, so it stops while the file holds a field
+/// that fairq does not know. The job must therefore be in the QUEUE before the
 /// file changes. The budget of one core holds it there, and the end of the job
 /// that occupies the budget releases it.
 #[test]
@@ -12534,21 +12562,21 @@ fn a_config_fault_in_the_record_of_a_job_stays_short() {
         "the budget of one core must hold the second job in the queue"
     );
 
-    // NOW the file gets a field that this qex does not know. The coordinator
+    // NOW the file gets a field that this fairq does not know. The coordinator
     // keeps the values that it read when it started, so it still schedules the
     // job; the supervisor of that job is a new process, and it reads this.
     //
-    // The section must be one that NO qex knows. This test wrote `[hooks]`
-    // until qex gained a `[hooks]` section, and it then wrote a file that
+    // The section must be one that NO fairq knows. This test wrote `[hooks]`
+    // until fairq gained a `[hooks]` section, and it then wrote a file that
     // PARSES: the supervisor met no fault, and the test measured nothing.
-    // Choose a name that this build refuses, and change it again when qex takes
+    // Choose a name that this build refuses, and change it again when fairq takes
     // that name.
     h.write_config(&format!(
         "{good}\n[telemetry]\nendpoint = \"https://example.invalid\"\n"
     ));
 
     // Release the budget. The waiting job then starts under the broken file.
-    h.qex(&["kill", &occupier, "--grace", "1s"]);
+    h.fairq(&["kill", &occupier, "--grace", "1s"]);
     h.until("the second job stops", Duration::from_secs(60), || {
         h.state_of(&victim) == "completed"
     });
@@ -12568,7 +12596,7 @@ fn a_config_fault_in_the_record_of_a_job_stays_short() {
     // also appears in any path that contains it, such as a checkout of a
     // repository whose name holds the word.
     assert!(
-        !status.contains("qex refuses a field that it does not know"),
+        !status.contains("fairq refuses a field that it does not know"),
         "the record of a job must hold the short form of a config fault. The \
          supervisor asked for the long form, which belongs to a person at a \
          terminal and not to the `error:` field of a job that already ran: \
@@ -12581,7 +12609,7 @@ fn a_config_fault_in_the_record_of_a_job_stays_short() {
 /// says how much went.
 ///
 /// A job wrote 386MB of standard output in a review, and nothing stopped it.
-/// qex is made to be started and left, so nobody sees a disk fill, and the same
+/// fairq is made to be started and left, so nobody sees a disk fill, and the same
 /// disk holds the record of each job. This test holds that fault.
 #[test]
 fn a_job_that_writes_more_than_the_limit_keeps_the_head_and_the_tail() {
@@ -12593,7 +12621,7 @@ fn a_job_that_writes_more_than_the_limit_keeps_the_head_and_the_tail() {
     );
     // About 3.4MB of output, which is 50 times the limit.
     let id = h.submit(&["submit", "--", "sh", "-c", "seq 1 500000"]);
-    let wait = h.qex(&["wait", &id, "--timeout", "60s"]);
+    let wait = h.fairq(&["wait", &id, "--timeout", "60s"]);
 
     // The limit must never fail a job. Reaching it is normal.
     assert_eq!(
@@ -12652,15 +12680,15 @@ fn a_job_that_writes_more_than_the_limit_keeps_the_head_and_the_tail() {
     // THE COUNT MUST BALANCE. The lines that the file holds and the lines that
     // the record says went are together the lines that the job wrote.
     //
-    // A count that is only "large" hides a part that qex does not count. The
-    // measured example: qex cuts the head back when the output passes the
+    // A count that is only "large" hides a part that fairq does not count. The
+    // measured example: fairq cuts the head back when the output passes the
     // limit, and it reads the log file to count the lines in that cut. With a
-    // log file that qex opened for writing only, that read gives nothing, the
+    // log file that fairq opened for writing only, that read gives nothing, the
     // count loses about 8000 lines, and the record then says that the job wrote
     // 492000 lines when it wrote 500000.
     // A line is a line end, so the count is the line ends that are not the line
-    // ends of the notes of qex.
-    let notes = text.lines().filter(|l| l.starts_with("[qex]")).count() as u64;
+    // ends of the notes of fairq.
+    let notes = text.lines().filter(|l| l.starts_with("[fairq]")).count() as u64;
     let kept = text.matches('\n').count() as u64 - notes;
     assert_eq!(
         kept + dropped["stdout_lines"].as_u64().unwrap(),
@@ -12671,17 +12699,17 @@ fn a_job_that_writes_more_than_the_limit_keeps_the_head_and_the_tail() {
     );
 
     // THE BYTES MUST BALANCE IN THE SAME WAY, and for a stronger reason: this
-    // is the number that `qex status` prints to a person, as "qex removed
+    // is the number that `fairq status` prints to a person, as "fairq removed
     // 3.2MB". An assertion of `> 0` beside a line count that balances exactly
     // left `stdout_bytes` with no exact test anywhere: a change that multiplied
     // that count in place of adding it passed every unit test and every
     // end-to-end test.
     //
-    // The bytes of the notes of qex are not output of the job, so they come
+    // The bytes of the notes of fairq are not output of the job, so they come
     // off. Each note is one line and it ends with one line end.
     let note_bytes: u64 = text
         .lines()
-        .filter(|l| l.starts_with("[qex]"))
+        .filter(|l| l.starts_with("[fairq]"))
         .map(|l| l.len() as u64 + 1)
         .sum();
     let kept_bytes = text.len() as u64 - note_bytes;
@@ -12693,13 +12721,13 @@ fn a_job_that_writes_more_than_the_limit_keeps_the_head_and_the_tail() {
         dropped["stdout_bytes"]
     );
 
-    // The head must hold whole lines only. It stops at a byte, so qex moves the
+    // The head must hold whole lines only. It stops at a byte, so fairq moves the
     // cut back to the last line end. Measured before that change: the head
     // ended `3498` and then `3`, where the job wrote `3499`, and a reader has
     // no way to see that `3` is half of a line.
     let head = &text[..text
-        .find("[qex]")
-        .expect("the file must hold a note of qex")];
+        .find("[fairq]")
+        .expect("the file must hold a note of fairq")];
     for line in head.lines() {
         let n: u64 = line
             .parse()
@@ -12707,7 +12735,7 @@ fn a_job_that_writes_more_than_the_limit_keeps_the_head_and_the_tail() {
         assert!((1..=500_000).contains(&n), "`{line}` is not in the output");
     }
 
-    // THE CUT BACK MUST COST ONE LINE, AND NOT A QUARTER OF THE HEAD. qex looks
+    // THE CUT BACK MUST COST ONE LINE, AND NOT A QUARTER OF THE HEAD. fairq looks
     // back from the cut for the LAST line end, inside a window. A search that
     // takes the FIRST line end of that window gives a head that is still a true
     // prefix and still ends at a line end, so every assertion above holds, and
@@ -12727,11 +12755,11 @@ fn a_job_that_writes_more_than_the_limit_keeps_the_head_and_the_tail() {
     );
 
     // The commands must not present a part of the output as the whole output.
-    let logs = h.qex(&["logs", &id, "--stdout", "--tail", "5"]);
+    let logs = h.fairq(&["logs", &id, "--stdout", "--tail", "5"]);
     let notice = String::from_utf8_lossy(&logs.stderr);
     assert!(
-        notice.contains("qex removed"),
-        "`qex logs` must say what went: {notice}"
+        notice.contains("fairq removed"),
+        "`fairq logs` must say what went: {notice}"
     );
 
     let json = h.ok(&["logs", &id, "--stdout", "--json"]);
@@ -12741,7 +12769,7 @@ fn a_job_that_writes_more_than_the_limit_keeps_the_head_and_the_tail() {
 
 /// Output with no line end must keep its last part.
 ///
-/// qex removes the incomplete first line of the tail, so that a reader never
+/// fairq removes the incomplete first line of the tail, so that a reader never
 /// meets one half of a line. An earlier version applied that rule when the tail
 /// held no line end at all, and it then removed the whole tail: a job that
 /// wrote one enormous line left the head only. One JSON document, one base64
@@ -12762,7 +12790,7 @@ fn a_job_that_writes_one_enormous_line_keeps_its_end() {
         "-c",
         "dd if=/dev/zero bs=1M count=8 2>/dev/null | tr '\\0' 'A'; printf THE-VERY-END",
     ]);
-    let wait = h.qex(&["wait", &id, "--timeout", "60s"]);
+    let wait = h.fairq(&["wait", &id, "--timeout", "60s"]);
     assert_eq!(wait.status.code(), Some(0));
 
     let path = h.job_dir(&id).join("stdout.log");
@@ -12782,7 +12810,7 @@ fn a_job_that_writes_one_enormous_line_keeps_its_end() {
 
 /// A second attempt must not remove output that fits in the limit.
 ///
-/// qex removes nothing before the output passes the limit. An earlier version
+/// fairq removes nothing before the output passes the limit. An earlier version
 /// cut the file back at the first byte of the second attempt: a retry of a job
 /// that wrote a third of the limit lost 87KB, and the file said that the output
 /// had reached the limit, which was not true.
@@ -12804,12 +12832,12 @@ fn a_retry_that_fits_the_limit_keeps_the_output_of_both_attempts() {
         "-c",
         "seq 1 20000; echo THE-LAST-LINE; exit 1",
     ]);
-    h.qex(&["wait", &id, "--timeout", "60s"]);
+    h.fairq(&["wait", &id, "--timeout", "60s"]);
 
     let text = std::fs::read_to_string(h.job_dir(&id).join("stdout.log")).unwrap();
     assert!(
-        !text.contains("[qex]"),
-        "qex wrote a note about the limit, and the output fits in the limit"
+        !text.contains("[fairq]"),
+        "fairq wrote a note about the limit, and the output fits in the limit"
     );
     assert_eq!(
         text.lines().filter(|l| *l == "THE-LAST-LINE").count(),
@@ -12823,11 +12851,11 @@ fn a_retry_that_fits_the_limit_keeps_the_output_of_both_attempts() {
     assert_eq!(
         h.status_json(&id)["logs_dropped"],
         serde_json::Value::Null,
-        "the record says that qex removed output, and it removed nothing"
+        "the record says that fairq removed output, and it removed nothing"
     );
 }
 
-/// `qex logs --follow` must not lose the output after the limit.
+/// `fairq logs --follow` must not lose the output after the limit.
 ///
 /// The log file of a job becomes SHORTER at the moment that the output passes
 /// `[logs] max_bytes`, because the supervisor keeps the head and removes the
@@ -12862,7 +12890,7 @@ fn follow_does_not_lose_the_output_of_a_job_that_passes_the_limit() {
         "seq 1 12000; sleep 2; seq 12001 13000; sleep 2; echo THE-FINAL-LINE",
     ]);
 
-    let out = h.qex(&["logs", &id, "--stdout", "--follow"]);
+    let out = h.fairq(&["logs", &id, "--stdout", "--follow"]);
     assert_eq!(out.status.code(), Some(0));
     let lines = String::from_utf8_lossy(&out.stdout).into_owned();
     let notice = String::from_utf8_lossy(&out.stderr).into_owned();
@@ -12875,7 +12903,7 @@ fn follow_does_not_lose_the_output_of_a_job_that_passes_the_limit() {
     );
     assert!(
         notice.contains("removed"),
-        "the follower must say that qex removed output. It said: {notice}"
+        "the follower must say that fairq removed output. It said: {notice}"
     );
 }
 
@@ -12908,7 +12936,7 @@ fn a_follower_that_starts_after_the_limit_still_learns_what_went() {
         || tail.exists(),
     );
 
-    let out = h.qex(&["logs", &id, "--stdout", "--follow"]);
+    let out = h.fairq(&["logs", &id, "--stdout", "--follow"]);
     assert_eq!(out.status.code(), Some(0));
     let lines = String::from_utf8_lossy(&out.stdout).into_owned();
     let notice = String::from_utf8_lossy(&out.stderr).into_owned();
@@ -12938,16 +12966,16 @@ fn a_job_that_stops_runs_the_stop_hook_one_time_with_its_result() {
         "[peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
          [hooks]\non_stop = [\"sh\", \"-c\", \
-         \"echo \\\"$QEX_JOB_ID $QEX_STATE $QEX_EXIT_CODE $QEX_JOB_NAME\\\" >> {}\"]\n",
+         \"echo \\\"$FAIRQ_JOB_ID $FAIRQ_STATE $FAIRQ_EXIT_CODE $FAIRQ_JOB_NAME\\\" >> {}\"]\n",
         mark.display()
     ));
 
     let id = h.submit(&["submit", "--name", "report", "--", "sh", "-c", "exit 7"]);
-    let out = h.qex(&["wait", &id]);
+    let out = h.fairq(&["wait", &id]);
     assert_eq!(out.status.code(), Some(7));
     assert_eq!(h.state_of(&id), "failed");
 
-    // The hook starts after the record says that the job stopped, so `qex wait`
+    // The hook starts after the record says that the job stopped, so `fairq wait`
     // can give its answer first. Wait for the hook itself.
     h.until(
         "the stop hook wrote its line",
@@ -12983,7 +13011,7 @@ fn a_job_that_stops_runs_the_stop_hook_one_time_with_its_result() {
 
 /// A hook that hangs must not hold the job, the queue or the coordinator.
 ///
-/// The hook is a command that a user wrote, so it can hang. qex runs it after
+/// The hook is a command that a user wrote, so it can hang. fairq runs it after
 /// the final state is on the disk. The job thus has its result, its claim
 /// leaves the budget, and the next job starts while the hook still hangs.
 #[test]
@@ -13002,7 +13030,7 @@ fn a_stop_hook_that_hangs_holds_neither_the_job_nor_the_queue() {
     ));
 
     let first = h.submit(&["submit", "--cpu", "1", "--mem", "128MB", "--", "true"]);
-    let out = h.qex(&["wait", &first, "--timeout", "30s"]);
+    let out = h.fairq(&["wait", &first, "--timeout", "30s"]);
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -13024,7 +13052,7 @@ fn a_stop_hook_that_hangs_holds_neither_the_job_nor_the_queue() {
 
     // The next job must start and stop while the hook of the first job hangs.
     let second = h.submit(&["submit", "--cpu", "1", "--mem", "128MB", "--", "true"]);
-    let out = h.qex(&["wait", &second, "--timeout", "30s"]);
+    let out = h.fairq(&["wait", &second, "--timeout", "30s"]);
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -13047,14 +13075,14 @@ fn the_configured_states_select_the_jobs_that_run_the_stop_hook() {
         "[peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
          [hooks]\non_stop_states = [\"skipped\"]\n\
-         on_stop = [\"sh\", \"-c\", \"echo \\\"$QEX_STATE $QEX_JOB_NAME\\\" >> {}\"]\n",
+         on_stop = [\"sh\", \"-c\", \"echo \\\"$FAIRQ_STATE $FAIRQ_JOB_NAME\\\" >> {}\"]\n",
         mark.display()
     ));
 
     let build = h.submit(&["submit", "--name", "build", "--", "false"]);
     let test = h.submit(&["submit", "--name", "test", "--needs", &build, "--", "true"]);
 
-    h.qex(&["wait", &build]);
+    h.fairq(&["wait", &build]);
     h.until("the second job is skipped", Duration::from_secs(30), || {
         h.state_of(&test) == "skipped"
     });
@@ -13079,10 +13107,10 @@ fn the_configured_states_select_the_jobs_that_run_the_stop_hook() {
     );
 }
 
-/// `qex clean` must delete the record of a job whose stop hook still runs.
+/// `fairq clean` must delete the record of a job whose stop hook still runs.
 ///
 /// The hook of a job that never started runs in a thread of the coordinator,
-/// AFTER the job has its final state, and qex writes the verdict into
+/// AFTER the job has its final state, and fairq writes the verdict into
 /// `hook.log` in the directory of the job when the hook ends. A reader sees
 /// `cancelled` and deletes the record in that time. The deletion then met a
 /// file that was not in its list, and failed with `Directory not empty`: the
@@ -13097,7 +13125,7 @@ fn the_configured_states_select_the_jobs_that_run_the_stop_hook() {
 ///
 /// The fault itself needs the new file to arrive in the middle of the
 /// deletion, which no test can order. So the test proves the thing that
-/// removes the window: when `qex clean` gives its answer, the hook has ENDED.
+/// removes the window: when `fairq clean` gives its answer, the hook has ENDED.
 #[test]
 fn a_clean_waits_for_a_stop_hook_that_still_writes() {
     let h = Harness::with_default_config("hookclean");
@@ -13126,7 +13154,7 @@ fn a_clean_waits_for_a_stop_hook_that_still_writes() {
     assert!(
         !std::fs::read_to_string(dir.join("hook.log"))
             .unwrap_or_default()
-            .contains("qex: the stop hook"),
+            .contains("fairq: the stop hook"),
         "the hook must still run when the deletion starts, or this test proves nothing: {:?}",
         std::fs::read_to_string(dir.join("hook.log"))
     );
@@ -13135,7 +13163,7 @@ fn a_clean_waits_for_a_stop_hook_that_still_writes() {
     assert_eq!(
         h.hook_lines(),
         vec!["started", "ended"],
-        "`qex clean` must wait for the hook, which writes into the directory that it deletes"
+        "`fairq clean` must wait for the hook, which writes into the directory that it deletes"
     );
     assert!(
         !dir.exists(),
@@ -13152,8 +13180,8 @@ fn a_clean_waits_for_a_stop_hook_that_still_writes() {
 /// makes that job `failed`, so the coordinator runs the hook. The claim file
 /// stops a second message.
 ///
-/// This test also reads `qex logs --hook`. The verdict of qex must reach a file
-/// that a qex command shows: a user whose notification did not arrive had no
+/// This test also reads `fairq logs --hook`. The verdict of fairq must reach a file
+/// that a fairq command shows: a user whose notification did not arrive had no
 /// command that gave the reason.
 #[test]
 fn a_job_whose_supervisor_stopped_still_runs_the_stop_hook_one_time() {
@@ -13162,7 +13190,7 @@ fn a_job_whose_supervisor_stopped_still_runs_the_stop_hook_one_time() {
     h.write_config(&format!(
         "[peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
-         [hooks]\non_stop = [\"sh\", \"-c\", \"echo \\\"$QEX_STATE\\\" >> {}\"]\n",
+         [hooks]\non_stop = [\"sh\", \"-c\", \"echo \\\"$FAIRQ_STATE\\\" >> {}\"]\n",
         mark.display()
     ));
 
@@ -13199,11 +13227,11 @@ fn a_job_whose_supervisor_stopped_still_runs_the_stop_hook_one_time() {
         "with no supervisor, the coordinator must be the process that notifies"
     );
 
-    // The verdict of qex must reach a qex command.
+    // The verdict of fairq must reach a fairq command.
     let text = h.ok(&["logs", &id, "--hook"]);
     assert!(
-        text.contains("qex: the stop hook"),
-        "`qex logs --hook` must give the verdict of qex: {text}"
+        text.contains("fairq: the stop hook"),
+        "`fairq logs --hook` must give the verdict of fairq: {text}"
     );
 }
 
@@ -13213,9 +13241,9 @@ fn a_job_whose_supervisor_stopped_still_runs_the_stop_hook_one_time() {
 /// The coordinator reads its configuration one time, at its start, and it
 /// operates for hours. With that configuration, a hook that the user deleted
 /// still ran on each job, and a hook that the user added never ran on the paths
-/// of the coordinator — while `qex config show` gave the new value. A stale
-/// configuration that makes qex do nothing is a fault; a stale configuration
-/// that makes qex RUN A COMMAND THAT THE USER DELETED is a different thing.
+/// of the coordinator — while `fairq config show` gave the new value. A stale
+/// configuration that makes fairq do nothing is a fault; a stale configuration
+/// that makes fairq RUN A COMMAND THAT THE USER DELETED is a different thing.
 #[test]
 fn a_stop_hook_that_the_user_deletes_does_not_run_again() {
     let h = Harness::with_default_config("hookstale");
@@ -13223,7 +13251,7 @@ fn a_stop_hook_that_the_user_deletes_does_not_run_again() {
     let base = "[peers]\nenabled = false\n\
                 [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n";
     h.write_config(&format!(
-        "{base}[hooks]\non_stop = [\"sh\", \"-c\", \"echo \\\"$QEX_JOB_NAME\\\" >> {}\"]\n",
+        "{base}[hooks]\non_stop = [\"sh\", \"-c\", \"echo \\\"$FAIRQ_JOB_NAME\\\" >> {}\"]\n",
         mark.display()
     ));
 
@@ -13250,20 +13278,20 @@ fn a_stop_hook_that_the_user_deletes_does_not_run_again() {
     );
     assert!(
         !h.job_dir(&second).join("hook.ran").exists(),
-        "qex must not record a run of a hook that does not exist"
+        "fairq must not record a run of a hook that does not exist"
     );
 
     // The other direction: a hook that the user adds must run at once, also on
     // a path of the coordinator. A skipped job has no supervisor.
     h.write_config(&format!(
         "{base}[hooks]\non_stop_states = [\"skipped\"]\n\
-         on_stop = [\"sh\", \"-c\", \"echo \\\"$QEX_STATE\\\" >> {}\"]\n",
+         on_stop = [\"sh\", \"-c\", \"echo \\\"$FAIRQ_STATE\\\" >> {}\"]\n",
         mark.display()
     ));
 
     let build = h.submit(&["submit", "--name", "build", "--", "false"]);
     let dependent = h.submit(&["submit", "--name", "dep", "--needs", &build, "--", "true"]);
-    h.qex(&["wait", &build]);
+    h.fairq(&["wait", &build]);
     h.until(
         "the dependent job is skipped",
         Duration::from_secs(30),
@@ -13309,7 +13337,7 @@ fn a_job_notifies_from_its_supervisor_when_no_coordinator_operates() {
         "[peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
          [hooks]\non_stop = [\"sh\", \"-c\", \
-         \"echo \\\"$QEX_STATE $QEX_JOB_NAME\\\" >> {}\"]\n",
+         \"echo \\\"$FAIRQ_STATE $FAIRQ_JOB_NAME\\\" >> {}\"]\n",
         mark.display()
     ));
 
@@ -13322,7 +13350,7 @@ fn a_job_notifies_from_its_supervisor_when_no_coordinator_operates() {
 
     // Take the coordinator away. The supervisor is a session of its own, so it
     // continues. This test started this coordinator, and the pid comes from
-    // qex itself.
+    // fairq itself.
     let coordinator = h.coordinator_pid();
     unsafe {
         libc::kill(coordinator, libc::SIGKILL);
@@ -13340,8 +13368,8 @@ fn a_job_notifies_from_its_supervisor_when_no_coordinator_operates() {
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    // FROM HERE, RUN NO qex COMMAND UNTIL THE HOOK HAS RUN. `qex status` and
-    // `qex list` start a coordinator when none operates, and that new
+    // FROM HERE, RUN NO fairq COMMAND UNTIL THE HOOK HAS RUN. `fairq status` and
+    // `fairq list` start a coordinator when none operates, and that new
     // coordinator would reap the job and could notify. Read the disk instead.
     h.until(
         "the stop hook wrote its line",
@@ -13385,7 +13413,7 @@ fn a_job_that_gives_up_waiting_runs_the_stop_hook() {
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
          [queue]\noversized = \"queue\"\n\
          [hooks]\non_stop = [\"sh\", \"-c\", \
-         \"echo \\\"$QEX_STATE $QEX_JOB_NAME\\\" >> {}\"]\n",
+         \"echo \\\"$FAIRQ_STATE $FAIRQ_JOB_NAME\\\" >> {}\"]\n",
         mark.display()
     ));
 
@@ -13440,11 +13468,11 @@ fn a_job_whose_command_does_not_exist_still_runs_the_stop_hook() {
         "[peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
          [hooks]\non_stop = [\"sh\", \"-c\", \
-         \"echo \\\"$QEX_STATE $QEX_JOB_NAME\\\" >> {}\"]\n",
+         \"echo \\\"$FAIRQ_STATE $FAIRQ_JOB_NAME\\\" >> {}\"]\n",
         mark.display()
     ));
 
-    let id = h.submit(&["submit", "--name", "typo", "--", "qex-no-such-program"]);
+    let id = h.submit(&["submit", "--name", "typo", "--", "fairq-no-such-program"]);
     h.until("the job failed", Duration::from_secs(45), || {
         h.state_of(&id) == "failed"
     });
@@ -13479,14 +13507,14 @@ fn a_cancelled_job_runs_the_stop_hook_when_the_config_file_asks_for_it() {
     let h = Harness::with_default_config("hookcancel");
     let mark = h.root.join("hook.txt");
     // One core of budget, and one job that takes it. The next job then stays in
-    // the queue, where `qex cancel` can take it out before it ever runs.
+    // the queue, where `fairq cancel` can take it out before it ever runs.
     h.write_config(&format!(
         "[budget]\ncpu = \"1\"\nmem = \"512MB\"\n\
          [peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
          [hooks]\non_stop_states = [\"cancelled\"]\n\
          on_stop = [\"sh\", \"-c\", \
-         \"echo \\\"$QEX_STATE $QEX_JOB_NAME\\\" >> {}\"]\n",
+         \"echo \\\"$FAIRQ_STATE $FAIRQ_JOB_NAME\\\" >> {}\"]\n",
         mark.display()
     ));
 
@@ -13506,7 +13534,7 @@ fn a_cancelled_job_runs_the_stop_hook_when_the_config_file_asks_for_it() {
         "the budget of one core must hold this job in the queue"
     );
 
-    h.qex(&["cancel", &waiting]);
+    h.fairq(&["cancel", &waiting]);
     h.until("the job is cancelled", Duration::from_secs(30), || {
         h.state_of(&waiting) == "cancelled"
     });
@@ -13529,21 +13557,21 @@ fn a_cancelled_job_runs_the_stop_hook_when_the_config_file_asks_for_it() {
 
     // The job that holds the budget stops as `killed`, which this filter does
     // not select, so the count above stands.
-    h.qex(&["kill", &occupier, "--grace", "1s"]);
+    h.fairq(&["kill", &occupier, "--grace", "1s"]);
 }
 
-/// `qex logs --hook` must SAY that qex ran no hook for this job.
+/// `fairq logs --hook` must SAY that fairq ran no hook for this job.
 ///
 /// An empty answer looks like a hook that ran and wrote nothing. The reader
 /// then tests the hook itself, and the true cause — that no hook is configured,
 /// or that this state is not in the filter — is somewhere else.
 #[test]
-fn qex_logs_hook_says_when_there_was_no_stop_hook() {
+fn fairq_logs_hook_says_when_there_was_no_stop_hook() {
     let h = Harness::with_default_config("hooknone");
     let id = h.submit(&["submit", "--", "true"]);
     h.ok(&["wait", &id]);
 
-    let out = h.qex(&["logs", &id, "--hook"]);
+    let out = h.fairq(&["logs", &id, "--hook"]);
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -13554,8 +13582,8 @@ fn qex_logs_hook_says_when_there_was_no_stop_hook() {
         notice.contains("ran no stop hook"),
         "the reader must learn that there was no hook: {notice}"
     );
-    // The message goes to stderr. `qex logs $ID --hook > file` must give a
-    // file that holds the log and no sentence of qex.
+    // The message goes to stderr. `fairq logs $ID --hook > file` must give a
+    // file that holds the log and no sentence of fairq.
     assert!(
         String::from_utf8_lossy(&out.stdout).is_empty(),
         "the standard output must hold the log only"
@@ -13566,7 +13594,7 @@ fn qex_logs_hook_says_when_there_was_no_stop_hook() {
 /// group id must reach stdout alone.
 ///
 /// The group id is the handle to the whole fan-out. Without it on stdout,
-/// `GROUP=$(qex submit --each-line ...)` gives nothing and the user must find
+/// `GROUP=$(fairq submit --each-line ...)` gives nothing and the user must find
 /// the jobs again by hand.
 #[test]
 fn each_line_gives_one_job_for_each_line_in_one_group() {
@@ -13605,7 +13633,7 @@ fn each_line_gives_one_job_for_each_line_in_one_group() {
     assert_eq!(h.list_json().len(), 3, "no other job may exist");
 
     // The group takes its NAME as well as its id, which is the rule that a
-    // group id follows everywhere in qex. The name of this group comes from
+    // group id follows everywhere in fairq. The name of this group comes from
     // the file, so it is `inputs`. Without `spec.group_name`, the id half
     // still operates and this half gives nothing.
     for job in &jobs {
@@ -13620,7 +13648,7 @@ fn each_line_gives_one_job_for_each_line_in_one_group() {
     assert_eq!(
         by_name.len(),
         3,
-        "`qex list --group inputs` must give the 3 jobs: {text}"
+        "`fairq list --group inputs` must give the 3 jobs: {text}"
     );
     // The start of the id names the group as well.
     let text = h.ok(&["list", "--group", &group[..8], "--json"]);
@@ -13638,7 +13666,7 @@ fn each_line_gives_one_job_for_each_line_in_one_group() {
     seen.sort();
     assert_eq!(seen, vec!["value=alpha", "value=beta", "value=gamma"]);
 
-    // The name must hold the position and the line, so `qex list` is readable.
+    // The name must hold the position and the line, so `fairq list` is readable.
     let names: Vec<String> = jobs
         .iter()
         .map(|j| j["name"].as_str().unwrap().to_string())
@@ -13723,10 +13751,10 @@ fn a_line_with_a_space_a_quotation_mark_and_a_semicolon_is_one_argument() {
 /// job name.
 ///
 /// A name goes to the terminal of the user at the submission and in every later
-/// `qex list`. `{}` can go in the program position, which the documentation
+/// `fairq list`. `{}` can go in the program position, which the documentation
 /// advertises, so BOTH parts of the name can come from the file. An escape
 /// sequence there changes the colour, moves the cursor, empties the screen or
-/// writes the title of the window, and rows of `qex list` go away in front of
+/// writes the title of the window, and rows of `fairq list` go away in front of
 /// the reader.
 #[test]
 fn a_line_never_puts_a_control_character_into_a_job_name() {
@@ -13738,7 +13766,7 @@ fn a_line_never_puts_a_control_character_into_a_job_name() {
 
     // `{}` in the program position as well, so the line also reaches the BASE
     // of the name. `echo` is the program, and the line is its argument.
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--each-line",
         input.to_str().unwrap(),
@@ -13749,14 +13777,14 @@ fn a_line_never_puts_a_control_character_into_a_job_name() {
     assert!(out.status.success());
     let group = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
-    // Nothing that qex wrote about the submission may hold a control character.
+    // Nothing that fairq wrote about the submission may hold a control character.
     let err = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(
         !err.contains('\u{1b}') && !err.contains('\u{7}'),
         "the submission output holds a control character: {err:?}"
     );
 
-    // The name in the record, which `qex list` writes, must be clean.
+    // The name in the record, which `fairq list` writes, must be clean.
     let text = h.ok(&["list", "--group", &group, "--json"]);
     let jobs: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap();
     assert_eq!(jobs.len(), 2);
@@ -13769,19 +13797,20 @@ fn a_line_never_puts_a_control_character_into_a_job_name() {
         );
     }
 
-    // `qex list` itself must write no control character.
+    // `fairq list` itself must write no control character.
     let listing = h.ok(&["list"]);
     assert!(
         !listing.contains('\u{1b}') && !listing.contains('\u{7}'),
-        "`qex list` holds a control character: {listing:?}"
+        "`fairq list` holds a control character: {listing:?}"
     );
 
-    // The COMMAND that the job received still holds the line exactly. qex
+    // The COMMAND that the job received still holds the line exactly. fairq
     // cleans the name, and it shows the command with an escape for a control
     // byte. The record on the disk is the data that the job received.
     let id = jobs[0]["id"].as_str().unwrap();
     let spec: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(h.root.join("state/qex/jobs").join(id).join("spec.json")).unwrap(),
+        &std::fs::read_to_string(h.root.join("state/fairq/jobs").join(id).join("spec.json"))
+            .unwrap(),
     )
     .unwrap();
     assert_eq!(
@@ -13806,7 +13835,7 @@ fn a_line_never_puts_a_control_character_into_a_job_name() {
 /// the path that the part from the line does not cover.
 ///
 /// The jobs do not start, because no such program exists. That is correct for
-/// this test: the name reaches `qex list` and the terminal of the user whatever
+/// this test: the name reaches `fairq list` and the terminal of the user whatever
 /// the job does after it.
 #[test]
 fn a_placeholder_in_the_program_position_gives_a_clean_name() {
@@ -13815,7 +13844,7 @@ fn a_placeholder_in_the_program_position_gives_a_clean_name() {
     let input = h.root.join("inputs.txt");
     std::fs::write(&input, "\u{1b}[31mBOOM\u{1b}[0m x\nsecond\n").unwrap();
 
-    let out = h.qex(&["submit", "--each-line", input.to_str().unwrap(), "--", "{}"]);
+    let out = h.fairq(&["submit", "--each-line", input.to_str().unwrap(), "--", "{}"]);
     assert!(out.status.success());
 
     let err = String::from_utf8_lossy(&out.stderr).to_string();
@@ -13842,7 +13871,7 @@ fn a_placeholder_in_the_program_position_gives_a_clean_name() {
     // would reach the name of the second job as well.
     assert!(
         !h.ok(&["list"]).contains('\u{1b}'),
-        "`qex list` holds an escape"
+        "`fairq list` holds an escape"
     );
 }
 
@@ -13863,7 +13892,7 @@ fn an_input_with_a_bad_line_submits_no_job_at_all() {
     bytes.extend_from_slice(b"bad \xff line\n");
     std::fs::write(&input, &bytes).unwrap();
 
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--each-line",
         input.to_str().unwrap(),
@@ -13881,7 +13910,7 @@ fn an_input_with_a_bad_line_submits_no_job_at_all() {
     );
 
     // A command with no place for the line is the same rule: no job at all.
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--each-line",
         input.to_str().unwrap(),
@@ -13895,20 +13924,20 @@ fn an_input_with_a_bad_line_submits_no_job_at_all() {
     assert!(h.list_json().is_empty());
 }
 
-/// An empty line and a comment line must give no job, and qex must SAY how many
+/// An empty line and a comment line must give no job, and fairq must SAY how many
 /// lines it passed over.
 ///
-/// A line that a user expected to run, and that qex passed over in silence, is
+/// A line that a user expected to run, and that fairq passed over in silence, is
 /// the quiet wrong answer that this project exists to prevent.
 #[test]
-fn an_empty_line_and_a_comment_line_give_no_job_and_qex_reports_them() {
+fn an_empty_line_and_a_comment_line_give_no_job_and_fairq_reports_them() {
     let h = Harness::with_default_config("eachskip");
 
     let input = h.root.join("inputs.txt");
     // No final newline on the last line, and one CRLF ending.
     std::fs::write(&input, "# a note\n\nalpha\r\n   \n#\nbeta").unwrap();
 
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--each-line",
         input.to_str().unwrap(),
@@ -13922,7 +13951,7 @@ fn an_empty_line_and_a_comment_line_give_no_job_and_qex_reports_them() {
 
     assert!(
         err.contains("2 empty lines") && err.contains("2 comment lines"),
-        "qex must say what it passed over: {err}"
+        "fairq must say what it passed over: {err}"
     );
 
     let text = h.ok(&["list", "--group", &group, "--json"]);
@@ -13943,13 +13972,13 @@ fn an_empty_line_and_a_comment_line_give_no_job_and_qex_reports_them() {
 
 /// The name `-` must read the lines from another program.
 ///
-/// `qex submit` reads nothing else from standard input, so this name is free.
+/// `fairq submit` reads nothing else from standard input, so this name is free.
 /// A fan-out over the output of `ls` or of a query is the common use.
 #[test]
 fn each_line_reads_the_lines_from_standard_input() {
     let h = Harness::with_default_config("eachstdin");
 
-    let out = h.qex_stdin(
+    let out = h.fairq_stdin(
         &["submit", "--each-line", "-", "--", "echo", "{}"],
         "one\ntwo\n",
     );
@@ -13969,7 +13998,7 @@ fn each_line_reads_the_lines_from_standard_input() {
 /// Every option of the submission must reach EVERY job of the fan-out.
 ///
 /// The documentation promises this, and each value takes a different path to
-/// the job. `--needs` is the dangerous one: qex changes the names into ids one
+/// the job. `--needs` is the dangerous one: fairq changes the names into ids one
 /// time, and then copies them into each job. A fan-out that lost that copy
 /// would start immediately, in front of the build that it needs, and it would
 /// give no error at all.
@@ -13995,7 +14024,7 @@ fn every_option_of_a_fan_out_reaches_every_job() {
     let work = h.root.join("work");
     std::fs::create_dir_all(&work).unwrap();
 
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--each-line",
         input.to_str().unwrap(),
@@ -14017,7 +14046,7 @@ fn every_option_of_a_fan_out_reaches_every_job() {
         "db",
         "--retries",
         "2",
-        // Both halves of the claim, because qex writes the claim into the
+        // Both halves of the claim, because fairq writes the claim into the
         // environment of the job only when the USER chose both. Without them,
         // the test of `--no-limit-env-hints` below proves nothing.
         "--cpu",
@@ -14099,7 +14128,7 @@ fn every_option_of_a_fan_out_reaches_every_job() {
         // environment of the job.
         let env = spec["env"].as_object().unwrap();
         assert!(
-            !env.contains_key("QEX_CPU") && !env.contains_key("QEX_MEM"),
+            !env.contains_key("FAIRQ_CPU") && !env.contains_key("FAIRQ_MEM"),
             "`--no-limit-env-hints` must reach the job {id}: {env:?}"
         );
     }
@@ -14107,7 +14136,7 @@ fn every_option_of_a_fan_out_reaches_every_job() {
     // ANTI-VACUITY for `--no-limit-env-hints`. The same fan-out WITHOUT that
     // option must write the claim, and the test above then measures the
     // option and not the absence of the claim.
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--each-line",
         input.to_str().unwrap(),
@@ -14134,7 +14163,7 @@ fn every_option_of_a_fan_out_reaches_every_job() {
         let text = std::fs::read_to_string(h.job_dir(id).join("spec.json")).unwrap();
         let spec: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(
-            spec["env"]["QEX_CPU"],
+            spec["env"]["FAIRQ_CPU"],
             serde_json::json!("1"),
             "with no `--no-limit-env-hints`, the job {id} must hear its claim"
         );
@@ -14153,7 +14182,7 @@ fn every_option_of_a_fan_out_reaches_every_job() {
     commands.sort();
     assert_eq!(commands, vec!["alpha".to_string(), "beta".to_string()]);
 
-    h.qex(&["kill", &gate]);
+    h.fairq(&["kill", &gate]);
 }
 
 /// A fan-out must refuse the options that hold a meaning for ONE job only.
@@ -14181,7 +14210,7 @@ fn a_fan_out_refuses_the_options_that_hold_a_meaning_for_one_job() {
             args.push(v);
         }
         args.extend_from_slice(&["--", "echo", "{}"]);
-        let out = h.qex(&args);
+        let out = h.fairq(&args);
 
         assert!(
             !out.status.success(),
@@ -14216,7 +14245,7 @@ fn a_fan_out_refuses_the_options_that_hold_a_meaning_for_one_job() {
     // ANTI-VACUITY: the same command with no refused option MUST submit. A
     // typing error in `--each-line` or in the input file would make every
     // assertion above pass for the wrong reason.
-    let out = h.qex(&["submit", "--each-line", &path, "--", "echo", "{}"]);
+    let out = h.fairq(&["submit", "--each-line", &path, "--", "echo", "{}"]);
     assert!(
         out.status.success(),
         "the fan-out without those options must operate: {}",
@@ -14227,7 +14256,7 @@ fn a_fan_out_refuses_the_options_that_hold_a_meaning_for_one_job() {
 
 /// The limit must stop a fan-out that would fill the state directory, and the
 /// message must say how to raise it. It must never wait for a key: the main
-/// user of qex is an agent, and an agent cannot answer a prompt.
+/// user of fairq is an agent, and an agent cannot answer a prompt.
 #[test]
 fn a_fan_out_above_the_limit_is_refused_with_no_prompt() {
     let h = Harness::with_default_config("eachlimit");
@@ -14236,7 +14265,7 @@ fn a_fan_out_above_the_limit_is_refused_with_no_prompt() {
     let text: String = (1..=20).map(|i| format!("line{i}\n")).collect();
     std::fs::write(&input, text).unwrap();
 
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--each-line",
         input.to_str().unwrap(),
@@ -14254,9 +14283,9 @@ fn a_fan_out_above_the_limit_is_refused_with_no_prompt() {
 
 fn _unused(_: &Path) {}
 
-/// Waits until a `qex run` that a test started stops, and gives its output.
+/// Waits until a `fairq run` that a test started stops, and gives its output.
 ///
-/// The test must not wait for ever. A `qex run` that never stops is the fault
+/// The test must not wait for ever. A `fairq run` that never stops is the fault
 /// that these tests look for, so the wait has a limit and it says what failed.
 fn wait_run(mut child: std::process::Child, what: &str) -> Output {
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -14266,7 +14295,7 @@ fn wait_run(mut child: std::process::Child, what: &str) -> Output {
             None => {
                 if Instant::now() >= deadline {
                     child.kill().ok();
-                    panic!("`qex run` did not stop in 60 seconds: {what}");
+                    panic!("`fairq run` did not stop in 60 seconds: {what}");
                 }
                 std::thread::sleep(Duration::from_millis(200));
             }
@@ -14274,85 +14303,85 @@ fn wait_run(mut child: std::process::Child, what: &str) -> Output {
     }
 }
 
-/// A DIFFERENT command stopped the job, so `qex run` gives 125 and not 1.
+/// A DIFFERENT command stopped the job, so `fairq run` gives 125 and not 1.
 ///
-/// This is the fault that this test prevents. A job of `qex run` is a job like
-/// any other, so another agent on the machine can run `qex kill` on it. With
+/// This is the fault that this test prevents. A job of `fairq run` is a job like
+/// any other, so another agent on the machine can run `fairq kill` on it. With
 /// the code 1 the caller cannot separate "my work failed" from "somebody
 /// stopped my work", so it starts the work again or it reports a fault that the
 /// work does not have. The message on stderr must also say that this command
 /// did not stop the job.
 #[test]
-fn qex_run_gives_125_when_a_different_command_kills_the_job() {
+fn fairq_run_gives_125_when_a_different_command_kills_the_job() {
     let h = Harness::with_default_config("runkill");
     let (child, id) = h.run_bg(&["--", "sleep", "60"]);
     h.until(
-        "the job of `qex run` starts",
+        "the job of `fairq run` starts",
         Duration::from_secs(30),
         || h.has_started(&id),
     );
 
-    let kill = h.qex(&["kill", &id, "--grace", "1s"]);
-    assert!(kill.status.success(), "`qex kill` failed");
+    let kill = h.fairq(&["kill", &id, "--grace", "1s"]);
+    assert!(kill.status.success(), "`fairq kill` failed");
 
     let out = wait_run(child, "a different command killed the job");
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(
         out.status.code(),
         Some(125),
-        "`qex run` must give 125 when something stopped the job: {err}"
+        "`fairq run` must give 125 when something stopped the job: {err}"
     );
     assert!(
         err.contains("did not send it"),
-        "`qex run` must say that it did not stop the job: {err}"
+        "`fairq run` must say that it did not stop the job: {err}"
     );
 }
 
-/// A different command cancelled the queued job, so `qex run` gives 125.
+/// A different command cancelled the queued job, so `fairq run` gives 125.
 ///
-/// The job never ran and it wrote nothing, so `qex run` has no exit code of the
-/// job to give. It gives the code of the state, and the same code as `qex
+/// The job never ran and it wrote nothing, so `fairq run` has no exit code of the
+/// job to give. It gives the code of the state, and the same code as `fairq
 /// wait`, and it says that the job left the queue.
 #[test]
-fn qex_run_gives_125_when_a_different_command_cancels_the_queued_job() {
+fn fairq_run_gives_125_when_a_different_command_cancels_the_queued_job() {
     let h = Harness::with_default_config("runcancel");
 
-    // Hold the job of `qex run` in the queue with a dependency, so the test
+    // Hold the job of `fairq run` in the queue with a dependency, so the test
     // controls the moment at which the cancel arrives.
     let blocker = h.submit(&["submit", "--", "sleep", "60"]);
     let (child, id) = h.run_bg(&["--needs", &blocker, "--", "echo", "never"]);
     h.until(
-        "the job of `qex run` waits",
+        "the job of `fairq run` waits",
         Duration::from_secs(30),
         || h.state_of(&id) == "queued",
     );
 
-    let cancel = h.qex(&["cancel", &id]);
-    assert!(cancel.status.success(), "`qex cancel` failed");
+    let cancel = h.fairq(&["cancel", &id]);
+    assert!(cancel.status.success(), "`fairq cancel` failed");
 
     let out = wait_run(child, "a different command cancelled the job");
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(
         out.status.code(),
         Some(125),
-        "`qex run` must give 125 for a job that left the queue: {err}"
+        "`fairq run` must give 125 for a job that left the queue: {err}"
     );
     assert!(
         err.contains("removed the job"),
-        "`qex run` must say that the job left the queue: {err}"
+        "`fairq run` must say that the job left the queue: {err}"
     );
 
-    h.qex(&["kill", &blocker, "--grace", "1s"]);
+    h.fairq(&["kill", &blocker, "--grace", "1s"]);
 }
 
-/// `qex run` writes the output of the job, so it gives the exit code of the
+/// `fairq run` writes the output of the job, so it gives the exit code of the
 /// job when the job RAN.
 ///
-/// Without this, `qex run` would change the result of the command that it goes
-/// in front of. The test also compares the code against `qex wait`, which
+/// Without this, `fairq run` would change the result of the command that it goes
+/// in front of. The test also compares the code against `fairq wait`, which
 /// answers the same question, so the two cannot drift.
 #[test]
-fn qex_run_gives_the_exit_code_of_a_job_that_ran() {
+fn fairq_run_gives_the_exit_code_of_a_job_that_ran() {
     let h = Harness::with_default_config("runcode");
     for code in [0, 1, 7] {
         let command = format!("exit {code}");
@@ -14361,36 +14390,36 @@ fn qex_run_gives_the_exit_code_of_a_job_that_ran() {
         assert_eq!(
             out.status.code(),
             Some(code),
-            "`qex run` must give the exit code {code} of the job: {}",
+            "`fairq run` must give the exit code {code} of the job: {}",
             String::from_utf8_lossy(&out.stderr)
         );
 
-        let wait = h.qex(&["wait", &id]);
+        let wait = h.fairq(&["wait", &id]);
         assert_eq!(
             out.status.code(),
             wait.status.code(),
-            "`qex run` and `qex wait` gave two codes for one job"
+            "`fairq run` and `fairq wait` gave two codes for one job"
         );
     }
 }
 
-/// `qex run` and `qex wait` must give one code for one state.
+/// `fairq run` and `fairq wait` must give one code for one state.
 ///
 /// The test compares the two commands against each other, and not against a
 /// number, so a later change cannot move one of them alone. It also proves that
 /// the two cases of the fault are now separate: a job that failed gives 1, and a
 /// job that something stopped does not.
 #[test]
-fn qex_run_and_qex_wait_give_the_same_code_for_the_same_job() {
+fn fairq_run_and_fairq_wait_give_the_same_code_for_the_same_job() {
     let h = Harness::with_default_config("runagree");
 
     let (child, killed) = h.run_bg(&["--", "sleep", "60"]);
     h.until(
-        "the job of `qex run` starts",
+        "the job of `fairq run` starts",
         Duration::from_secs(30),
         || h.has_started(&killed),
     );
-    h.qex(&["kill", &killed, "--grace", "1s"]);
+    h.fairq(&["kill", &killed, "--grace", "1s"]);
     let stopped = wait_run(child, "the job that a kill stopped");
 
     let (child, failed) = h.run_bg(&["--", "sh", "-c", "exit 1"]);
@@ -14403,18 +14432,18 @@ fn qex_run_and_qex_wait_give_the_same_code_for_the_same_job() {
 
     assert_eq!(
         stopped.status.code(),
-        h.qex(&["wait", &killed]).status.code(),
-        "`qex run` and `qex wait` gave two codes for a job that something stopped"
+        h.fairq(&["wait", &killed]).status.code(),
+        "`fairq run` and `fairq wait` gave two codes for a job that something stopped"
     );
     assert_eq!(
         timed_out.status.code(),
-        h.qex(&["wait", &limited]).status.code(),
-        "`qex run` and `qex wait` gave two codes for a job that reached its time limit"
+        h.fairq(&["wait", &limited]).status.code(),
+        "`fairq run` and `fairq wait` gave two codes for a job that reached its time limit"
     );
     assert_eq!(
         ran.status.code(),
-        h.qex(&["wait", &failed]).status.code(),
-        "`qex run` and `qex wait` gave two codes for a job that failed"
+        h.fairq(&["wait", &failed]).status.code(),
+        "`fairq run` and `fairq wait` gave two codes for a job that failed"
     );
 
     assert_eq!(ran.status.code(), Some(1), "a job that failed gives 1");
@@ -14430,18 +14459,18 @@ fn qex_run_and_qex_wait_give_the_same_code_for_the_same_job() {
     );
 }
 
-/// `qex run` must say when IT stopped the job, and not blame a different
+/// `fairq run` must say when IT stopped the job, and not blame a different
 /// command.
 ///
 /// The branch that writes this sentence is the branch that gives the wrong
 /// blame when it is wrong, so a test must reach it. Without this test, a change
 /// that always blames a different command passes every other test.
 #[test]
-fn qex_run_says_when_this_command_stopped_the_job() {
+fn fairq_run_says_when_this_command_stopped_the_job() {
     let h = Harness::with_default_config("runctrlc");
     let (child, id) = h.run_bg(&["--", "sleep", "60"]);
     h.until(
-        "the job of `qex run` starts",
+        "the job of `fairq run` starts",
         Duration::from_secs(30),
         || h.has_started(&id),
     );
@@ -14459,28 +14488,28 @@ fn qex_run_says_when_this_command_stopped_the_job() {
     );
     assert!(
         err.contains("this command stopped the job"),
-        "`qex run` must say that IT stopped the job: {err}"
+        "`fairq run` must say that IT stopped the job: {err}"
     );
     assert!(
         !err.contains("did not send it"),
-        "`qex run` must not blame a different command for its own kill: {err}"
+        "`fairq run` must not blame a different command for its own kill: {err}"
     );
 }
 
 /// Ctrl-C must take the job out of the queue when the job has not started.
 ///
 /// The coordinator refuses to kill a job that waits in the queue, because that
-/// job has no process. Without the cancel, `qex run` waited for a job that
+/// job has no process. Without the cancel, `fairq run` waited for a job that
 /// still had to run, and it then said that a different command stopped a job
 /// that this command tried to stop.
 #[test]
-fn ctrl_c_removes_the_job_of_qex_run_from_the_queue() {
+fn ctrl_c_removes_the_job_of_fairq_run_from_the_queue() {
     let h = Harness::with_default_config("runctrlcq");
 
     let blocker = h.submit(&["submit", "--", "sleep", "60"]);
     let (child, id) = h.run_bg(&["--needs", &blocker, "--", "echo", "never"]);
     h.until(
-        "the job of `qex run` waits",
+        "the job of `fairq run` waits",
         Duration::from_secs(30),
         || h.state_of(&id) == "queued",
     );
@@ -14502,20 +14531,20 @@ fn ctrl_c_removes_the_job_of_qex_run_from_the_queue() {
     );
     assert!(
         err.contains("this command removed the job"),
-        "`qex run` must say that IT removed the job from the queue: {err}"
+        "`fairq run` must say that IT removed the job from the queue: {err}"
     );
 
-    h.qex(&["kill", &blocker, "--grace", "1s"]);
+    h.fairq(&["kill", &blocker, "--grace", "1s"]);
 }
 /// A change to the configuration must reach a coordinator that operates.
 ///
 /// # The fault that this test holds
 ///
 /// The coordinator read the file one time, at its start, and it then operates
-/// for hours. A user who changed `[budget] cpu` saw `qex config show` report
-/// the NEW value, because that command reads the file, and `qex info` report
+/// for hours. A user who changed `[budget] cpu` saw `fairq config show` report
+/// the NEW value, because that command reads the file, and `fairq info` report
 /// the OLD one, because that command asks the coordinator. The two commands of
-/// qex disagreed about the budget of qex, and neither said that one was old.
+/// fairq disagreed about the budget of fairq, and neither said that one was old.
 #[test]
 fn a_change_to_the_configuration_reaches_the_coordinator() {
     let h = Harness::new(
@@ -14532,7 +14561,7 @@ fn a_change_to_the_configuration_reaches_the_coordinator() {
 
     // Change the file while the coordinator operates.
     std::fs::write(
-        h.root.join("cfg/qex.toml"),
+        h.root.join("cfg/fairq.toml"),
         "[budget]\ncpu = \"2\"\nmem = \"4GB\"\n\
          [peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n",
@@ -14545,7 +14574,7 @@ fn a_change_to_the_configuration_reaches_the_coordinator() {
         || h.ok(&["info"]).contains("of 2 in use"),
     );
 
-    // A file that qex cannot read must NOT become the default values. The
+    // A file that fairq cannot read must NOT become the default values. The
     // default budget is far larger than 2 cores, so a silent fall back would
     // give this coordinator a budget that nobody asked for.
     //
@@ -14553,10 +14582,10 @@ fn a_change_to_the_configuration_reaches_the_coordinator() {
     // the same way as the start of a coordinator: an earlier version of this
     // work installed `cpu = "two"` and gave every job a budget of 0 cores with
     // no word to anybody.
-    std::fs::write(h.root.join("cfg/qex.toml"), "[budget]\ncpu = \"two\"\n").unwrap();
+    std::fs::write(h.root.join("cfg/fairq.toml"), "[budget]\ncpu = \"two\"\n").unwrap();
 
-    h.until("qex reports the fault", Duration::from_secs(45), || {
-        let out = h.qex(&["info"]);
+    h.until("fairq reports the fault", Duration::from_secs(45), || {
+        let out = h.fairq(&["info"]);
         String::from_utf8_lossy(&out.stderr).contains("cannot read it")
     });
 
@@ -14569,34 +14598,34 @@ fn a_change_to_the_configuration_reaches_the_coordinator() {
     // The fault travels as DATA as well. An agent reads the JSON, and a number
     // with no word about its age is worse than no number.
     let json: serde_json::Value =
-        serde_json::from_slice(&h.qex(&["info", "--json"]).stdout).unwrap();
+        serde_json::from_slice(&h.fairq(&["info", "--json"]).stdout).unwrap();
     assert!(
         json["config_error"].is_string(),
-        "`qex info --json` must carry the fault: {json}"
+        "`fairq info --json` must carry the fault: {json}"
     );
 
     // A FAULT OF THE FORM OF THE FILE gives a message of several lines, with a
-    // caret under the column. Every line must carry the `qex:` prefix, or the
+    // caret under the column. Every line must carry the `fairq:` prefix, or the
     // lines after the first read as output of the command.
-    std::fs::write(h.root.join("cfg/qex.toml"), "[budget\n").unwrap();
+    std::fs::write(h.root.join("cfg/fairq.toml"), "[budget\n").unwrap();
 
     h.until(
-        "qex reports the fault of the form",
+        "fairq reports the fault of the form",
         Duration::from_secs(45),
-        || String::from_utf8_lossy(&h.qex(&["info"]).stderr).contains("TOML parse error"),
+        || String::from_utf8_lossy(&h.fairq(&["info"]).stderr).contains("TOML parse error"),
     );
-    let err = String::from_utf8_lossy(&h.qex(&["info"]).stderr).to_string();
+    let err = String::from_utf8_lossy(&h.fairq(&["info"]).stderr).to_string();
     for line in err.lines() {
         assert!(
-            line.starts_with("qex:"),
+            line.starts_with("fairq:"),
             "every line of the warning must carry the prefix: {err}"
         );
     }
 
     // CORRECT THE FILE, AND THE WARNING GOES AWAY. A warning that stays after
-    // the remedy teaches the reader to ignore every warning of qex.
+    // the remedy teaches the reader to ignore every warning of fairq.
     std::fs::write(
-        h.root.join("cfg/qex.toml"),
+        h.root.join("cfg/fairq.toml"),
         "[budget]\ncpu = \"5\"\nmem = \"4GB\"\n\
          [peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n",
@@ -14608,7 +14637,7 @@ fn a_change_to_the_configuration_reaches_the_coordinator() {
         Duration::from_secs(45),
         || h.ok(&["info"]).contains("of 5 in use"),
     );
-    let err = String::from_utf8_lossy(&h.qex(&["info"]).stderr).to_string();
+    let err = String::from_utf8_lossy(&h.fairq(&["info"]).stderr).to_string();
     assert!(
         !err.contains("cannot read it"),
         "the warning must go away when the file is correct: {err}"
@@ -14619,7 +14648,7 @@ fn a_change_to_the_configuration_reaches_the_coordinator() {
 ///
 /// # The fault that this test holds
 ///
-/// A file that qex cannot read must never become the DEFAULT values. The
+/// A file that fairq cannot read must never become the DEFAULT values. The
 /// default budget is 75% of the machine, so a coordinator that took the
 /// defaults would turn a budget of 2 cores into a budget of 12, with no word to
 /// anybody. An empty file and a file that is gone are the two states that a
@@ -14634,7 +14663,7 @@ fn an_empty_or_missing_configuration_does_not_become_the_default_values() {
                 [peers]\nenabled = false\n\
                 [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n";
     let h = Harness::new("reload-gone", file);
-    let path = h.root.join("cfg/qex.toml");
+    let path = h.root.join("cfg/fairq.toml");
 
     h.ok(&["list"]);
     let info = h.ok(&["info"]);
@@ -14643,9 +14672,9 @@ fn an_empty_or_missing_configuration_does_not_become_the_default_values() {
     // An empty file, which is the state that a truncate leaves.
     std::fs::write(&path, "").unwrap();
     h.until(
-        "qex reports the empty file",
+        "fairq reports the empty file",
         Duration::from_secs(45),
-        || String::from_utf8_lossy(&h.qex(&["info"]).stderr).contains("the file is empty"),
+        || String::from_utf8_lossy(&h.fairq(&["info"]).stderr).contains("the file is empty"),
     );
     let info = h.ok(&["info"]);
     assert!(
@@ -14664,7 +14693,7 @@ fn an_empty_or_missing_configuration_does_not_become_the_default_values() {
 
     // A RENAME OVER THE FILE. The name then points at a different file, so a
     // watch of the name would hold a file that nobody reads again.
-    let temp = h.root.join("cfg/.qex.toml.new");
+    let temp = h.root.join("cfg/.fairq.toml.new");
     std::fs::write(&temp, file.replace("cpu = \"2\"", "cpu = \"6\"")).unwrap();
     std::fs::rename(&temp, &path).unwrap();
 
@@ -14691,7 +14720,7 @@ fn an_empty_or_missing_configuration_does_not_become_the_default_values() {
 /// That is worse than the fault this branch removes, because it STARTS WORK.
 ///
 /// The test writes the SAME content each time, so the budget has no reason to
-/// change at all. Every value that `qex info` gives must be the value in the
+/// change at all. Every value that `fairq info` gives must be the value in the
 /// file.
 #[test]
 fn a_write_that_is_not_finished_does_not_change_the_budget() {
@@ -14702,11 +14731,11 @@ fn a_write_that_is_not_finished_does_not_change_the_budget() {
                 [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
                 [budget]\ncpu = \"2\"\nmem = \"1GB\"\n";
     let h = Harness::new("reload-partial", file);
-    let path = h.root.join("cfg/qex.toml");
+    let path = h.root.join("cfg/fairq.toml");
 
     h.ok(&["list"]);
     let info: serde_json::Value =
-        serde_json::from_slice(&h.qex(&["info", "--json"]).stdout).unwrap();
+        serde_json::from_slice(&h.fairq(&["info", "--json"]).stdout).unwrap();
     assert_eq!(info["mem_budget"].as_u64(), Some(1024 * 1024 * 1024));
 
     // Write the file line by line, again and again, for as long as the reader
@@ -14733,7 +14762,7 @@ fn a_write_that_is_not_finished_does_not_change_the_budget() {
     let mut looks = 0;
     while Instant::now() < deadline {
         let info: serde_json::Value =
-            serde_json::from_slice(&h.qex(&["info", "--json"]).stdout).unwrap();
+            serde_json::from_slice(&h.fairq(&["info", "--json"]).stdout).unwrap();
         looks += 1;
         assert_eq!(
             info["mem_budget"].as_u64(),
@@ -14745,10 +14774,10 @@ fn a_write_that_is_not_finished_does_not_change_the_budget() {
             Some(2),
             "a write that is not finished must never give the default budget: {info}"
         );
-        // The file is correct each time it is complete, so qex must report no
-        // FAULT of it. A note that qex WAITS for the writer is not a fault:
-        // qex says that while a writer holds the file, so that a person who
-        // reads `qex info` learns why the new values did not arrive yet.
+        // The file is correct each time it is complete, so fairq must report no
+        // FAULT of it. A note that fairq WAITS for the writer is not a fault:
+        // fairq says that while a writer holds the file, so that a person who
+        // reads `fairq info` learns why the new values did not arrive yet.
         let reported = info["config_error"].as_str().unwrap_or_default();
         assert!(
             reported.is_empty() || reported.contains("waits for it"),
@@ -14767,7 +14796,7 @@ fn a_write_that_is_not_finished_does_not_change_the_budget() {
 ///
 /// # The fault that this test holds
 ///
-/// qex looks at the file about ten times in half a second and takes the content
+/// fairq looks at the file about ten times in half a second and takes the content
 /// when every look gave the same content. With one look every 500ms the window
 /// holds TWO looks, and two looks cannot separate "the file did not change"
 /// from "the file changed and changed back between them".
@@ -14793,18 +14822,18 @@ fn a_file_that_goes_back_and_forth_does_not_change_the_budget() {
     back_and_forth("reload-alternating", None);
 }
 
-/// A writer that stalls is not a fault of qex, and the test says so.
+/// A writer that stalls is not a fault of fairq, and the test says so.
 ///
 /// A half file that stays at the path past `daemon::CONFIG_SETTLE` IS the
-/// configuration, so qex is right to take it (issue #17). This test holds the
-/// first half file for 1.5s, so qex takes it. The test above must excuse that
+/// configuration, so fairq is right to take it (issue #17). This test holds the
+/// first half file for 1.5s, so fairq takes it. The test above must excuse that
 /// attempt, say why, and pass on the next one.
 #[test]
 fn a_writer_stall_in_the_reload_test_is_excused_and_said() {
     let excused = back_and_forth("reload-stalled", Some(Duration::from_millis(1500)));
     assert!(
         !excused.is_empty(),
-        "qex must take a half file that stayed 1.5s, and the test must excuse it"
+        "fairq must take a half file that stayed 1.5s, and the test must excuse it"
     );
 }
 
@@ -14820,11 +14849,11 @@ fn back_and_forth(name: &str, stall: Option<Duration>) -> Vec<String> {
     let half = whole.strip_suffix("mem = \"1GB\"\n").unwrap().to_string();
 
     let h = Harness::new(name, whole);
-    let path = h.root.join("cfg/qex.toml");
+    let path = h.root.join("cfg/fairq.toml");
 
     h.ok(&["list"]);
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&h.qex(&["info", "--json"]).stdout).unwrap()
+        serde_json::from_slice::<serde_json::Value>(&h.fairq(&["info", "--json"]).stdout).unwrap()
             ["mem_budget"]
             .as_u64(),
         Some(1024 * 1024 * 1024)
@@ -14835,10 +14864,10 @@ fn back_and_forth(name: &str, stall: Option<Duration>) -> Vec<String> {
     // The coordinator takes a file whose age reaches `daemon::CONFIG_SETTLE`
     // (500ms): a file that stays half-written that long IS the configuration.
     // The writer means each half file to stay 300ms, but a busy machine can
-    // hold its thread past 500ms, and qex is then right to take that file. So
+    // hold its thread past 500ms, and fairq is then right to take that file. So
     // the writer records, by the monotonic clock, how long each half file
     // stayed. A fault after a half file that stayed under the settle time is a
-    // fault of qex, and fails with the timings. A fault after the writer
+    // fault of fairq, and fails with the timings. A fault after the writer
     // stalled proves nothing: the test says so, and that attempt runs again.
     const SETTLE: Duration = Duration::from_millis(500);
     // The kernel stamps a file with a coarse clock that rounds down, which
@@ -14851,7 +14880,7 @@ fn back_and_forth(name: &str, stall: Option<Duration>) -> Vec<String> {
         let writer = {
             let (path, stop, whole, half) =
                 (path.clone(), stop.clone(), whole.to_string(), half.clone());
-            let temp = h.root.join("cfg/.qex.toml.new");
+            let temp = h.root.join("cfg/.fairq.toml.new");
             let mut stall = if attempt == 1 { stall } else { None };
             std::thread::spawn(move || {
                 // (put down, replaced) for each half file. `put down` is taken
@@ -14892,13 +14921,13 @@ fn back_and_forth(name: &str, stall: Option<Duration>) -> Vec<String> {
         let deadline = Instant::now() + Duration::from_secs(12);
         let mut looks = 0;
         let mut fault = None;
-        // When the last look that gave the whole budget began: qex still held
+        // When the last look that gave the whole budget began: fairq still held
         // the whole file then, so the half file it took was at the path, or
         // held open by a read, at some moment after it.
         let mut last_good: Option<Instant> = None;
         while Instant::now() < deadline {
             let asked = Instant::now();
-            let out = h.qex(&["info", "--json"]);
+            let out = h.fairq(&["info", "--json"]);
             if let Ok(info) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
                 looks += 1;
                 if info["mem_budget"].as_u64() != Some(1024 * 1024 * 1024) {
@@ -14922,10 +14951,10 @@ fn back_and_forth(name: &str, stall: Option<Duration>) -> Vec<String> {
         let Some((seen_at, last_good, fault)) = fault else {
             return stalls;
         };
-        // Only a half file that qex could have taken between the last good look
+        // Only a half file that fairq could have taken between the last good look
         // and the report counts: one put down before the report, and whose age
         // could still grow after the last good look. A stall of some OTHER half
-        // file must not excuse this fault. Each span stops at the report: qex
+        // file must not excuse this fault. Each span stops at the report: fairq
         // took the file before it, so it never saw an age past `seen_at`.
         let spans: Vec<Duration> = halves
             .iter()
@@ -14938,8 +14967,8 @@ fn back_and_forth(name: &str, stall: Option<Duration>) -> Vec<String> {
         assert!(
             longest + TICK >= SETTLE,
             "a file that goes back and forth must not change the budget: {fault}. No half \
-             file stayed {SETTLE:?}, so qex took a file younger than its settle time. The half \
-             files that qex could have taken stayed {spans:?}; the last good look was \
+             file stayed {SETTLE:?}, so fairq took a file younger than its settle time. The half \
+             files that fairq could have taken stayed {spans:?}; the last good look was \
              {:?} before the report",
             last_good.map(|good| seen_at - good)
         );
@@ -14948,7 +14977,7 @@ fn back_and_forth(name: &str, stall: Option<Duration>) -> Vec<String> {
         // passes, so CI would never show the stall.
         let said = format!(
             "{name}: attempt {attempt}: the writer stalled, a half file stayed {longest:?} (half \
-             files qex could have taken: {spans:?}), so qex was right to take it; trying again"
+             files fairq could have taken: {spans:?}), so fairq was right to take it; trying again"
         );
         {
             use std::io::Write as _;
@@ -14961,7 +14990,7 @@ fn back_and_forth(name: &str, stall: Option<Duration>) -> Vec<String> {
             "the whole file is the configuration again",
             Duration::from_secs(10),
             || {
-                serde_json::from_slice::<serde_json::Value>(&h.qex(&["info", "--json"]).stdout)
+                serde_json::from_slice::<serde_json::Value>(&h.fairq(&["info", "--json"]).stdout)
                     .is_ok_and(|i| i["mem_budget"].as_u64() == Some(1024 * 1024 * 1024))
             },
         );
@@ -14981,10 +15010,10 @@ fn back_and_forth(name: &str, stall: Option<Duration>) -> Vec<String> {
 /// scheduler waits on a condition variable with a timeout of 500ms, and every
 /// request thread wakes it, so a coordinator with work in the queue turns much
 /// faster. A mark on each turn measured a median gap of 500.7ms with nothing to
-/// do and 17.0ms with a loop of `qex submit` running, with a minimum of 1.2ms.
+/// do and 17.0ms with a loop of `fairq submit` running, with a minimum of 1.2ms.
 ///
 /// A review then made a partial write with a pause of 300ms in the middle,
-/// under load, and `qex info` gave `cpu_budget: 12` — the default of that
+/// under load, and `fairq info` gave `cpu_budget: 12` — the default of that
 /// machine — while the file said 2, with `config_error: null`. The test above
 /// cannot find this, because an idle coordinator never shows it.
 ///
@@ -14998,7 +15027,7 @@ fn a_write_that_is_not_finished_does_not_change_the_budget_under_load() {
                 [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
                 [budget]\ncpu = \"2\"\nmem = \"1GB\"\n";
     let h = Harness::new("reload-partial-load", file);
-    let path = h.root.join("cfg/qex.toml");
+    let path = h.root.join("cfg/fairq.toml");
 
     h.ok(&["list"]);
 
@@ -15010,7 +15039,7 @@ fn a_write_that_is_not_finished_does_not_change_the_budget_under_load() {
         let (root, peers, stop) = (h.root.clone(), h.peers_dir.clone(), stop.clone());
         std::thread::spawn(move || {
             while !stop.load(Ordering::Relaxed) {
-                let mut cmd = Command::new(env!("CARGO_BIN_EXE_qex"));
+                let mut cmd = Command::new(env!("CARGO_BIN_EXE_fairq"));
                 cmd.args(["submit", "--", "true"]);
                 isolate(&mut cmd, &root, &peers);
                 cmd.output().ok();
@@ -15037,7 +15066,7 @@ fn a_write_that_is_not_finished_does_not_change_the_budget_under_load() {
     let mut looks = 0;
     let mut fault = None;
     while Instant::now() < deadline {
-        let out = h.qex(&["info", "--json"]);
+        let out = h.fairq(&["info", "--json"]);
         if let Ok(info) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
             looks += 1;
             if info["mem_budget"].as_u64() != Some(1024 * 1024 * 1024)
@@ -15068,12 +15097,12 @@ fn a_write_that_is_not_finished_does_not_change_the_budget_under_load() {
 ///
 /// # The fault that this test holds
 ///
-/// The coordinator refuses a path that is not a regular file. `qex config show`
-/// and `qex submit` read the file for THEMSELVES, so the guard must be in the
+/// The coordinator refuses a path that is not a regular file. `fairq config show`
+/// and `fairq submit` read the file for THEMSELVES, so the guard must be in the
 /// reader that they share. A review measured both of them with no answer at all
 /// with a FIFO at the config path.
 ///
-/// The warning of `qex info` names `qex config show` as the way to see the whole
+/// The warning of `fairq info` names `fairq config show` as the way to see the whole
 /// message. Without this guard, that advice walks the reader into the wait that
 /// this branch exists to remove.
 #[test]
@@ -15082,7 +15111,7 @@ fn a_command_refuses_a_configuration_path_that_is_not_a_regular_file() {
                 [peers]\nenabled = false\n\
                 [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n";
     let h = Harness::new("client-not-a-file", file);
-    let path = h.root.join("cfg/qex.toml");
+    let path = h.root.join("cfg/fairq.toml");
 
     assert!(h.ok(&["config", "show"]).contains("2 cores"));
 
@@ -15109,12 +15138,12 @@ fn a_command_refuses_a_configuration_path_that_is_not_a_regular_file() {
         let err = String::from_utf8_lossy(&out.stderr).to_string();
         assert!(
             !out.status.success(),
-            "`qex {}` must stop: {err}",
+            "`fairq {}` must stop: {err}",
             args.join(" ")
         );
         assert!(
             err.contains("not a regular file"),
-            "`qex {}` must name the cause: {err}",
+            "`fairq {}` must name the cause: {err}",
             args.join(" ")
         );
     }
@@ -15125,7 +15154,7 @@ fn a_command_refuses_a_configuration_path_that_is_not_a_regular_file() {
 /// # The fault that this test holds
 ///
 /// The coordinator opens this path on every turn of the scheduler. A FIFO
-/// stops the OPEN until somebody writes to the FIFO. A review measured `qex
+/// stops the OPEN until somebody writes to the FIFO. A review measured `fairq
 /// info` with no answer in 15 seconds: the scheduler waited in the open while
 /// it held the state mutex, and the three other threads waited for that mutex.
 /// A write to the FIFO did not end it, and a delete of the FIFO did not end it.
@@ -15140,7 +15169,7 @@ fn a_configuration_path_that_is_not_a_regular_file_does_not_stop_the_coordinator
                 [peers]\nenabled = false\n\
                 [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n";
     let h = Harness::new("reload-not-a-file", file);
-    let path = h.root.join("cfg/qex.toml");
+    let path = h.root.join("cfg/fairq.toml");
 
     h.ok(&["list"]);
     assert!(h.ok(&["info"]).contains("of 2 in use"));
@@ -15150,9 +15179,9 @@ fn a_configuration_path_that_is_not_a_regular_file_does_not_stop_the_coordinator
     std::fs::remove_file(&path).unwrap();
     std::fs::create_dir(&path).unwrap();
     h.until(
-        "qex reports the type of the path",
+        "fairq reports the type of the path",
         Duration::from_secs(45),
-        || String::from_utf8_lossy(&h.qex(&["info"]).stderr).contains("not a regular file"),
+        || String::from_utf8_lossy(&h.fairq(&["info"]).stderr).contains("not a regular file"),
     );
     assert!(
         h.ok(&["info"]).contains("of 2 in use"),
@@ -15161,7 +15190,7 @@ fn a_configuration_path_that_is_not_a_regular_file_does_not_stop_the_coordinator
     std::fs::remove_dir(&path).unwrap();
 
     // A FIFO at the path, which is the case that stopped the coordinator.
-    // `qex info` runs as a child with a limit on the wait, so a coordinator
+    // `fairq info` runs as a child with a limit on the wait, so a coordinator
     // that stops gives a failure of this test and not a test that never ends.
     let made = Command::new("mkfifo").arg(&path).status();
     if made.map(|s| s.success()).unwrap_or(false) {
@@ -15201,7 +15230,7 @@ fn wait_for_child(mut child: std::process::Child, limit: Duration, what: &str) -
             None => {
                 if Instant::now() >= deadline {
                     child.kill().ok();
-                    panic!("`qex info` gave no answer in {limit:?}: {what}");
+                    panic!("`fairq info` gave no answer in {limit:?}: {what}");
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
@@ -15209,12 +15238,12 @@ fn wait_for_child(mut child: std::process::Child, limit: Duration, what: &str) -
     }
 }
 
-/// The completions must name the commands that qex has.
+/// The completions must name the commands that fairq has.
 ///
 /// A completion file that a person installs and then finds to be wrong is worse
 /// than no completion: it teaches a command that does not exist.
 #[test]
-fn the_completions_hold_the_commands_of_qex() {
+fn the_completions_hold_the_commands_of_fairq() {
     let h = Harness::with_default_config("completions");
 
     for shell in ["bash", "zsh", "fish"] {
@@ -15228,8 +15257,8 @@ fn the_completions_hold_the_commands_of_qex() {
         }
     }
 
-    // A shell that qex does not know must give an error, and not an empty file.
-    let out = h.qex(&["completions", "not-a-shell"]);
+    // A shell that fairq does not know must give an error, and not an empty file.
+    let out = h.fairq(&["completions", "not-a-shell"]);
     assert!(!out.status.success(), "an unknown shell must give an error");
 
     // A NAME MUST NOT RUN. `compgen -W` expands its word list again, so the
@@ -15237,7 +15266,9 @@ fn the_completions_hold_the_commands_of_qex() {
     // TAB. An agent chooses the names of the jobs and a person presses the TAB,
     // so a name is not trusted text.
     let bash = h.ok(&["completions", "bash"]);
-    let jobs_part = &bash[bash.find("_qex_jobs()").expect("bash needs `_qex_jobs`")..];
+    let jobs_part = &bash[bash
+        .find("_fairq_jobs()")
+        .expect("bash needs `_fairq_jobs`")..];
     // The comment in that part NAMES `compgen`, and a comment is not code.
     assert!(
         !jobs_part
@@ -15252,7 +15283,7 @@ fn the_completions_hold_the_commands_of_qex() {
 
     // A NAME MUST STAY ONE WORD. bash writes a candidate to the line as it
     // stands, so a name that holds `;` would put a command on the line beside
-    // `qex`, and the next press of ENTER would run it. `printf %q` puts a
+    // `fairq`, and the next press of ENTER would run it. `printf %q` puts a
     // backslash before each character that the shell reads.
     assert!(
         jobs_part.contains("printf -v candidate '%q'"),
@@ -15281,11 +15312,11 @@ fn the_completions_hold_the_commands_of_qex() {
     // BASH MUST CALL THE FUNCTION THAT ADDS THE JOBS.
     //
     // This is the fault that zsh had: the words were in the file and the shell
-    // never ran them. A test that calls `_qex_with_jobs` by name cannot see it,
+    // never ran them. A test that calls `_fairq_with_jobs` by name cannot see it,
     // because the name is right and the registration is wrong.
     assert!(
-        bash.contains("complete -F _qex_with_jobs "),
-        "bash must give `_qex_with_jobs` to the shell, and not `_qex`: {bash}"
+        bash.contains("complete -F _fairq_with_jobs "),
+        "bash must give `_fairq_with_jobs` to the shell, and not `_fairq`: {bash}"
     );
     // `-o nosort` came with bash 4.4, and `complete` refuses the WHOLE command
     // when it meets an option name that it does not know. An earlier version
@@ -15293,22 +15324,22 @@ fn the_completions_hold_the_commands_of_qex() {
     // macOS the file bound NOTHING and it wrote an error at each shell start.
     assert!(
         bash.contains("BASH_VERSINFO[0]}\" -eq 4 && \"${BASH_VERSINFO[1]}\" -ge 4")
-            && bash.contains("complete -F _qex_with_jobs -o bashdefault -o default qex"),
+            && bash.contains("complete -F _fairq_with_jobs -o bashdefault -o default fairq"),
         "the registration must test the version of bash before it uses `-o nosort`: {bash}"
     );
     // `-o nosort` must stay for a bash that has it: it is what keeps the newest
     // job first, and bash sorts the candidates again without it.
     assert!(
-        bash.contains("complete -F _qex_with_jobs -o nosort -o bashdefault -o default qex"),
+        bash.contains("complete -F _fairq_with_jobs -o nosort -o bashdefault -o default fairq"),
         "a bash that has `-o nosort` must get it: {bash}"
     );
     assert!(
-        bash.contains("_qex_with_jobs() {") && bash.contains("    _qex_jobs\n}"),
-        "`_qex_with_jobs` must run `_qex` and then add the jobs"
+        bash.contains("_fairq_with_jobs() {") && bash.contains("    _fairq_jobs\n}"),
+        "`_fairq_with_jobs` must run `_fairq` and then add the jobs"
     );
 
     // An option that takes a VALUE must be named, and a flag must not. The
-    // guard read every word that starts with a dash, so `qex status --json
+    // guard read every word that starts with a dash, so `fairq status --json
     // <TAB>` offered no job at all.
     let guard = bash
         .lines()
@@ -15342,17 +15373,17 @@ fn the_completions_hold_the_commands_of_qex() {
         ("'*::ids -- The job ids to delete", "ids"),
     ] {
         assert!(
-            zsh.contains(&format!("{line}: _qex_jobs {what}' \\")),
+            zsh.contains(&format!("{line}: _fairq_jobs {what}' \\")),
             "the zsh job argument must offer the jobs: {line}"
         );
     }
-    // The SPACE before `_qex_jobs` is not decoration: zsh runs an action as a
+    // The SPACE before `_fairq_jobs` is not decoration: zsh runs an action as a
     // command only when the action starts with a space.
     assert!(
-        !zsh.contains(":_qex_jobs "),
+        !zsh.contains(":_fairq_jobs "),
         "a zsh action needs a space before the name of the function"
     );
-    // An option that takes a value is not a job. `qex kill --signal <TAB>`
+    // An option that takes a value is not a job. `fairq kill --signal <TAB>`
     // must offer a signal, and never a job.
     assert!(
         zsh.contains("]:SIGNAL:_default'"),
@@ -15360,24 +15391,26 @@ fn the_completions_hold_the_commands_of_qex() {
     );
     // The function must exist BEFORE the file gives the completion to the
     // shell, and `#compdef` must stay on the first line.
-    let helper = zsh.find("_qex_jobs()").expect("zsh needs `_qex_jobs`");
-    let hand_over = zsh.find("compdef _qex qex").expect("zsh needs `compdef`");
+    let helper = zsh.find("_fairq_jobs()").expect("zsh needs `_fairq_jobs`");
+    let hand_over = zsh
+        .find("compdef _fairq fairq")
+        .expect("zsh needs `compdef`");
     assert!(
-        zsh.starts_with("#compdef qex"),
+        zsh.starts_with("#compdef fairq"),
         "zsh needs `#compdef` first"
     );
     assert!(
         helper < hand_over,
-        "`_qex_jobs` must exist before zsh gets the completion"
+        "`_fairq_jobs` must exist before zsh gets the completion"
     );
 
-    // The commands that qex gives to itself must not be offered. A person who
-    // pressed TAB was invited to run `qex daemon`.
+    // The commands that fairq gives to itself must not be offered. A person who
+    // pressed TAB was invited to run `fairq daemon`.
     for shell in ["bash", "zsh", "fish", "elvish", "powershell"] {
         let out = h.ok(&["completions", shell]);
         for hidden in ["daemon", "supervise", "__complete"] {
             // Look in the lines that OFFER a command, and not in the whole
-            // file: the part that asks qex for the ids names `qex __complete`
+            // file: the part that asks fairq for the ids names `fairq __complete`
             // itself, and that line is code and not a candidate. The block that
             // says what a hidden command accepts also stays, and it offers
             // nothing.
@@ -15387,7 +15420,7 @@ fn the_completions_hold_the_commands_of_qex() {
                     || trimmed.starts_with(&format!("'{hidden}:"))
                     || trimmed.starts_with("cand ")
                     || trimmed.starts_with("[CompletionResult]::new(")
-                    || (trimmed.starts_with("complete -c qex")
+                    || (trimmed.starts_with("complete -c fairq")
                         && trimmed.contains("__fish_use_subcommand"));
                 if !offers {
                     continue;
@@ -15406,8 +15439,8 @@ fn the_completions_hold_the_commands_of_qex() {
     for shell in ["bash", "zsh", "fish"] {
         let out = h.ok(&["completions", shell]);
         assert!(
-            out.contains("qex __complete"),
-            "the {shell} completions must ask qex for the ids"
+            out.contains("fairq __complete"),
+            "the {shell} completions must ask fairq for the ids"
         );
     }
 
@@ -15421,8 +15454,8 @@ fn the_completions_hold_the_commands_of_qex() {
     ] {
         assert!(
             fish.contains(&format!(
-                "complete -c qex -n \"__fish_seen_subcommand_from {commands}\" \
-                 -f -a \"(qex __complete {what})\""
+                "complete -c fairq -n \"__fish_seen_subcommand_from {commands}\" \
+                 -f -a \"(fairq __complete {what})\""
             )),
             "fish must offer `{what}` after `{commands}`: {fish}"
         );
@@ -15441,7 +15474,7 @@ fn the_completion_candidates_start_no_coordinator() {
     // No coordinator, and no jobs.
     let empty = h.ok(&["__complete", "ids"]);
     assert!(empty.is_empty(), "an empty state must give no candidate");
-    let info = h.qex(&["info", "--no-start"]);
+    let info = h.fairq(&["info", "--no-start"]);
     let text = String::from_utf8_lossy(&info.stdout);
     assert!(
         text.contains("no coordinator"),
@@ -15466,8 +15499,8 @@ fn the_completion_candidates_start_no_coordinator() {
         assert!(all.lines().any(|l| l == want), "`ids` must hold {want}");
     }
 
-    // `qex kill` takes a job that operates, so it must not offer one that
-    // waits. `qex cancel` is the opposite. A candidate that the command
+    // `fairq kill` takes a job that operates, so it must not offer one that
+    // waits. `fairq cancel` is the opposite. A candidate that the command
     // refuses teaches the wrong command.
     let active = h.ok(&["__complete", "active"]);
     assert!(active.lines().any(|l| l == running));
@@ -15489,8 +15522,8 @@ fn the_completion_candidates_start_no_coordinator() {
     // them becomes ONE `_`, a first character of `-` becomes `_`, and the
     // result stops at 128 characters.
     //
-    // A later qex refuses these names at submission. Plant them in a record
-    // that an earlier qex could have written. The safe form comes from the
+    // A later fairq refuses these names at submission. Plant them in a record
+    // that an earlier fairq could have written. The safe form comes from the
     // name that the record holds, so the rule reaches every record at once.
     let pairs: Vec<(String, String)> = [
         ("deploy prod$(id)", "deploy_prod_id_"),
@@ -15525,13 +15558,13 @@ fn the_completion_candidates_start_no_coordinator() {
         h.plant_stored_name(id, name);
     }
     for (id, name, safe) in &planted {
-        // qex shows the safe form. `every_output_shows_the_safe_name` holds
+        // fairq shows the safe form. `every_output_shows_the_safe_name` holds
         // the other half: the record on the disk keeps the name that the user
         // gave.
         assert_eq!(
             h.status_json(id)["name"].as_str(),
             Some(safe.as_str()),
-            "qex must show {safe:?} for the name {name:?}"
+            "fairq must show {safe:?} for the name {name:?}"
         );
         // The list holds the SAFE form, and never the name itself.
         let all = h.ok(&["__complete", "ids"]);
@@ -15550,19 +15583,19 @@ fn the_completion_candidates_start_no_coordinator() {
         assert_eq!(
             h.status_json(safe)["id"].as_str(),
             Some(id.as_str()),
-            "`qex status {safe}` must find the job named {name:?}"
+            "`fairq status {safe}` must find the job named {name:?}"
         );
         // The stored name still finds it as well. A user who knows the real
         // name must not lose it. A name that starts with `-` goes after `--`,
         // which is how every command line takes a value of that form.
         let found = if name.starts_with('-') {
-            h.qex(&["status", "--", name])
+            h.fairq(&["status", "--", name])
         } else {
-            h.qex(&["status", name])
+            h.fairq(&["status", name])
         };
         assert!(
             found.status.success(),
-            "`qex status` must still find the job by its stored name {name:?}"
+            "`fairq status` must still find the job by its stored name {name:?}"
         );
     }
 
@@ -15572,7 +15605,7 @@ fn the_completion_candidates_start_no_coordinator() {
         "no candidate may be longer than 128 characters"
     );
 
-    // TWO NAMES THAT GIVE ONE SAFE FORM fall into the answer that qex already
+    // TWO NAMES THAT GIVE ONE SAFE FORM fall into the answer that fairq already
     // has for a name that names more than one job. There is no second error.
     //
     // `a b` and `a_b` both give `a_b`. `a-b` does NOT collide with them,
@@ -15584,7 +15617,7 @@ fn the_completion_candidates_start_no_coordinator() {
     });
     h.stop_coordinator();
     h.plant_stored_name(&spaced, "x y");
-    let out = h.qex(&["status", "x_y"]);
+    let out = h.fairq(&["status", "x_y"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         !out.status.success(),
@@ -15626,14 +15659,14 @@ fn the_completion_candidates_start_no_coordinator() {
     assert_eq!(h.state_of(&running), "failed");
 }
 
-/// qex must SHOW the safe form of a name, and only that, in every output.
+/// fairq must SHOW the safe form of a name, and only that, in every output.
 ///
 /// A job name is text that another agent chose. A name that holds an ESC byte,
-/// written to a terminal by `qex list`, moves the cursor and writes over the
+/// written to a terminal by `fairq list`, moves the cursor and writes over the
 /// text around it: no shell and no TAB are needed. Sanitising at each output
 /// closes that whole class.
 ///
-/// The record on the disk keeps the name that the user gave, and `qex status`
+/// The record on the disk keeps the name that the user gave, and `fairq status`
 /// still finds the job by it.
 #[test]
 fn every_output_shows_the_safe_name() {
@@ -15643,7 +15676,7 @@ fn every_output_shows_the_safe_name() {
     let safe = "deploy_prod_id_";
     let id = h.submit(&["submit", "--name", "deploy-plant", "--", "true"]);
     // A name that holds an ESC byte. This is the one that hurts a terminal.
-    // An earlier qex stored it. A later qex refuses it at submission.
+    // An earlier fairq stored it. A later fairq refuses it at submission.
     let esc = "esc\u{1b}[2Jbad";
     let esc_id = h.submit(&["submit", "--name", "esc-plant", "--", "true"]);
     h.until("both jobs stop", Duration::from_secs(45), || {
@@ -15654,7 +15687,11 @@ fn every_output_shows_the_safe_name() {
     h.plant_stored_name(&esc_id, esc);
 
     // 1. THE RECORD KEEPS THE STORED NAME. This change rewrites no history.
-    let record = h.root.join("state/qex/jobs").join(&id).join("status.json");
+    let record = h
+        .root
+        .join("state/fairq/jobs")
+        .join(&id)
+        .join("status.json");
     let text = std::fs::read_to_string(&record).expect("the record must exist");
     let value: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
@@ -15665,23 +15702,23 @@ fn every_output_shows_the_safe_name() {
 
     // 2. EVERY OUTPUT SHOWS THE SAFE FORM.
     let list = h.ok(&["list"]);
-    assert!(list.contains(safe), "`qex list` must show {safe}: {list}");
+    assert!(list.contains(safe), "`fairq list` must show {safe}: {list}");
     let status = h.ok(&["status", &id]);
     assert!(
         status.contains(&format!("name:      {safe}")),
-        "`qex status` must show {safe}: {status}"
+        "`fairq status` must show {safe}: {status}"
     );
     assert_eq!(
         h.status_json(&id)["name"].as_str(),
         Some(safe),
-        "the JSON of `qex status` must hold the safe name"
+        "the JSON of `fairq status` must hold the safe name"
     );
     let listed = h.list_json();
     assert!(
         listed
             .iter()
             .any(|j| j["name"].as_str() == Some(safe) && j["id"].as_str() == Some(id.as_str())),
-        "the JSON of `qex list` must hold the safe name: {listed:?}"
+        "the JSON of `fairq list` must hold the safe name: {listed:?}"
     );
     for out in [
         h.ok(&["wait", &id]),
@@ -15711,13 +15748,13 @@ fn every_output_shows_the_safe_name() {
         vec!["__complete", "ids"],
         vec!["top", "--once"],
     ] {
-        let out = h.qex(&args);
-        // `qex top` paints with its own escape codes, so look for the bytes of
+        let out = h.fairq(&args);
+        // `fairq top` paints with its own escape codes, so look for the bytes of
         // the NAME and not for an escape byte anywhere.
         for stream in [&out.stdout, &out.stderr] {
             assert!(
                 !stream.windows(6).any(|w| w == b"esc\x1b[2"),
-                "`qex {}` wrote the ESC byte of a job name",
+                "`fairq {}` wrote the ESC byte of a job name",
                 args.join(" ")
             );
         }
@@ -15786,11 +15823,11 @@ fn every_output_shows_the_safe_name() {
         vec!["status", &gone],
         vec!["top", "--once"],
     ] {
-        let out = h.qex(&args);
+        let out = h.fairq(&args);
         for stream in [&out.stdout, &out.stderr] {
             assert!(
                 !stream.windows(6).any(|w| w == b"esc\x1b[2"),
-                "`qex {}` wrote the ESC byte of a job name",
+                "`fairq {}` wrote the ESC byte of a job name",
                 args.join(" ")
             );
         }
@@ -15813,7 +15850,7 @@ fn every_output_shows_the_safe_name() {
         failed.contains("esc_2Jbad"),
         "the sentence must name the job that failed: {failed}"
     );
-    let missing = String::from_utf8_lossy(&h.qex(&["status", &gone]).stderr).to_string();
+    let missing = String::from_utf8_lossy(&h.fairq(&["status", &gone]).stderr).to_string();
     assert!(
         missing.contains("esc_2Jbad"),
         "the sentence must name the job whose record is gone: {missing}"
@@ -15833,7 +15870,7 @@ fn every_output_shows_the_safe_name() {
         "the sentence must name the job that this one waits for, safely: {reason}"
     );
 
-    // The sentence that `qex clean` gives when a job in the queue needs the
+    // The sentence that `fairq clean` gives when a job in the queue needs the
     // record. It names the job that WAITS.
     let done = h.submit(&["submit", "--", "true"]);
     h.until("a job to delete stops", Duration::from_secs(45), || {
@@ -15859,18 +15896,18 @@ fn every_output_shows_the_safe_name() {
     h.until("that job waits too", Duration::from_secs(45), || {
         h.state_of(&waiting_esc) == "queued"
     });
-    let refused = h.qex(&["clean", &done]);
+    let refused = h.fairq(&["clean", &done]);
     let text = String::from_utf8_lossy(&refused.stderr).to_string();
     assert!(
         text.contains("is needed by"),
-        "`qex clean` must refuse a record that a job in the queue needs: {text}"
+        "`fairq clean` must refuse a record that a job in the queue needs: {text}"
     );
     assert!(
         text.contains("esc_2Jbad") && !text.contains('\u{1b}'),
         "that sentence must name the waiting job, safely: {text}"
     );
 
-    // The sentence that `qex clean` writes into a job that did not run. It
+    // The sentence that `fairq clean` writes into a job that did not run. It
     // names the job whose record goes.
     h.ok(&["clean", &broken]);
     let after = h.status_json(&dependent)["error"]
@@ -15884,8 +15921,8 @@ fn every_output_shows_the_safe_name() {
 
     // A PIPELINE gives a group a name, and that name reaches a reader too.
     //
-    // ONE FIELD NAME CARRIES ONE VALUE. `qex list --json`, `qex pipeline
-    // --json` and the id file all give the safe form, and `qex list --group`
+    // ONE FIELD NAME CARRIES ONE VALUE. `fairq list --json`, `fairq pipeline
+    // --json` and the id file all give the safe form, and `fairq list --group`
     // takes it. A script that reads the value out of one of them and gives it
     // back to `--group` must find the jobs.
     let file = h.root.join("p.toml");
@@ -15895,7 +15932,7 @@ fn every_output_shows_the_safe_name() {
     )
     .unwrap();
     let id_file = h.root.join("ids.json");
-    let made = h.qex(&[
+    let made = h.fairq(&[
         "pipeline",
         file.to_str().unwrap(),
         "--json",
@@ -15904,15 +15941,15 @@ fn every_output_shows_the_safe_name() {
     ]);
     assert!(made.status.success(), "the pipeline must start");
 
-    // `qex pipeline --json` gives the SAME `group_name` as `qex list --json`.
+    // `fairq pipeline --json` gives the SAME `group_name` as `fairq list --json`.
     let started: serde_json::Value = serde_json::from_slice(&made.stdout).unwrap();
     assert_eq!(
         started["group_name"].as_str(),
         Some("my_grp_2Jbad"),
-        "`qex pipeline --json` must give the safe group name: {started}"
+        "`fairq pipeline --json` must give the safe group name: {started}"
     );
 
-    // The line that `qex pipeline` writes for a PERSON holds the safe name of
+    // The line that `fairq pipeline` writes for a PERSON holds the safe name of
     // each stage. The JSON above and the id file keep the name of the stage,
     // because a machine reads it as a key.
     let file2 = h.root.join("p2.toml");
@@ -15921,15 +15958,15 @@ fn every_output_shows_the_safe_name() {
         "name = \"two grp\"\n\n         [[jobs]]\nname = \"stg\\u001B[2Jbad\"\ncommand = [\"true\"]\n",
     )
     .unwrap();
-    let echo = h.qex(&["pipeline", file2.to_str().unwrap()]);
+    let echo = h.fairq(&["pipeline", file2.to_str().unwrap()]);
     assert!(
         !echo.stderr.windows(6).any(|w| w == b"stg\x1b[2"),
-        "`qex pipeline` wrote the ESC byte of a stage name: {}",
+        "`fairq pipeline` wrote the ESC byte of a stage name: {}",
         String::from_utf8_lossy(&echo.stderr)
     );
     assert!(
         String::from_utf8_lossy(&echo.stderr).contains("stg_2Jbad"),
-        "`qex pipeline` must still name each stage: {}",
+        "`fairq pipeline` must still name each stage: {}",
         String::from_utf8_lossy(&echo.stderr)
     );
     let listed = h.list_json();
@@ -15948,10 +15985,10 @@ fn every_output_shows_the_safe_name() {
     assert_eq!(
         ids["group_name"].as_str(),
         Some(group.as_str()),
-        "the id file must give the same value as `qex list --json`: {ids}"
+        "the id file must give the same value as `fairq list --json`: {ids}"
     );
 
-    // `qex list --group` takes the value that qex showed, AND the name that
+    // `fairq list --group` takes the value that fairq showed, AND the name that
     // the file gave.
     for word in [group.as_str(), "my grp\u{1b}[2Jbad"] {
         let out = h.ok(&["list", "--group", word, "--json"]);
@@ -15959,7 +15996,7 @@ fn every_output_shows_the_safe_name() {
         assert_eq!(
             jobs.len(),
             1,
-            "`qex list --group {word:?}` must find the job of the pipeline: {out}"
+            "`fairq list --group {word:?}` must find the job of the pipeline: {out}"
         );
         assert!(
             !out.contains('\u{1b}'),
@@ -15976,11 +16013,11 @@ fn every_output_shows_the_safe_name() {
         .to_string();
     let out = h.ok(&["list", "--group", &gid, "--json"]);
     let jobs: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
-    assert_eq!(jobs.len(), 1, "`qex list --group <id>` must still work");
+    assert_eq!(jobs.len(), 1, "`fairq list --group <id>` must still work");
 
     // The log of the coordinator is an output as well. A person reads it in a
     // terminal after a fault, so a name in it holds no ESC byte either.
-    let log = std::fs::read(h.root.join("state/qex/run/daemon.log")).unwrap_or_default();
+    let log = std::fs::read(h.root.join("state/fairq/run/daemon.log")).unwrap_or_default();
     assert!(
         !log.windows(6).any(|w| w == b"esc\x1b[2"),
         "the log of the coordinator wrote the ESC byte of a job name"
@@ -15996,7 +16033,7 @@ fn every_output_shows_the_safe_name() {
     //
     // The NAME column of the table stops at 16 characters, as it did before
     // this rule, so a word copied out of that column is not always the whole
-    // name. `qex list --json` and `qex status` give the whole name, and the
+    // name. `fairq list --json` and `fairq status` give the whole name, and the
     // documentation names those two. This test holds the boundary, so that a
     // later change to the column does not make the sentence false in silence.
     let long_name = "a-very-long-name-for-one-job";
@@ -16018,11 +16055,11 @@ fn every_output_shows_the_safe_name() {
             .unwrap()["name"]
             .as_str(),
         Some(long_name),
-        "`qex list --json` must give the whole name"
+        "`fairq list --json` must give the whole name"
     );
 
-    // 4b. THE ROUND TRIP for a name that fits. A safe name that a reader copies out of `qex list`
-    // goes back into `qex status` as it stands.
+    // 4b. THE ROUND TRIP for a name that fits. A safe name that a reader copies out of `fairq list`
+    // goes back into `fairq status` as it stands.
     let from_list = listed
         .iter()
         .find(|j| j["id"].as_str() == Some(id.as_str()))
@@ -16033,7 +16070,7 @@ fn every_output_shows_the_safe_name() {
     assert_eq!(
         h.status_json(&from_list)["id"].as_str(),
         Some(id.as_str()),
-        "the name that `qex list` shows must find the job"
+        "the name that `fairq list` shows must find the job"
     );
 
     // And the name that the user gave still finds it as well.
@@ -16051,11 +16088,11 @@ fn a_chosen_name_outside_the_set_is_refused() {
     let h = Harness::with_default_config("refusename");
     for name in ["deploy prod", "-version", &"y".repeat(129), "esc\u{1b}[2J"] {
         // `--name=VALUE` so a name that starts with `-` is not an option.
-        let out = h.qex(&["submit", &format!("--name={name}"), "--", "true"]);
-        assert!(!out.status.success(), "qex accepted the name {name:?}");
+        let out = h.fairq(&["submit", &format!("--name={name}"), "--", "true"]);
+        assert!(!out.status.success(), "fairq accepted the name {name:?}");
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(
-            err.contains("not a name that qex accepts"),
+            err.contains("not a name that fairq accepts"),
             "the error must say what happened: {err}"
         );
         assert!(
@@ -16072,7 +16109,7 @@ fn a_chosen_name_outside_the_set_is_refused() {
     assert_eq!(h.status_json(&id)["name"].as_str(), Some("build"));
 }
 
-/// A name that qex takes from the program must become the safe form. The user
+/// A name that fairq takes from the program must become the safe form. The user
 /// did not select it, so the job still starts.
 #[test]
 fn a_derived_name_outside_the_set_becomes_the_safe_form() {
@@ -16095,7 +16132,7 @@ fn a_derived_name_outside_the_set_becomes_the_safe_form() {
 }
 
 /// The default name holds the words that name the work, so two jobs of one
-/// launcher have two names in `qex list`, and each name finds its job.
+/// launcher have two names in `fairq list`, and each name finds its job.
 #[test]
 fn the_default_name_tells_the_jobs_of_one_launcher_apart() {
     let h = Harness::with_default_config("defaultname");
@@ -16104,7 +16141,7 @@ fn the_default_name_tells_the_jobs_of_one_launcher_apart() {
     assert_eq!(h.status_json(&a)["name"].as_str(), Some("true-run-a.py"));
     assert_eq!(h.status_json(&b)["name"].as_str(), Some("true-run-b.py"));
 
-    // The name finds the job, in `qex status` and in the completions.
+    // The name finds the job, in `fairq status` and in the completions.
     assert_eq!(
         h.status_json("true-run-b.py")["id"].as_str(),
         Some(b.as_str()),
@@ -16118,7 +16155,7 @@ fn the_default_name_tells_the_jobs_of_one_launcher_apart() {
 }
 
 /// A name that does not fit the NAME column shows its start, `..`, and its
-/// end, in `qex list`, in `qex top` and in `qex du --top`. The width of the
+/// end, in `fairq list`, in `fairq top` and in `fairq du --top`. The width of the
 /// column is the property: a row that held the whole name would push every
 /// column after it, and a row that held the start alone would show one text
 /// for the jobs of one command.
@@ -16165,7 +16202,7 @@ fn every_page_states_the_rule_of_the_default_name() {
     for page in [
         "src/cli.rs",
         "src/help.rs",
-        "skills/qex/SKILL.md",
+        "skills/fairq/SKILL.md",
         "docs/agents.md",
         "docs/reference.md",
     ] {
@@ -16214,7 +16251,7 @@ fn a_tag_a_lock_a_command_and_the_environment_are_safe_on_the_page() {
     let status = h.ok(&["status", &id, "--show-env"]);
     assert!(
         !status.contains('\u{1b}'),
-        "`qex status` wrote an ESC byte: {status:?}"
+        "`fairq status` wrote an ESC byte: {status:?}"
     );
     assert!(
         status.contains("t_2Jag") || status.contains("t_ag"),
@@ -16244,10 +16281,10 @@ fn a_tag_a_lock_a_command_and_the_environment_are_safe_on_the_page() {
     );
 
     let listed = h.ok(&["list"]);
-    assert!(!listed.contains('\u{1b}'), "`qex list` wrote an ESC byte");
+    assert!(!listed.contains('\u{1b}'), "`fairq list` wrote an ESC byte");
 }
 
-/// A lock word that `qex status` shows must find the lock that the job holds.
+/// A lock word that `fairq status` shows must find the lock that the job holds.
 #[test]
 fn a_safe_lock_word_pauses_and_resumes_the_stored_lock() {
     let h = Harness::with_default_config("safelock");
@@ -16279,19 +16316,19 @@ fn a_safe_lock_word_pauses_and_resumes_the_stored_lock() {
 
 /// bash must keep a hostile candidate in ONE word, whatever the answer holds.
 ///
-/// `qex __complete` gives a SAFE form of each name now, so the real command no
+/// `fairq __complete` gives a SAFE form of each name now, so the real command no
 /// longer answers with a `;` or a `$(`. That is not a reason to stop making the
 /// word safe in the shell, and it is not a reason to stop testing it: **the
 /// answer is text that came off a disk, and it is not a guarantee.** A record
-/// that another program wrote, a record of a qex that is older or newer, and a
+/// that another program wrote, a record of a fairq that is older or newer, and a
 /// fault in the sanitiser all reach this function in the same way.
 ///
-/// The test puts a `qex` of its own in front of the real one on the PATH, and
+/// The test puts a `fairq` of its own in front of the real one on the PATH, and
 /// that one answers with the names that an attacker would choose.
 #[test]
 fn bash_keeps_a_hostile_candidate_in_one_word() {
     let h = Harness::with_default_config("bashquote");
-    let script = h.root.join("qex.bash");
+    let script = h.root.join("fairq.bash");
     std::fs::write(&script, h.ok(&["completions", "bash"])).unwrap();
 
     // The answer of the stand-in. Each line is one candidate.
@@ -16318,11 +16355,11 @@ fn bash_keeps_a_hostile_candidate_in_one_word() {
         "x".repeat(2002),
     ];
 
-    // A `qex` that answers with those names, and gives every other command to
+    // A `fairq` that answers with those names, and gives every other command to
     // the real one.
     let bin = h.root.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    let stand_in = bin.join("qex");
+    let stand_in = bin.join("fairq");
     std::fs::write(
         &stand_in,
         format!(
@@ -16330,7 +16367,7 @@ fn bash_keeps_a_hostile_candidate_in_one_word() {
              if [ \"$1\" = __complete ]; then cat {answers}; exit 0; fi\n\
              exec {real} \"$@\"\n",
             answers = h.root.join("answers").display(),
-            real = env!("CARGO_BIN_EXE_qex"),
+            real = env!("CARGO_BIN_EXE_fairq"),
         ),
     )
     .unwrap();
@@ -16340,18 +16377,18 @@ fn bash_keeps_a_hostile_candidate_in_one_word() {
         .status()
         .unwrap();
 
-    // `_qex_jobs` alone, and not `_qex_with_jobs`. The wrapper adds the
+    // `_fairq_jobs` alone, and not `_fairq_with_jobs`. The wrapper adds the
     // options of clap first, and this test asks about the ONE candidate that
     // the jobs part gives. The wrapper and the registration have their own test.
     let ask = |prefix: &str, tail: &str| -> String {
         let program = format!(
             "source {script}\n\
-             COMP_WORDS=(qex status '{prefix}')\n\
+             COMP_WORDS=(fairq status '{prefix}')\n\
              COMP_CWORD=2\n\
-             COMP_LINE='qex status {prefix}'\n\
+             COMP_LINE='fairq status {prefix}'\n\
              COMP_POINT=${{#COMP_LINE}}\n\
              COMPREPLY=()\n\
-             _qex_jobs 2>/dev/null\n\
+             _fairq_jobs 2>/dev/null\n\
              {tail}\n",
             script = script.display(),
         );
@@ -16411,8 +16448,8 @@ fn bash_keeps_a_hostile_candidate_in_one_word() {
 fn a_real_bash_offers_the_jobs_and_runs_no_name() {
     let h = Harness::with_default_config("bashcomp");
 
-    // The names that an attacker would choose. A later qex refuses them at
-    // submission. Plant them in records that an earlier qex could have written.
+    // The names that an attacker would choose. A later fairq refuses them at
+    // submission. Plant them in records that an earlier fairq could have written.
     let bait = h.root.join("BAIT");
     let bait_id = h.submit(&["submit", "--name", "bait-plant", "--", "true"]);
     let two_id = h.submit(&["submit", "--name", "two-plant", "--", "true"]);
@@ -16438,7 +16475,7 @@ fn a_real_bash_offers_the_jobs_and_runs_no_name() {
         h.state_of(&running) == "running"
     });
 
-    let script = h.root.join("qex.bash");
+    let script = h.root.join("fairq.bash");
     std::fs::write(&script, h.ok(&["completions", "bash"])).unwrap();
 
     // Ask bash for the candidates the way that bash asks for them.
@@ -16460,19 +16497,19 @@ fn a_real_bash_offers_the_jobs_and_runs_no_name() {
              COMP_LINE='{comp_line}'\n\
              COMP_POINT=${{#COMP_LINE}}\n\
              COMPREPLY=()\n\
-             _qex_with_jobs qex \"${{COMP_WORDS[{last}]}}\" 2>/dev/null\n\
+             _fairq_with_jobs fairq \"${{COMP_WORDS[{last}]}}\" 2>/dev/null\n\
              {tail}\n",
             script = script.display(),
             comp_line = line.join(" ").replace('\'', "'\\''"),
         );
-        let bin = Path::new(env!("CARGO_BIN_EXE_qex")).parent().unwrap();
+        let bin = Path::new(env!("CARGO_BIN_EXE_fairq")).parent().unwrap();
         let out = Command::new("bash")
             .arg("-c")
             .arg(&program)
             .env("XDG_CONFIG_HOME", h.root.join("cfg"))
             .env("XDG_STATE_HOME", h.root.join("state"))
             .env("XDG_RUNTIME_DIR", h.root.join("run"))
-            .env("QEX_IDLE_EXIT_SECS", "120")
+            .env("FAIRQ_IDLE_EXIT_SECS", "120")
             .env(
                 "PATH",
                 format!(
@@ -16493,7 +16530,7 @@ fn a_real_bash_offers_the_jobs_and_runs_no_name() {
 
     // THE REGISTRATION MUST RUN, AND IT MUST BIND OUR FUNCTION.
     //
-    // Every other test here calls `_qex_with_jobs` by its name, so none of them
+    // Every other test here calls `_fairq_with_jobs` by its name, so none of them
     // can see a registration that failed. `-o nosort` came with bash 4.4, and
     // `complete` refuses the whole command when it meets an option name that it
     // does not know: on the bash 3.2 of macOS the file thus bound nothing, and
@@ -16502,7 +16539,7 @@ fn a_real_bash_offers_the_jobs_and_runs_no_name() {
     let out = Command::new("bash")
         .arg("-c")
         .arg(format!(
-            "set -e\nsource {}\ncomplete -p qex\n",
+            "set -e\nsource {}\ncomplete -p fairq\n",
             script.display()
         ))
         .output()
@@ -16518,8 +16555,8 @@ fn a_real_bash_offers_the_jobs_and_runs_no_name() {
         "sourcing the completions must write nothing: {noise}"
     );
     assert!(
-        bound.contains("-F _qex_with_jobs"),
-        "the shell must call `_qex_with_jobs` after TAB, and it holds: {bound}"
+        bound.contains("-F _fairq_with_jobs"),
+        "the shell must call `_fairq_with_jobs` after TAB, and it holds: {bound}"
     );
 
     let ask = |line: &[&str]| ask_with("", line, "printf '%s\\n' \"${COMPREPLY[@]}\"");
@@ -16549,7 +16586,7 @@ fn check_the_bash_candidates(
     bait: &Path,
 ) {
     // A command that reads a record offers every job, by id and by name.
-    let reply = ask(&["qex", "status", ""]);
+    let reply = ask(&["fairq", "status", ""]);
     for want in [running, queued, "holder", "waiter"] {
         assert!(
             reply.lines().any(|l| l == want),
@@ -16557,66 +16594,66 @@ fn check_the_bash_candidates(
         );
     }
 
-    // The prefix chooses. `qex status hol<TAB>` gives one job.
-    let reply = ask(&["qex", "status", "hol"]);
+    // The prefix chooses. `fairq status hol<TAB>` gives one job.
+    let reply = ask(&["fairq", "status", "hol"]);
     assert_eq!(reply.trim(), "holder", "bash must complete the name");
 
-    // `qex kill` takes a job that operates, and `qex cancel` takes one that
+    // `fairq kill` takes a job that operates, and `fairq cancel` takes one that
     // waits. A candidate that the command refuses teaches the wrong command.
-    let reply = ask(&["qex", "kill", ""]);
+    let reply = ask(&["fairq", "kill", ""]);
     assert!(reply.lines().any(|l| l == running), "kill: {reply}");
     assert!(!reply.lines().any(|l| l == queued), "kill: {reply}");
-    let reply = ask(&["qex", "cancel", ""]);
+    let reply = ask(&["fairq", "cancel", ""]);
     assert!(reply.lines().any(|l| l == queued), "cancel: {reply}");
     assert!(!reply.lines().any(|l| l == running), "cancel: {reply}");
 
     // The value of an option is not a job.
-    let reply = ask(&["qex", "kill", "--signal", ""]);
+    let reply = ask(&["fairq", "kill", "--signal", ""]);
     assert!(
         !reply.lines().any(|l| l == running),
-        "`qex kill --signal <TAB>` must not offer a job: {reply}"
+        "`fairq kill --signal <TAB>` must not offer a job: {reply}"
     );
 
     // A FLAG takes no value, so the word after it IS a job. The guard read
-    // every word that starts with a dash, and `qex status --json <TAB>` then
+    // every word that starts with a dash, and `fairq status --json <TAB>` then
     // offered nothing.
     for flag in ["--json", "--show-env"] {
-        let reply = ask(&["qex", "status", flag, ""]);
+        let reply = ask(&["fairq", "status", flag, ""]);
         assert!(
             reply.lines().any(|l| l == "holder"),
-            "`qex status {flag} <TAB>` must still offer a job: {reply}"
+            "`fairq status {flag} <TAB>` must still offer a job: {reply}"
         );
     }
 
-    // `qex clean` takes a job id or a job name, so it offers them. Without
+    // `fairq clean` takes a job id or a job name, so it offers them. Without
     // this it offered the files of the current directory.
-    let reply = ask(&["qex", "clean", ""]);
+    let reply = ask(&["fairq", "clean", ""]);
     assert!(
         reply.lines().any(|l| l == "holder"),
-        "`qex clean <TAB>` must offer a job: {reply}"
+        "`fairq clean <TAB>` must offer a job: {reply}"
     );
 
     // THE LIST HOLDS THE SAFE FORM of a name that is not plain.
     //
     // `two words` arrives as `two_words`, and that word finds the job.
-    let reply = ask(&["qex", "status", "two"]);
+    let reply = ask(&["fairq", "status", "two"]);
     assert_eq!(reply.trim(), "two_words", "the safe form only: {reply}");
-    let read = read_back(&["qex", "status", "two"]);
+    let read = read_back(&["fairq", "status", "two"]);
     assert_eq!(
         read.trim(),
         "1\ntwo_words",
-        "the completed word must be ONE argument of qex: {read}"
+        "the completed word must be ONE argument of fairq: {read}"
     );
 
     // AND NOTHING RAN. The job named `bait$(touch FILE)` made no file, at the
     // press of TAB and at the press of ENTER.
-    let reply = ask(&["qex", "status", "bait"]);
+    let reply = ask(&["fairq", "status", "bait"]);
     assert_eq!(reply.lines().count(), 1, "one candidate only: {reply}");
     assert!(
         !reply.contains("$("),
         "the list must hold the safe form: {reply}"
     );
-    let read = read_back(&["qex", "status", "bait"]);
+    let read = read_back(&["fairq", "status", "bait"]);
     assert_eq!(read.lines().next(), Some("1"), "one argument only: {read}");
     assert!(
         !bait.exists(),
@@ -16629,11 +16666,11 @@ fn check_the_bash_candidates(
 ///
 /// The queue controls how many cores a job uses. It does not control how rudely
 /// the job uses them, and a build inside its budget still makes an editor
-/// stutter. qex knows what the scheduler of the machine does not: this work sat
+/// stutter. fairq knows what the scheduler of the machine does not: this work sat
 /// in a queue, so nobody waits for the next second of it.
 ///
 /// `--nice 0` needs a coordinator at nice 0. The kernel refuses a value below
-/// the value of the process that asks, and qex does not ask for privilege. A
+/// the value of the process that asks, and fairq does not ask for privilege. A
 /// queue that starts this suite gives the coordinator the nice value of the
 /// job. The step then sees that value, expects 0, and fails as though the
 /// code is wrong.
@@ -16652,8 +16689,8 @@ fn a_job_gives_way_to_the_work_of_a_person() {
     );
 
     // A machine that refuses the change must still run the job. The system
-    // refuses a number below the one that the coordinator has, unless qex has
-    // privilege, and qex does not ask for privilege.
+    // refuses a number below the one that the coordinator has, unless fairq has
+    // privilege, and fairq does not ask for privilege.
     let id = h.submit(&["submit", "--nice", "-5", "--", "true"]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
     assert_eq!(
@@ -16667,7 +16704,7 @@ fn a_job_gives_way_to_the_work_of_a_person() {
     let nice = unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) };
     if nice > 0 {
         eprintln!(
-            "`--nice 0` did not run: this process is at nice {nice}, and qex cannot \
+            "`--nice 0` did not run: this process is at nice {nice}, and fairq cannot \
              lower a nice value, so that step needs a coordinator at nice 0"
         );
         return;
@@ -16698,7 +16735,7 @@ fn a_job_gives_way_to_the_work_of_a_person() {
 fn every_politeness_value_reaches_the_job_and_its_children() {
     // The name of the class as `ionice -p` gives it, for each name that
     // `[politeness] io` takes. `best-effort` carries the level, because the
-    // level is half of the number that qex builds.
+    // level is half of the number that fairq builds.
     for (io, expect) in [
         ("idle", "idle"),
         ("best-effort", "best-effort: prio 4"),
@@ -16723,12 +16760,12 @@ fn every_politeness_value_reaches_the_job_and_its_children() {
                      oom=$(cat /proc/$2/oom_score_adj) io=$(ionice -p $2)\"; }; \
                      report child $$'";
         // `[politeness]` changes the priority of every job, so the text form of
-        // `qex config show` must name the values. A user who asks why a build
+        // `fairq config show` must name the values. A user who asks why a build
         // is slow reads this text, and not the JSON.
         let shown = h.ok(&["config", "show"]);
         assert!(
             shown.contains("nice 12") && shown.contains(&format!("io {io}")),
-            "`qex config show` must name the politeness values: {shown}"
+            "`fairq config show` must name the politeness values: {shown}"
         );
 
         let id = h.submit(&["submit", "--", "sh", "-c", probe]);
@@ -16759,8 +16796,8 @@ fn every_politeness_value_reaches_the_job_and_its_children() {
 /// A `[politeness]` value with a fault, at the moment that a job starts, must
 /// give the DEFAULT values and name the fault.
 ///
-/// `qex submit` tests the file, but the file can change after the submission: a
-/// job can wait in the queue while somebody edits the file, and `qex rerun`
+/// `fairq submit` tests the file, but the file can change after the submission: a
+/// job can wait in the queue while somebody edits the file, and `fairq rerun`
 /// needs no config file at all. The supervisor reads the file for itself and
 /// parses it WITHOUT validating it, so without a second test the job would take
 /// the value as it is. Measured: `nice = 100` ran a job at nice 19, because
@@ -16782,15 +16819,18 @@ fn a_politeness_value_with_a_fault_at_the_start_gives_the_default_values() {
     // The file goes wrong AFTER the submission. The coordinator refuses it and
     // keeps the values that it had; the supervisor must refuse it as well.
     std::fs::write(
-        h.root.join("cfg/qex.toml"),
+        h.root.join("cfg/fairq.toml"),
         "[peers]\nenabled = false\n\
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
          [politeness]\nnice = 100\n",
     )
     .unwrap();
 
-    let out = h.qex(&["rerun", &first]);
-    assert!(out.status.success(), "`qex rerun` must still start the job");
+    let out = h.fairq(&["rerun", &first]);
+    assert!(
+        out.status.success(),
+        "`fairq rerun` must still start the job"
+    );
     let again = String::from_utf8_lossy(&out.stdout).trim().to_string();
 
     h.ok(&["wait", &again, "--timeout", "45s"]);
@@ -16816,11 +16856,11 @@ fn a_politeness_value_with_a_fault_at_the_start_gives_the_default_values() {
 /// A claim controls the queue and not the job. A job that asks the machine how
 /// many cores it has receives the number of the MACHINE, so a job with a claim
 /// of two cores on a machine of sixteen starts sixteen threads and takes the
-/// capacity that qex gave to the other jobs.
+/// capacity that fairq gave to the other jobs.
 ///
 /// THIS TEST USES `env_capture = "minimal"`, and the reason is not secrecy.
 /// With the default `all`, the shell of the developer reaches the job, and an
-/// ambient `GOMAXPROCS` or `MAKEFLAGS` defeats every assertion here: qex fills
+/// ambient `GOMAXPROCS` or `MAKEFLAGS` defeats every assertion here: fairq fills
 /// a value that nobody chose, so a value that the shell chose stays and the
 /// test reads it. Measured: `GOMAXPROCS=4 cargo test` gave `[][4][]` where the
 /// test asks for `[][][]`.
@@ -16850,16 +16890,16 @@ fn a_job_is_told_the_size_of_its_claim() {
     // The default claim is one core. A job with no claim that heard "one core"
     // would run sixteen times slower on a machine of sixteen cores, with no
     // error and no warning. A node job would receive a SMALLER heap than it
-    // receives with no qex at all: measured on this machine, the default claim
+    // receives with no fairq at all: measured on this machine, the default claim
     // of 1805MB gives node a heap of 1353MB, and node 12 takes 2096MB by
-    // itself. qex tells a job the claim that SOMEBODY CHOSE, and never the
-    // claim that qex invented.
+    // itself. fairq tells a job the claim that SOMEBODY CHOSE, and never the
+    // claim that fairq invented.
     let id = h.submit(&[
         "submit",
         "--",
         "sh",
         "-c",
-        "echo \"[$QEX_CPU][$GOMAXPROCS][$NODE_OPTIONS]\"",
+        "echo \"[$FAIRQ_CPU][$GOMAXPROCS][$NODE_OPTIONS]\"",
     ]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
     let out = h.ok(&["logs", &id, "--stdout"]);
@@ -16878,7 +16918,7 @@ fn a_job_is_told_the_size_of_its_claim() {
         "--",
         "sh",
         "-c",
-        "echo \"$QEX_CPU $QEX_MEM_MB $GOMAXPROCS $OMP_NUM_THREADS\"",
+        "echo \"$FAIRQ_CPU $FAIRQ_MEM_MB $GOMAXPROCS $OMP_NUM_THREADS\"",
     ]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
     let out = h.ok(&["logs", &id, "--stdout"]);
@@ -16892,7 +16932,7 @@ fn a_job_is_told_the_size_of_its_claim() {
     //
     // With `--mem` and no `--cpu`, the number of cores comes from
     // `[defaults]`, and it is one. A job that heard that number would run
-    // single-threaded on a machine of sixteen cores. qex writes the claim only
+    // single-threaded on a machine of sixteen cores. fairq writes the claim only
     // when the user answered BOTH questions.
     let id = h.submit(&[
         "submit",
@@ -16901,7 +16941,7 @@ fn a_job_is_told_the_size_of_its_claim() {
         "--",
         "sh",
         "-c",
-        "echo \"[$QEX_CPU][$GOMAXPROCS]\"",
+        "echo \"[$FAIRQ_CPU][$GOMAXPROCS]\"",
     ]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
     let out = h.ok(&["logs", &id, "--stdout"]);
@@ -16919,7 +16959,7 @@ fn a_job_is_told_the_size_of_its_claim() {
         "--",
         "sh",
         "-c",
-        "echo \"[$QEX_CPU][$GOMAXPROCS]\"",
+        "echo \"[$FAIRQ_CPU][$GOMAXPROCS]\"",
     ]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
     let out = h.ok(&["logs", &id, "--stdout"]);
@@ -16963,20 +17003,20 @@ fn a_job_is_told_the_size_of_its_claim() {
         "--",
         "sh",
         "-c",
-        "echo \"[$QEX_CPU][$GOMAXPROCS]\"",
+        "echo \"[$FAIRQ_CPU][$GOMAXPROCS]\"",
     ]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
     let out = h.ok(&["logs", &id, "--stdout"]);
     assert_eq!(out.trim(), "[][]", "the option must write nothing: {out}");
 
     // A job file must be able to say the same thing. Without the field, the
-    // file is refused, because a job file rejects a name that qex does not
+    // file is refused, because a job file rejects a name that fairq does not
     // know.
     let file = h.root.join("off.toml");
     std::fs::write(
         &file,
         "name = \"off\"\n\
-         command = [\"sh\", \"-c\", \"echo \\\"[$QEX_CPU][$GOMAXPROCS]\\\"\"]\n\
+         command = [\"sh\", \"-c\", \"echo \\\"[$FAIRQ_CPU][$GOMAXPROCS]\\\"\"]\n\
          no_limit_env_hints = true\n\n\
          [resources]\ncpu = 2\nmem = \"128MB\"\n",
     )
@@ -16991,7 +17031,7 @@ fn a_job_is_told_the_size_of_its_claim() {
     std::fs::write(
         &file,
         "name = \"on\"\n\
-         command = [\"sh\", \"-c\", \"echo \\\"[$QEX_CPU][$GOMAXPROCS]\\\"\"]\n\n\
+         command = [\"sh\", \"-c\", \"echo \\\"[$FAIRQ_CPU][$GOMAXPROCS]\\\"\"]\n\n\
          [resources]\ncpu = 2\nmem = \"128MB\"\n",
     )
     .unwrap();
@@ -17009,10 +17049,10 @@ fn a_job_is_told_the_size_of_its_claim() {
     std::fs::write(
         &pipeline,
         "[[jobs]]\nname = \"stage-on\"\n\
-         command = [\"sh\", \"-c\", \"echo \\\"[$QEX_CPU][$GOMAXPROCS]\\\"\"]\n\
+         command = [\"sh\", \"-c\", \"echo \\\"[$FAIRQ_CPU][$GOMAXPROCS]\\\"\"]\n\
          [jobs.resources]\ncpu = 2\nmem = \"128MB\"\n\n\
          [[jobs]]\nname = \"stage-off\"\n\
-         command = [\"sh\", \"-c\", \"echo \\\"[$QEX_CPU][$GOMAXPROCS]\\\"\"]\n\
+         command = [\"sh\", \"-c\", \"echo \\\"[$FAIRQ_CPU][$GOMAXPROCS]\\\"\"]\n\
          no_limit_env_hints = true\n\
          [jobs.resources]\ncpu = 2\nmem = \"128MB\"\n",
     )
@@ -17037,10 +17077,10 @@ fn a_job_is_told_the_size_of_its_claim() {
         );
     }
 
-    // `qex run` HAS ITS OWN WIRING, and it needs its own test.
+    // `fairq run` HAS ITS OWN WIRING, and it needs its own test.
     //
     // `commands::run` builds `SubmitOptions` in a second place, so the option
-    // can arrive for `qex submit` and be lost for `qex run`. A mutation that
+    // can arrive for `fairq submit` and be lost for `fairq run`. A mutation that
     // put `false` in that one line passed every other test in this file.
     let (child, id) = h.run_bg(&[
         "--cpu",
@@ -17051,18 +17091,18 @@ fn a_job_is_told_the_size_of_its_claim() {
         "--",
         "sh",
         "-c",
-        "echo \"[$QEX_CPU][$GOMAXPROCS]\"",
+        "echo \"[$FAIRQ_CPU][$GOMAXPROCS]\"",
     ]);
-    wait_run(child, "`qex run` with --no-limit-env-hints");
+    wait_run(child, "`fairq run` with --no-limit-env-hints");
     let out = h.ok(&["logs", &id, "--stdout"]);
     assert_eq!(
         out.trim(),
         "[][]",
-        "`qex run --no-limit-env-hints` must write nothing: {out}"
+        "`fairq run --no-limit-env-hints` must write nothing: {out}"
     );
 
-    // And `qex run` without the option still receives the claim, or the test
-    // above would pass with the feature removed from `qex run` altogether.
+    // And `fairq run` without the option still receives the claim, or the test
+    // above would pass with the feature removed from `fairq run` altogether.
     let (child, id) = h.run_bg(&[
         "--cpu",
         "2",
@@ -17071,21 +17111,21 @@ fn a_job_is_told_the_size_of_its_claim() {
         "--",
         "sh",
         "-c",
-        "echo \"[$QEX_CPU][$GOMAXPROCS]\"",
+        "echo \"[$FAIRQ_CPU][$GOMAXPROCS]\"",
     ]);
-    wait_run(child, "`qex run` with a claim");
+    wait_run(child, "`fairq run` with a claim");
     let out = h.ok(&["logs", &id, "--stdout"]);
     assert_eq!(
         out.trim(),
         "[2][2]",
-        "`qex run` must give the claim to the job: {out}"
+        "`fairq run` must give the claim to the job: {out}"
     );
 }
 
 /// `[claims]` in the config file controls every job of this machine.
 ///
 /// `export_env = false` turns the claim off for all of them, and `also` adds
-/// the two variables that qex does not write without a request. Each of those
+/// the two variables that fairq does not write without a request. Each of those
 /// two has a cost, so neither is a default: every JVM writes `Picked up
 /// JAVA_TOOL_OPTIONS: ...` to its standard error, and `MAKEFLAGS` makes a
 /// build parallel that its author never ran in parallel.
@@ -17102,7 +17142,7 @@ fn the_config_file_controls_the_claim_in_the_environment() {
     let show = [
         "sh",
         "-c",
-        "echo \"[$QEX_CPU][$GOMAXPROCS][$JAVA_TOOL_OPTIONS][$MAKEFLAGS]\"",
+        "echo \"[$FAIRQ_CPU][$GOMAXPROCS][$JAVA_TOOL_OPTIONS][$MAKEFLAGS]\"",
     ];
 
     let h = Harness::new(
@@ -17123,13 +17163,13 @@ fn the_config_file_controls_the_claim_in_the_environment() {
         "`export_env = false` must write nothing: {out}"
     );
 
-    // `qex config show` MUST SAY SO. A reader who cannot see this value cannot
+    // `fairq config show` MUST SAY SO. A reader who cannot see this value cannot
     // tell whether a job receives GOMAXPROCS, and the config file is not the
     // answer: a machine with no file still has these values.
     let shown = h.ok(&["config", "show"]);
     assert!(
         shown.contains("claim in job: no; [claims] export_env = false"),
-        "`qex config show` must report that the claim is off: {shown}"
+        "`fairq config show` must report that the claim is off: {shown}"
     );
 
     // THE LINE MUST READ EVERY CONDITION THAT THE CODE READS.
@@ -17194,7 +17234,7 @@ fn the_config_file_controls_the_claim_in_the_environment() {
     let shown = h.ok(&["config", "show"]);
     assert!(
         shown.contains("also java, make"),
-        "`qex config show` must name the hints that operate: {shown}"
+        "`fairq config show` must name the hints that operate: {shown}"
     );
 
     // A NAME WITH A SPELLING FAULT MUST STOP THE COMMAND.
@@ -17208,7 +17248,7 @@ fn the_config_file_controls_the_claim_in_the_environment() {
          [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n\
          [claims]\nalso = [\"jvm\"]\n",
     );
-    let out = h.qex(&["submit", "--cpu", "2", "--mem", "128MB", "--", "true"]);
+    let out = h.fairq(&["submit", "--cpu", "2", "--mem", "128MB", "--", "true"]);
     assert!(
         !out.status.success(),
         "an unknown name must stop the submit"
@@ -17233,7 +17273,7 @@ fn the_config_file_controls_the_claim_in_the_environment() {
 // The event stream
 // ---------------------------------------------------------------------------
 
-/// Starts `qex events` in this harness, with the given extra arguments.
+/// Starts `fairq events` in this harness, with the given extra arguments.
 ///
 /// EVERY reader in a test has a time limit. A test that reads a stream with no
 /// limit hangs for ever when the stream gives nothing, and a test that hangs is
@@ -17245,7 +17285,7 @@ fn events_reader(h: &Harness, args: &[&str]) -> std::process::Child {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .expect("qex events did not start")
+        .expect("fairq events did not start")
 }
 
 /// Reads the lines of a reader that stopped, as JSON.
@@ -17318,15 +17358,15 @@ fn the_event_stream_reports_each_change_of_state_in_order() {
 
 /// The stream must show the SAFE name, in both of its forms.
 ///
-/// A job name is text that another agent chose. `qex events` with no `--json`
+/// A job name is text that another agent chose. `fairq events` with no `--json`
 /// writes that name to a terminal, so an ESC byte in a name moves the cursor
-/// and writes over the lines around it. `qex list` and `qex status` close this
+/// and writes over the lines around it. `fairq list` and `fairq status` close this
 /// already; a stream that does not close it is a hole of the same shape in a
 /// command that a person leaves open for hours.
 ///
 /// The JSON form takes the same name. `serde_json` escapes a control byte, so
 /// the JSON is safe to PARSE either way; the rule here is that one line of the
-/// stream and one line of `qex status --json` must never give two names for
+/// stream and one line of `fairq status --json` must never give two names for
 /// one job.
 #[test]
 fn the_stream_shows_the_safe_name() {
@@ -17340,7 +17380,7 @@ fn the_stream_shows_the_safe_name() {
     h.plant_stored_name(&id, esc);
 
     // Read AFTER the plant. The coordinator that starts now holds the stored
-    // name, so the stream and `qex status` show one safe form.
+    // name, so the stream and `fairq status` show one safe form.
     let reader = events_reader(&h, &["--json", "--timeout", "20s"]);
     let plain = events_reader(&h, &["--timeout", "20s"]);
     std::thread::sleep(Duration::from_millis(500));
@@ -17358,16 +17398,16 @@ fn the_stream_shows_the_safe_name() {
     for stream in [&text.stdout, &text.stderr] {
         assert!(
             !stream.windows(6).any(|w| w == b"esc\x1b[2"),
-            "`qex events` wrote the ESC byte of a job name"
+            "`fairq events` wrote the ESC byte of a job name"
         );
     }
     assert!(
         String::from_utf8_lossy(&text.stdout).contains("esc_2Jbad"),
-        "`qex events` must show the safe name: {}",
+        "`fairq events` must show the safe name: {}",
         String::from_utf8_lossy(&text.stdout)
     );
 
-    // The JSON form must hold the same name as `qex status --json`.
+    // The JSON form must hold the same name as `fairq status --json`.
     let shown = h.status_json(&id)["name"].as_str().unwrap().to_string();
     let lines = events_lines(reader);
     let mine: Vec<&serde_json::Value> = lines
@@ -17379,7 +17419,7 @@ fn the_stream_shows_the_safe_name() {
         assert_eq!(
             line["name"].as_str(),
             Some(shown.as_str()),
-            "the stream and `qex status --json` must give one name: {line}"
+            "the stream and `fairq status --json` must give one name: {line}"
         );
         assert_eq!(
             line["job"]["name"].as_str(),
@@ -17391,7 +17431,7 @@ fn the_stream_shows_the_safe_name() {
 
 /// The stream must show no control byte in the SENTENCES either.
 ///
-/// A sentence that qex writes is not safe because qex wrote it. It carries
+/// A sentence that fairq writes is not safe because fairq wrote it. It carries
 /// values that the caller chose: `blocked_reason` names the LOCK that a job
 /// waits for, and a lock name is a word from the command line. `expire` then
 /// folds that reason into `error`, so the same word reaches the reader a second
@@ -17435,19 +17475,19 @@ fn the_stream_shows_no_control_byte_in_a_sentence() {
         "--",
         "true",
     ]);
-    h.qex(&["wait", &waiter, "--timeout", "40s"]);
-    h.qex(&["kill", &holder]);
+    h.fairq(&["wait", &waiter, "--timeout", "40s"]);
+    h.fairq(&["kill", &holder]);
 
     let text = plain.wait_with_output().expect("the reader did not stop");
     for stream in [&text.stdout, &text.stderr] {
         assert!(
             !stream.windows(5).any(|w| w == b"lk\x1b[2"),
-            "`qex events` wrote the ESC byte of a lock name"
+            "`fairq events` wrote the ESC byte of a lock name"
         );
     }
 
     // The JSON form takes the same rule, so a reader of the stream and a reader
-    // of `qex status --json` never see two forms of one sentence.
+    // of `fairq status --json` never see two forms of one sentence.
     let lines = events_lines(json);
     let mine: Vec<&serde_json::Value> = lines
         .iter()
@@ -17590,7 +17630,7 @@ fn the_stream_reports_the_terminal_states_that_no_supervisor_reports() {
     let second = h.submit(&["submit", "--needs", &first, "--", "echo", "after"]);
 
     // Both jobs stop without running. Wait for the second, which stops last.
-    h.qex(&["wait", &second, "--timeout", "60s"]);
+    h.fairq(&["wait", &second, "--timeout", "60s"]);
 
     let lines = events_lines(reader);
     let state_of = |id: &str| -> Vec<String> {
@@ -17696,9 +17736,9 @@ fn the_stream_counts_the_events_that_it_dropped() {
     // hundred events, and a test that takes minutes is a test that nobody runs.
     let out = h
         .command(&["submit", "--name", "gap0", "--", "true"])
-        .env("QEX_EVENTS_RETAINED", "3")
+        .env("FAIRQ_EVENTS_RETAINED", "3")
         .output()
-        .expect("qex did not start");
+        .expect("fairq did not start");
     assert!(out.status.success(), "the first submission failed");
     let first = String::from_utf8_lossy(&out.stdout).trim().to_string();
     h.ok(&["wait", &first]);
@@ -17745,11 +17785,11 @@ fn the_coordinator_retires_under_a_reader_and_says_goodbye() {
     // this short idle time.
     let reader = h
         .command(&["events", "--json", "--timeout", "60s"])
-        .env("QEX_IDLE_EXIT_SECS", "3")
+        .env("FAIRQ_IDLE_EXIT_SECS", "3")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .expect("qex events did not start");
+        .expect("fairq events did not start");
 
     let out = reader.wait_with_output().expect("the reader did not stop");
     assert_eq!(
@@ -17770,21 +17810,21 @@ fn the_coordinator_retires_under_a_reader_and_says_goodbye() {
     );
 }
 
-/// A coordinator that cannot obey `qex events` must REFUSE it.
+/// A coordinator that cannot obey `fairq events` must REFUSE it.
 ///
-/// This is the capability rule of qex, in the one place where a silent refusal
+/// This is the capability rule of fairq, in the one place where a silent refusal
 /// is worst. An earlier coordinator gave no line and no error, and the reader
 /// then cannot tell "no job changed" from "this coordinator has no stream". It
-/// waits for ever, which is the fault that qex exists to remove.
+/// waits for ever, which is the fault that fairq exists to remove.
 ///
 /// The test uses a coordinator of its own that answers like an earlier version.
-/// It never starts a qex coordinator, so it never kills a process.
+/// It never starts a fairq coordinator, so it never kills a process.
 #[test]
 fn a_coordinator_that_has_no_event_stream_refuses_the_command() {
     use std::io::{BufRead, BufReader, Write};
 
     let root = std::env::temp_dir().join(format!("qxold{}", std::process::id()));
-    let run = root.join("state/qex/run");
+    let run = root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     std::fs::create_dir_all(root.join("cfg")).unwrap();
     let socket = run.join("s");
@@ -17812,7 +17852,7 @@ fn a_coordinator_that_has_no_event_stream_refuses_the_command() {
             } else {
                 serde_json::json!({
                     "result": "error", "kind": "internal",
-                    "message": "qex could not read this request",
+                    "message": "fairq could not read this request",
                 })
             };
             writeln!(writer, "{answer}").ok();
@@ -17822,10 +17862,10 @@ fn a_coordinator_that_has_no_event_stream_refuses_the_command() {
 
     let peers = root.join("peers");
     std::fs::create_dir_all(&peers).ok();
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_qex"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_fairq"));
     cmd.args(["events", "--json", "--timeout", "10s"]);
     isolate(&mut cmd, &root, &peers);
-    let out = cmd.output().expect("qex did not start");
+    let out = cmd.output().expect("fairq did not start");
 
     let err = String::from_utf8_lossy(&out.stderr).to_string();
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -17838,7 +17878,7 @@ fn a_coordinator_that_has_no_event_stream_refuses_the_command() {
         "the command must fail. stdout: {stdout} stderr: {err}"
     );
     assert!(
-        err.contains("cannot obey `qex events`"),
+        err.contains("cannot obey `fairq events`"),
         "the message must say what happened: {err}"
     );
     assert!(
@@ -17859,7 +17899,7 @@ fn a_coordinator_that_has_no_event_stream_refuses_the_command() {
 /// receives a pipeline that does not hold the rule that they wrote.
 ///
 /// The test uses a coordinator of its own that answers like an earlier version.
-/// It never starts a qex coordinator, so it never kills a process. It also
+/// It never starts a fairq coordinator, so it never kills a process. It also
 /// RECORDS every request, so the test proves that no job reached the queue.
 #[test]
 fn a_pipeline_with_an_option_on_a_later_stage_is_refused() {
@@ -17870,7 +17910,7 @@ fn a_pipeline_with_an_option_on_a_later_stage_is_refused() {
     // A run that a signal stopped leaves this directory and its socket, and the
     // next run with the same number then cannot bind. Take it first.
     std::fs::remove_dir_all(&root).ok();
-    let run = root.join("state/qex/run");
+    let run = root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     std::fs::create_dir_all(root.join("cfg")).unwrap();
     let socket = run.join("s");
@@ -17911,7 +17951,7 @@ fn a_pipeline_with_an_option_on_a_later_stage_is_refused() {
             } else {
                 serde_json::json!({
                     "result": "error", "kind": "internal",
-                    "message": "qex could not read this request",
+                    "message": "fairq could not read this request",
                 })
             };
             writeln!(writer, "{answer}").ok();
@@ -17921,10 +17961,10 @@ fn a_pipeline_with_an_option_on_a_later_stage_is_refused() {
 
     let peers = root.join("peers");
     std::fs::create_dir_all(&peers).ok();
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_qex"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_fairq"));
     cmd.args(["pipeline", file.to_str().unwrap()]);
     isolate(&mut cmd, &root, &peers);
-    let out = cmd.output().expect("qex did not start");
+    let out = cmd.output().expect("fairq did not start");
 
     let err = String::from_utf8_lossy(&out.stderr).to_string();
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -17935,7 +17975,7 @@ fn a_pipeline_with_an_option_on_a_later_stage_is_refused() {
     assert_eq!(
         out.status.code(),
         Some(121),
-        "a refused pipeline must give 121, as `qex submit` does. stdout: {stdout} stderr: {err}"
+        "a refused pipeline must give 121, as `fairq submit` does. stdout: {stdout} stderr: {err}"
     );
     assert!(
         err.contains("--nice"),
@@ -17955,12 +17995,12 @@ fn a_pipeline_with_an_option_on_a_later_stage_is_refused() {
     );
 }
 
-/// A `qex rerun` against a coordinator that cannot obey an option of the job
+/// A `fairq rerun` against a coordinator that cannot obey an option of the job
 /// must be refused.
 ///
 /// A rerun keeps the locks, the retries, the politeness, the queue limit and
 /// the claims of the first job. Without this test the coordinator takes the new
-/// job, ignores each of those, and gives an id: the reader asked qex to run the
+/// job, ignores each of those, and gives an id: the reader asked fairq to run the
 /// work AGAIN, and receives work that holds none of its rules.
 ///
 /// The test starts a real coordinator to make the record, stops it, and then
@@ -17975,14 +18015,14 @@ fn a_rerun_of_a_job_that_holds_a_lock_is_refused_by_an_earlier_coordinator() {
     let id = h.submit(&["submit", "--lock", "deploy", "--mem", "64MB", "--", "true"]);
     h.ok(&["wait", &id]);
 
-    // Stop the coordinator, and take its socket. The pid comes from qex, and
+    // Stop the coordinator, and take its socket. The pid comes from fairq, and
     // never from a search of the process table.
     let info = h.ok(&["info", "--no-start", "--json"]);
     let pid: i32 = serde_json::from_str::<serde_json::Value>(&info).unwrap()["pid"]
         .as_i64()
         .expect("the coordinator must report its pid") as i32;
     unsafe { libc::kill(pid, libc::SIGTERM) };
-    let socket = h.root.join("state/qex/run/s");
+    let socket = h.root.join("state/fairq/run/s");
     for _ in 0..200 {
         if !socket.exists() {
             break;
@@ -17992,7 +18032,7 @@ fn a_rerun_of_a_job_that_holds_a_lock_is_refused_by_an_earlier_coordinator() {
     std::fs::remove_file(&socket).ok();
 
     // The record of the job, as the coordinator would give it.
-    let raw = std::fs::read_to_string(h.root.join(format!("state/qex/jobs/{id}/status.json")))
+    let raw = std::fs::read_to_string(h.root.join(format!("state/fairq/jobs/{id}/status.json")))
         .expect("the record of the job must exist");
     // The protocol gives one answer for each line, and the record on the disk
     // is written for a reader. Take the value, and write it as one line.
@@ -18030,7 +18070,7 @@ fn a_rerun_of_a_job_that_holds_a_lock_is_refused_by_an_earlier_coordinator() {
             } else {
                 serde_json::json!({
                     "result": "error", "kind": "internal",
-                    "message": "qex could not read this request",
+                    "message": "fairq could not read this request",
                 })
                 .to_string()
             };
@@ -18042,7 +18082,7 @@ fn a_rerun_of_a_job_that_holds_a_lock_is_refused_by_an_earlier_coordinator() {
     let out = h
         .command(&["rerun", &id])
         .output()
-        .expect("qex did not start");
+        .expect("fairq did not start");
 
     let err = String::from_utf8_lossy(&out.stderr).to_string();
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -18052,7 +18092,7 @@ fn a_rerun_of_a_job_that_holds_a_lock_is_refused_by_an_earlier_coordinator() {
     assert_eq!(
         out.status.code(),
         Some(121),
-        "a refused rerun must give 121, as `qex submit` does. stdout: {stdout} stderr: {err}"
+        "a refused rerun must give 121, as `fairq submit` does. stdout: {stdout} stderr: {err}"
     );
     assert!(
         err.contains("--lock"),
@@ -18071,7 +18111,7 @@ fn a_rerun_of_a_job_that_holds_a_lock_is_refused_by_an_earlier_coordinator() {
 /// event for each record that it reads. The number 2 of the earlier stream thus
 /// names a DIFFERENT event in the new stream. Without the name of the stream,
 /// the coordinator continues from that number, and the reader loses the events
-/// before it with no message — which is the class of fault that qex exists to
+/// before it with no message — which is the class of fault that fairq exists to
 /// remove.
 #[test]
 fn a_number_from_a_coordinator_that_stopped_gives_a_gap() {
@@ -18121,7 +18161,7 @@ fn a_number_from_a_coordinator_that_stopped_gives_a_gap() {
         });
     assert!(
         gap["missed"].is_null(),
-        "qex cannot count across two streams, and it must not invent a number: {gap:?}"
+        "fairq cannot count across two streams, and it must not invent a number: {gap:?}"
     );
     assert!(
         gap["reason"].as_str().unwrap().contains(&old_stream),
@@ -18235,7 +18275,7 @@ fn a_paused_queue_starts_no_job_and_the_jobs_that_operate_continue() {
 /// # The fault that this test prevents
 ///
 /// This is the test that protects the whole feature. A coordinator stops when
-/// no job operates, and when a new build replaces the program file. qex itself
+/// no job operates, and when a new build replaces the program file. fairq itself
 /// tells a user to run `kill <pid>` on it. A pause that lived in the memory of
 /// that process would go away in silence, the next command would start a new
 /// coordinator, and the queue would start work while the person believes that
@@ -18304,7 +18344,7 @@ fn the_pause_survives_a_coordinator_that_stops() {
 /// A command that refused while a job held the lock would be a command that a
 /// person cannot use: the person would try it again and again, and one of the
 /// waiting jobs would take the lock between two tries. The request must be safe
-/// to type at any moment, so qex records it, the job that holds the lock keeps
+/// to type at any moment, so fairq records it, the job that holds the lock keeps
 /// it, and no other job takes it in the time between.
 #[test]
 fn a_person_gets_a_lock_when_the_job_that_holds_it_stops() {
@@ -18376,7 +18416,7 @@ fn a_job_that_waits_for_a_pause_says_the_pause() {
 
     h.ok(&["pause", "queue", "--reason", "recording a demo"]);
 
-    let out = h.qex(&["submit", "--", "true"]);
+    let out = h.fairq(&["submit", "--", "true"]);
     assert!(out.status.success());
     let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
     let warning = String::from_utf8_lossy(&out.stderr).to_string();
@@ -18445,7 +18485,7 @@ fn a_pause_with_a_time_ends_by_itself() {
 ///
 /// The dependency pass and the capacity pass are separate. If the pause test
 /// stopped the dependency pass as well, a job whose dependency already failed
-/// would stay in the queue for the whole length of the pause, and `qex wait` on
+/// would stay in the queue for the whole length of the pause, and `fairq wait` on
 /// it would block for ever. Skipping starts no process, so a pause has no
 /// reason to stop it.
 #[test]
@@ -18453,7 +18493,7 @@ fn a_failed_dependency_is_still_skipped_while_the_queue_is_paused() {
     let h = Harness::with_default_config("pausedeps");
 
     let failer = h.submit(&["submit", "--cpu", "1", "--mem", "64MB", "--", "false"]);
-    let out = h.qex(&["wait", &failer]);
+    let out = h.fairq(&["wait", &failer]);
     assert_eq!(out.status.code(), Some(1));
 
     h.ok(&["pause", "queue"]);
@@ -18466,11 +18506,11 @@ fn a_failed_dependency_is_still_skipped_while_the_queue_is_paused() {
         h.state_of(&skipped) == "skipped"
     });
 
-    let out = h.qex(&["wait", &skipped, "--timeout", "10s"]);
+    let out = h.fairq(&["wait", &skipped, "--timeout", "10s"]);
     assert_eq!(
         out.status.code(),
         Some(126),
-        "`qex wait` must give an answer while the queue is paused"
+        "`fairq wait` must give an answer while the queue is paused"
     );
 
     h.ok(&["resume", "--all"]);
@@ -18529,9 +18569,9 @@ fn a_retry_continues_while_the_queue_is_paused() {
         "a pause must still hold work that has not started"
     );
 
-    // Between attempts the record is `running` with no pid, so `qex kill` can
+    // Between attempts the record is `running` with no pid, so `fairq kill` can
     // refuse. The job stops by itself when the retries run out.
-    h.qex(&["kill", &id, "--grace", "1s"]);
+    h.fairq(&["kill", &id, "--grace", "1s"]);
     h.ok(&["resume", "--all"]);
 }
 
@@ -18593,7 +18633,7 @@ fn a_retry_keeps_its_lock_until_the_job_stops() {
     );
 
     // Do not kill. Between attempts the record is `running` with no pid, and
-    // `qex kill` then says "starts now". The last attempt stops by itself.
+    // `fairq kill` then says "starts now". The last attempt stops by itself.
     h.until("the retrying job stops", Duration::from_secs(45), || {
         h.state_of(&id) == "failed"
     });
@@ -18609,23 +18649,23 @@ fn a_retry_keeps_its_lock_until_the_job_stops() {
     });
 }
 
-/// A pause record that qex cannot read must HOLD the queue, and say why.
+/// A pause record that fairq cannot read must HOLD the queue, and say why.
 ///
 /// # The fault that this test prevents
 ///
 /// A parse fault that gave "nothing is paused" would start the work while the
 /// person believes that the machine is quiet, with no line in any log and no
 /// word in any command. The two directions are not equal in cost: a queue that
-/// qex holds by mistake costs latency and one command corrects it, and a queue
+/// fairq holds by mistake costs latency and one command corrects it, and a queue
 /// that operates by mistake cannot be corrected after the work started.
 #[test]
-fn a_pause_record_that_qex_cannot_read_holds_the_queue() {
+fn a_pause_record_that_fairq_cannot_read_holds_the_queue() {
     let h = Harness::with_default_config("pausebroken");
 
-    // Make the runtime directory, then write a record that no version of qex
+    // Make the runtime directory, then write a record that no version of fairq
     // can read.
     h.ok(&["pause", "queue"]);
-    let file = h.root.join("state/qex/run/paused.json");
+    let file = h.root.join("state/fairq/run/paused.json");
     assert!(file.exists(), "the pause must be a file");
     h.ok(&["resume", "--all"]);
 
@@ -18649,7 +18689,7 @@ fn a_pause_record_that_qex_cannot_read_holds_the_queue() {
         assert_eq!(
             h.state_of(&id),
             "queued",
-            "a record that qex cannot read must hold the queue"
+            "a record that fairq cannot read must hold the queue"
         );
         std::thread::sleep(Duration::from_millis(300));
     }
@@ -18665,7 +18705,7 @@ fn a_pause_record_that_qex_cannot_read_holds_the_queue() {
         "the report must say what happened: {words}"
     );
     assert!(
-        words.contains("qex resume queue"),
+        words.contains("fairq resume queue"),
         "the report must give the remedy: {words}"
     );
 
@@ -18693,11 +18733,11 @@ fn a_pause_record_that_qex_cannot_read_holds_the_queue() {
 #[test]
 fn a_pause_for_zero_is_refused() {
     let h = Harness::with_default_config("pausezero");
-    let out = h.qex(&["pause", "queue", "--for", "0"]);
+    let out = h.fairq(&["pause", "queue", "--for", "0"]);
     assert!(!out.status.success(), "`--for 0` must not give a pause");
     let words = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(
-        words.contains("qex resume queue"),
+        words.contains("fairq resume queue"),
         "the error must give the remedy: {words}"
     );
     assert!(h.ok(&["pause"]).contains("nothing is paused"));
@@ -18713,8 +18753,8 @@ fn json_of(text: &str) -> serde_json::Value {
 ///
 /// # The fault that this test prevents
 ///
-/// A queue held ONE pause record. A second `qex pause queue` had to change
-/// it, and `qex resume` removed it whoever made it: an agent that finished
+/// A queue held ONE pause record. A second `fairq pause queue` had to change
+/// it, and `fairq resume` removed it whoever made it: an agent that finished
 /// its own work started the queue under a person who had paused it for a
 /// call. Every rule that merged two pauses into one record had a sequence in
 /// which one session shortened what a different session asked for.
@@ -18760,11 +18800,11 @@ fn two_pause_requests_stand_apart_and_a_bare_resume_ends_nothing() {
     // A resume with no id removes NOTHING, says so, gives each id, fails, and
     // never names `--all`.
     for args in [vec!["resume"], vec!["resume", "queue"]] {
-        let out = h.qex(&args);
+        let out = h.fairq(&args);
         let text = String::from_utf8_lossy(&out.stderr).to_string();
         assert!(!out.status.success(), "a bare resume must fail: {text}");
         assert!(
-            text.contains("qex resumed nothing: say which request. 2 requests stand"),
+            text.contains("fairq resumed nothing: say which request. 2 requests stand"),
             "{text}"
         );
         assert!(text.contains(&timed) && text.contains(&endless), "{text}");
@@ -18847,21 +18887,21 @@ fn a_timed_request_after_one_with_no_end_shortens_nothing() {
     assert_eq!(json_of(&h.ok(&["pause", "--json"]))["paused"], false);
 }
 
-/// `qex abort` adds a request of its own and gives the receipt; it changes no
+/// `fairq abort` adds a request of its own and gives the receipt; it changes no
 /// request that stood before.
 #[test]
 fn an_abort_gives_the_receipt_of_its_own_pause_request() {
     let h = Harness::with_default_config("abortreceipt");
 
     let person = json_of(&h.ok(&["pause", "queue", "--for", "30m", "--json"]));
-    let out = h.qex(&["abort", "--all", "--json"]);
+    let out = h.fairq(&["abort", "--all", "--json"]);
     assert!(out.status.success());
     let abort = json_of(&String::from_utf8_lossy(&out.stdout));
     let id = abort["pause_id"].as_str().expect("the abort gives an id");
     assert_eq!(abort["created"], false);
     assert_eq!(
         abort["resume_command"],
-        format!("qex resume queue --pause {id}")
+        format!("fairq resume queue --pause {id}")
     );
     assert_eq!(abort["other_pauses"][0]["pause_id"], person["pause_id"]);
     assert!(!abort.to_string().contains("pid"), "{abort}");
@@ -18872,7 +18912,7 @@ fn an_abort_gives_the_receipt_of_its_own_pause_request() {
     h.ok(&["resume", "--all"]);
 }
 
-/// A peer that is not the qex command gives an issuer of `unknown`, and the
+/// A peer that is not the fairq command gives an issuer of `unknown`, and the
 /// pause is NOT refused.
 ///
 /// The instrument: a copy of the program under a different name. The
@@ -18880,28 +18920,28 @@ fn an_abort_gives_the_receipt_of_its_own_pause_request() {
 /// the command nor the program file of the coordinator, exactly as a socket
 /// relay or the proxy of a container engine has.
 #[test]
-fn a_peer_that_is_not_the_qex_command_has_an_unknown_issuer() {
+fn a_peer_that_is_not_the_fairq_command_has_an_unknown_issuer() {
     let h = Harness::with_default_config("pausepeer");
     // The real program starts the coordinator.
     h.ok(&["info"]);
 
     let relay = h.root.join("relay");
-    copy_for_a_start(Path::new(env!("CARGO_BIN_EXE_qex")), &relay);
+    copy_for_a_start(Path::new(env!("CARGO_BIN_EXE_fairq")), &relay);
     let mut cmd = Command::new(&relay);
     cmd.args(["pause", "queue", "--reason", "through a relay", "--json"]);
     isolate(&mut cmd, &h.root, &h.peers_dir);
     let out = cmd.output().expect("the copy did not start");
     assert!(
         out.status.success(),
-        "a peer that qex cannot name must not be refused: {}",
+        "a peer that fairq cannot name must not be refused: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let receipt = json_of(&String::from_utf8_lossy(&out.stdout));
     let id = receipt["pause_id"].as_str().unwrap();
-    // The receipt speaks to the holder of the id, whatever qex knows.
+    // The receipt speaks to the holder of the id, whatever fairq knows.
     assert_eq!(
         receipt["resume_command"],
-        format!("qex resume queue --pause {id}")
+        format!("fairq resume queue --pause {id}")
     );
 
     let status = json_of(&h.ok(&["pause", "--json"]));
@@ -18914,7 +18954,7 @@ fn a_peer_that_is_not_the_qex_command_has_an_unknown_issuer() {
     let words = h.ok(&["pause"]);
     assert!(words.contains("treat it as still there"), "{words}");
     assert!(
-        !words.contains("qex resume") && !words.contains("THIS") && !words.contains("another"),
+        !words.contains("fairq resume") && !words.contains("THIS") && !words.contains("another"),
         "{words}"
     );
 
@@ -18934,7 +18974,7 @@ fn a_pause_from_inside_a_job_has_an_unknown_issuer() {
         "--mem",
         "64MB",
         "--",
-        env!("CARGO_BIN_EXE_qex"),
+        env!("CARGO_BIN_EXE_fairq"),
         "pause",
         "queue",
         "--reason",
@@ -18965,7 +19005,7 @@ fn a_pause_from_inside_a_job_is_unknown_after_a_coordinator_restart() {
     let script = format!(
         "while [ ! -e '{}' ]; do sleep 0.2; done; '{}' pause queue --reason 'after a restart'",
         flag.display(),
-        env!("CARGO_BIN_EXE_qex")
+        env!("CARGO_BIN_EXE_fairq")
     );
     let job = h.submit(&[
         "submit", "--cpu", "1", "--mem", "64MB", "--", "sh", "-c", &script,
@@ -19013,8 +19053,8 @@ fn a_resume_with_the_id_of_a_different_target_says_where_it_stands() {
     let queue = json_of(&h.ok(&["pause", "queue", "--json"]));
     let queue_id = queue["pause_id"].as_str().unwrap().to_string();
 
-    let lock_command = format!("qex resume lock gpu0 --pause {lock_id}");
-    let queue_command = format!("qex resume queue --pause {queue_id}");
+    let lock_command = format!("fairq resume lock gpu0 --pause {lock_id}");
+    let queue_command = format!("fairq resume queue --pause {queue_id}");
     let cases: [(Vec<&str>, &str, &str); 4] = [
         (
             vec!["resume", "--pause", &lock_id],
@@ -19038,7 +19078,7 @@ fn a_resume_with_the_id_of_a_different_target_says_where_it_stands() {
         ),
     ];
     for (args, place, command) in cases {
-        let out = h.qex(&args);
+        let out = h.fairq(&args);
         let text = String::from_utf8_lossy(&out.stderr).to_string();
         assert!(!out.status.success(), "{args:?} must fail: {text}");
         assert!(text.contains(&format!("stands for {place}")), "{text}");
@@ -19046,7 +19086,7 @@ fn a_resume_with_the_id_of_a_different_target_says_where_it_stands() {
         assert!(!text.contains("does not stand"), "{text}");
     }
 
-    // Nothing changed, and the commands that qex gave end both.
+    // Nothing changed, and the commands that fairq gave end both.
     let status = json_of(&h.ok(&["pause", "--json"]));
     assert_eq!(status["pauses"].as_array().unwrap().len(), 1, "{status}");
     assert_eq!(status["locks"].as_array().unwrap().len(), 1, "{status}");
@@ -19066,7 +19106,7 @@ fn the_resume_of_an_earlier_cli_is_refused_with_the_status_lines() {
     let receipt = json_of(&h.ok(&["pause", "queue", "--reason", "a call", "--json"]));
     let id = receipt["pause_id"].as_str().unwrap();
 
-    let socket = h.root.join("state/qex/run/s");
+    let socket = h.root.join("state/fairq/run/s");
     let stream = std::os::unix::net::UnixStream::connect(&socket)
         .unwrap_or_else(|e| panic!("no socket at {}: {e}", socket.display()));
     stream
@@ -19082,9 +19122,9 @@ fn the_resume_of_an_earlier_cli_is_refused_with_the_status_lines() {
     let answer = json_of(&line);
     assert_eq!(answer["result"], "error", "{answer}");
     let message = answer["message"].as_str().unwrap();
-    assert!(message.contains("qex resumed nothing"), "{message}");
+    assert!(message.contains("fairq resumed nothing"), "{message}");
     assert!(message.contains(&format!("pause {id}")), "{message}");
-    // This test is not the qex command, so qex cannot say who reads.
+    // This test is not the fairq command, so fairq cannot say who reads.
     assert!(!message.contains("--all"), "{message}");
 
     assert_eq!(json_of(&h.ok(&["pause", "--json"]))["paused"], true);
@@ -19135,12 +19175,12 @@ fn two_requests_for_one_lock_stand_apart() {
         "submit", "--lock", "gpu0", "--cpu", "1", "--mem", "64MB", "--", "true",
     ]);
 
-    let out = h.qex(&["resume", "lock", "gpu0"]);
+    let out = h.fairq(&["resume", "lock", "gpu0"]);
     assert!(!out.status.success());
     let text = String::from_utf8_lossy(&out.stderr).to_string();
-    assert!(text.contains("qex resumed nothing"), "{text}");
+    assert!(text.contains("fairq resumed nothing"), "{text}");
     assert!(
-        text.contains(&format!("qex resume lock gpu0 --pause {one}")),
+        text.contains(&format!("fairq resume lock gpu0 --pause {one}")),
         "{text}"
     );
 
@@ -19160,7 +19200,7 @@ fn two_requests_for_one_lock_stand_apart() {
 fn raw_request(h: &Harness, request: &serde_json::Value) -> serde_json::Value {
     use std::io::{BufRead, BufReader, Write};
 
-    let socket = h.root.join("state/qex/run/s");
+    let socket = h.root.join("state/fairq/run/s");
     let stream = std::os::unix::net::UnixStream::connect(&socket)
         .unwrap_or_else(|e| panic!("no socket at {}: {e}", socket.display()));
     stream
@@ -19286,9 +19326,9 @@ fn two_submits_of_one_new_id_at_once_make_one_job() {
     });
     // The switch pauses the first mkdir in jobs/, so a new coordinator takes it after the model.
     h.stop_coordinator();
-    let jobs = h.root.join("state/qex/jobs");
+    let jobs = h.root.join("state/fairq/jobs");
     h.extra_env.push((
-        "QEX_TEST_PAUSE_AFTER_MKDIR_IN".into(),
+        "FAIRQ_TEST_PAUSE_AFTER_MKDIR_IN".into(),
         format!("{} {}", PAUSE.as_millis(), jobs.display()),
     ));
     h.coordinator_pid();
@@ -19339,9 +19379,9 @@ fn a_submit_whose_record_write_fails_leaves_no_job_directory() {
     });
     // The switch pauses the first mkdir in jobs/, so a new coordinator takes it after the model.
     h.stop_coordinator();
-    let jobs = h.root.join("state/qex/jobs");
+    let jobs = h.root.join("state/fairq/jobs");
     h.extra_env.push((
-        "QEX_TEST_PAUSE_AFTER_MKDIR_IN".into(),
+        "FAIRQ_TEST_PAUSE_AFTER_MKDIR_IN".into(),
         format!("{} {}", PAUSE.as_millis(), jobs.display()),
     ));
     h.coordinator_pid();
@@ -19506,10 +19546,10 @@ fn a_submit_whose_leftover_cannot_be_removed_names_it() {
     let message = failed.0["message"].as_str().unwrap();
     assert!(message.contains("status.json"), "{message}");
     assert!(
-        message.contains("qex could not remove") && message.contains(&id),
+        message.contains("fairq could not remove") && message.contains(&id),
         "{message}"
     );
-    let lines = h.log_lines("qex could not remove");
+    let lines = h.log_lines("fairq could not remove");
     assert!(lines.len() == 1 && lines[0].contains(&id), "{lines:?}");
     assert!(kept, "the plant is gone: {message}");
     assert_id_refused(&again, &id, "already exists");
@@ -19527,9 +19567,9 @@ fn a_paused_coordinator_after_a_model_under_build_k(
         h.state_of(&model) == "completed"
     });
     h.stop_coordinator();
-    let jobs = h.root.join("state/qex/jobs");
+    let jobs = h.root.join("state/fairq/jobs");
     h.extra_env.push((
-        "QEX_TEST_PAUSE_AFTER_MKDIR_IN".into(),
+        "FAIRQ_TEST_PAUSE_AFTER_MKDIR_IN".into(),
         format!("{} {}", pause.as_millis(), jobs.display()),
     ));
     h.coordinator_pid();
@@ -19571,7 +19611,7 @@ fn a_keyed_submit_that_meets_a_failed_submission_gets_an_id_that_names_a_job() {
             .map(|_| {
                 scope.spawn(|| {
                     (
-                        h.qex_within(&keyed, Duration::from_secs(60)),
+                        h.fairq_within(&keyed, Duration::from_secs(60)),
                         Instant::now(),
                     )
                 })
@@ -19596,7 +19636,7 @@ fn a_keyed_submit_that_meets_a_failed_submission_gets_an_id_that_names_a_job() {
         .collect();
     let given = answers[0]["id"].as_str().unwrap().to_string();
     assert_eq!(answers[1]["id"], given.as_str(), "{answers:?}");
-    let status = h.qex(&["status", &given]);
+    let status = h.fairq(&["status", &given]);
     assert!(
         status.status.success(),
         "the id {given} names no job: {answers:?}\n{}",
@@ -19658,7 +19698,7 @@ fn a_keyed_submit_that_meets_a_submission_in_progress_waits_for_its_job() {
         let made = || h.job_dir(&id).exists();
         Harness::poll_until("the first submission makes its directory", PAUSE * 5, made);
         let sent = Instant::now();
-        let second = scope.spawn(|| h.qex_within(&keyed, Duration::from_secs(60)));
+        let second = scope.spawn(|| h.fairq_within(&keyed, Duration::from_secs(60)));
         let mut line_seen = false;
         while sent.elapsed() < Duration::from_secs(4) {
             if h.log_lines(&line).len() == 1 {
@@ -19668,7 +19708,7 @@ fn a_keyed_submit_that_meets_a_submission_in_progress_waits_for_its_job() {
             std::thread::sleep(Duration::from_millis(10));
         }
         // A job with no key: its insert wakes the waiter while the first still holds the key.
-        let extra = h.qex_within(&["submit", "--json", "--", "true"], Duration::from_secs(60));
+        let extra = h.fairq_within(&["submit", "--json", "--", "true"], Duration::from_secs(60));
         (
             first.join().unwrap(),
             second.join().unwrap(),
@@ -19777,7 +19817,7 @@ fn a_submit_that_made_no_job_leaves_its_id_free() {
          [queue]\noversized = \"reject\"\n",
     );
     let model = h.submit(&["submit", "--", "true"]);
-    let jobs = h.root.join("state/qex/jobs");
+    let jobs = h.root.join("state/fairq/jobs");
     let id = uuid::Uuid::new_v4().to_string();
     let request = submit_request(&h, &model, &id);
 
@@ -19805,7 +19845,7 @@ fn a_submit_that_made_no_job_leaves_its_id_free() {
     assert!(!h.job_dir(&id).exists(), "{failed}");
     // No directory was made, so the answer names none as left behind.
     let message = failed["message"].as_str().unwrap();
-    assert!(!message.contains("qex could not remove"), "{message}");
+    assert!(!message.contains("fairq could not remove"), "{message}");
 
     let again = raw_request(&h, &request);
     assert_eq!(again["result"], "submitted", "{again}");
@@ -19821,7 +19861,7 @@ fn a_submit_that_made_no_job_leaves_its_id_free() {
 /// `--max-queue-time` and the pause are two features that landed apart, and
 /// their meeting is the sharp edge of both. A person pauses the queue to take
 /// the machine for half an hour. Every job with a smaller limit then reaches
-/// that limit while NOBODY can start it: qex writes `expired`, it fires the
+/// that limit while NOBODY can start it: fairq writes `expired`, it fires the
 /// stop hook of each one, and the person — who is away, which is the whole
 /// point of a pause — comes back to an empty queue and a set of dead records.
 ///
@@ -19944,12 +19984,12 @@ fn the_limit_still_expires_a_job_after_the_pause_ends() {
     h.ok(&["kill", &holder, "--grace", "1s"]);
 }
 
-/// `qex wait` must say that the queue is paused.
+/// `fairq wait` must say that the queue is paused.
 ///
 /// # The fault that this test prevents
 ///
-/// Issue #28: `qex wait` gives no word where `qex run` explains itself. A pause
-/// makes that silence unbounded. An agent that runs `qex wait <id>` with no
+/// Issue #28: `fairq wait` gives no word where `fairq run` explains itself. A pause
+/// makes that silence unbounded. An agent that runs `fairq wait <id>` with no
 /// `--timeout`, behind a pause with no end, waits for ever and reads nothing —
 /// no line, no reason, no remedy. The wait must name the pause and the command
 /// that ends it.
@@ -19960,7 +20000,7 @@ fn a_wait_behind_a_pause_says_the_pause() {
     h.ok(&["pause", "queue", "--reason", "recording a demo"]);
     let id = h.submit(&["submit", "--cpu", "1", "--mem", "64MB", "--", "true"]);
 
-    let out = h.qex(&["wait", &id, "--timeout", "3s"]);
+    let out = h.fairq(&["wait", &id, "--timeout", "3s"]);
     let err = String::from_utf8_lossy(&out.stderr).to_string();
 
     assert!(
@@ -19972,7 +20012,7 @@ fn a_wait_behind_a_pause_says_the_pause() {
         "the wait must give the reason of the pause: {err}"
     );
     assert!(
-        err.contains("qex resume queue"),
+        err.contains("fairq resume queue"),
         "the wait must give the command that ends the pause: {err}"
     );
     assert_eq!(
@@ -19996,7 +20036,7 @@ fn a_wait_behind_a_pause_says_the_pause() {
 ///
 /// # The fault that this test prevents
 ///
-/// `--reason` is a SENTENCE that `qex info`, `qex top`, `qex list` and `qex
+/// `--reason` is a SENTENCE that `fairq info`, `fairq top`, `fairq list` and `fairq
 /// pause` each print, and a lock name is a NAME that goes into the
 /// `blocked_reason` of every job that waits for it. An ESC byte in either one
 /// clears the screen of the next reader or moves the cursor over the lines
@@ -20031,12 +20071,12 @@ fn a_pause_shows_no_control_byte_of_a_reason_or_a_lock_name() {
         vec!["list"],
         vec!["status", id.as_str()],
     ] {
-        let out = h.qex(&args);
+        let out = h.fairq(&args);
         let mut stream = out.stdout.clone();
         stream.extend_from_slice(&out.stderr);
         assert!(
             !stream.windows(4).any(|w| w == b"\x1b[2J"),
-            "`qex {}` wrote the ESC byte of a pause",
+            "`fairq {}` wrote the ESC byte of a pause",
             args.join(" ")
         );
     }
@@ -20047,11 +20087,11 @@ fn a_pause_shows_no_control_byte_of_a_reason_or_a_lock_name() {
     let shown = h.ok(&["pause"]);
     assert!(
         shown.contains("esc [2Jbad"),
-        "`qex pause` must keep the reason, without the control byte: {shown}"
+        "`fairq pause` must keep the reason, without the control byte: {shown}"
     );
     assert!(
         shown.contains("esc_2Jlock"),
-        "`qex pause` must keep the lock name, in its safe form: {shown}"
+        "`fairq pause` must keep the lock name, in its safe form: {shown}"
     );
 
     h.ok(&["resume", "lock", "esc\x1b[2Jlock", "--all"]);
@@ -20098,7 +20138,7 @@ fn an_oversized_job_in_a_paused_queue_says_the_pause() {
 
     // The warning of the submission still gives BOTH, because the person who
     // typed the command must learn about the claim as well.
-    let out = h.qex(&["submit", "--cpu", "4", "--mem", "128MB", "--", "true"]);
+    let out = h.fairq(&["submit", "--cpu", "4", "--mem", "128MB", "--", "true"]);
     let err = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(
         err.contains("the queue is paused"),
@@ -20112,16 +20152,16 @@ fn an_oversized_job_in_a_paused_queue_says_the_pause() {
     h.ok(&["resume", "--all"]);
 }
 
-/// `qex pause`, `qex info`, `qex top` and `qex list` must all give the same
+/// `fairq pause`, `fairq info`, `fairq top` and `fairq list` must all give the same
 /// requests, by id and by session, and NO process id of a pauser.
 ///
 /// # The fault that this test prevents
 ///
 /// The reports gave "by pid N", where N was the number that the CLI reported
-/// for itself. A `qex abort` that was the first process of a container
+/// for itself. A `fairq abort` that was the first process of a container
 /// reported 1. A reader takes such a number for a process of ITS machine: it
 /// ran `ps -p 1`, found the first process alive, and believed for six hours
-/// that the pauser still operated. An earlier `qex info` gave the pid of the
+/// that the pauser still operated. An earlier `fairq info` gave the pid of the
 /// COORDINATOR in that place, and a reader who kills that number stops the
 /// one process that must keep operating.
 ///
@@ -20140,7 +20180,7 @@ fn every_command_names_the_same_request_and_no_process_id() {
     assert_eq!(receipt["created"], true);
     assert_eq!(
         receipt["resume_command"],
-        format!("qex resume queue --pause {id}")
+        format!("fairq resume queue --pause {id}")
     );
 
     let info = h.ok(&["info", "--no-start", "--json"]);
@@ -20180,7 +20220,7 @@ fn every_command_names_the_same_request_and_no_process_id() {
     );
     assert!(chain.iter().all(|p| p.get("pid").is_none()));
 
-    // `qex list` and `qex wait` write the pause to STDERR, so this loop reads
+    // `fairq list` and `fairq wait` write the pause to STDERR, so this loop reads
     // both streams.
     for args in [
         vec!["pause"],
@@ -20188,7 +20228,7 @@ fn every_command_names_the_same_request_and_no_process_id() {
         vec!["top", "--once"],
         vec!["list"],
     ] {
-        let out = h.qex(&args);
+        let out = h.fairq(&args);
         let text = format!(
             "{}{}",
             String::from_utf8_lossy(&out.stdout),
@@ -20196,12 +20236,12 @@ fn every_command_names_the_same_request_and_no_process_id() {
         );
         assert!(
             text.contains(&format!("pause {id}")),
-            "`qex {}` must give the request by its id: {text}",
+            "`fairq {}` must give the request by its id: {text}",
             args.join(" ")
         );
         assert!(
             text.contains("from THIS session"),
-            "`qex {}` must give the session that asked: {text}",
+            "`fairq {}` must give the session that asked: {text}",
             args.join(" ")
         );
         let pause_part = text
@@ -20211,7 +20251,7 @@ fn every_command_names_the_same_request_and_no_process_id() {
             .join("\n");
         assert!(
             !pause_part.contains("pid") && !pause_part.contains(&coordinator_pid.to_string()),
-            "`qex {}` must give no process id for a pause: {pause_part}",
+            "`fairq {}` must give no process id for a pause: {pause_part}",
             args.join(" ")
         );
     }
@@ -20226,7 +20266,7 @@ fn every_command_names_the_same_request_and_no_process_id() {
 /// # The fault that this test prevents
 ///
 /// A pause of the queue ends in three places, and only two of them were
-/// covered. The third is a coordinator that is not there: qex itself tells a
+/// covered. The third is a coordinator that is not there: fairq itself tells a
 /// user to run `kill <pid>` on it, a new build replaces it, and a reboot or an
 /// out-of-memory kill removes it. `recover` read the pause and expired it, and
 /// it gave no credit — and it could not, because the job records are read after
@@ -20367,7 +20407,7 @@ max_pressure = 100
     // A resume with no id removes nothing, so the remedy is the command that
     // gives each request and its id.
     assert!(
-        after.contains("`qex pause`"),
+        after.contains("`fairq pause`"),
         "the reason must give the remedy: {after}"
     );
 
@@ -20381,7 +20421,7 @@ max_pressure = 100
 /// # Why these tests simulate the kill and do not make one
 ///
 /// A genuine kill by the out-of-memory killer needs one of two things: a cgroup
-/// memory limit, or a machine with no free memory. qex can apply a limit only
+/// memory limit, or a machine with no free memory. fairq can apply a limit only
 /// when the coordinator owns its cgroup, and a usual test machine gives the
 /// login session to the root user, so the limit is not available. A test that
 /// fills the machine is worse: other work operates on the same machine, and the
@@ -20394,10 +20434,10 @@ max_pressure = 100
 /// the words in the record, and the learner. The unit tests in `src/enforce.rs`
 /// and `src/supervisor.rs` cover the reading of the cgroup counter itself.
 ///
-/// The record says `job`, which is the evidence of a cgroup that qex made for
-/// this job. qex acts on that evidence only, so the test must produce it. On a
+/// The record says `job`, which is the evidence of a cgroup that fairq made for
+/// this job. fairq acts on that evidence only, so the test must produce it. On a
 /// machine with a delegated cgroup, `[enforce] mode` gives it. These tests must
-/// not use that mode: qex then starts the coordinator again in a systemd unit,
+/// not use that mode: fairq then starts the coordinator again in a systemd unit,
 /// which does not receive the `XDG_*` values of the test, and the test would
 /// use the state directory of the user.
 struct OomJob {
@@ -20413,7 +20453,7 @@ impl OomJob {
 
     /// Tells the job where its own directory is. The job then starts.
     fn release(&self, h: &Harness, id: &str) {
-        let dir = h.root.join("state/qex/jobs").join(id);
+        let dir = h.root.join("state/fairq/jobs").join(id);
         assert!(
             dir.is_dir(),
             "the job directory {} is missing",
@@ -20426,9 +20466,9 @@ impl OomJob {
 /// A job that a USER stopped must NOT run again, and it must teach the learner
 /// nothing.
 ///
-/// This test protects the feature from doing harm. The kernel and `qex kill`
+/// This test protects the feature from doing harm. The kernel and `fairq kill`
 /// both use `SIGKILL`. A job that somebody stopped on purpose must never run
-/// again with a larger claim: qex would repeat work that the user stopped, and
+/// again with a larger claim: fairq would repeat work that the user stopped, and
 /// it would also record that the command needs more memory than it does.
 #[test]
 fn a_job_that_a_user_killed_is_not_retried_and_teaches_the_learner_nothing() {
@@ -20441,11 +20481,11 @@ fn a_job_that_a_user_killed_is_not_retried_and_teaches_the_learner_nothing() {
 
     // Give the job the evidence of a kill for memory as well.
     //
-    // This step is the point of the test. qex reads the out-of-memory count of
+    // This step is the point of the test. fairq reads the out-of-memory count of
     // the SESSION when it applies no limit, and that count also holds a kill in
-    // a different program of the same user. The mark from `qex kill` must win
+    // a different program of the same user. The mark from `fairq kill` must win
     // against that evidence. Without the mark, this job looks like a job that
-    // the kernel stopped for memory, and qex starts it again with a larger
+    // the kernel stopped for memory, and fairq starts it again with a larger
     // claim.
     let job = OomJob::new(&h);
     let control = h.root.join("control");
@@ -20475,10 +20515,10 @@ fn a_job_that_a_user_killed_is_not_retried_and_teaches_the_learner_nothing() {
 
     let s = h.status_json(&id);
     assert_eq!(s["state"], "killed", "a command stopped this job: {s}");
-    assert_eq!(s["attempts"], 1, "qex must not start the job again: {s}");
-    // The record carries NO count of raises. qex raises no claim, so a field
+    assert_eq!(s["attempts"], 1, "fairq must not start the job again: {s}");
+    // The record carries NO count of raises. fairq raises no claim, so a field
     // that counts the raises names a behaviour that went, and every agent that
-    // reads `qex status --json` gets it.
+    // reads `fairq status --json` gets it.
     assert!(
         s.get("oom_raises").is_none(),
         "the record must hold no count of raises: {s}"
@@ -20491,7 +20531,7 @@ fn a_job_that_a_user_killed_is_not_retried_and_teaches_the_learner_nothing() {
 
     // The learner must hold nothing. The memory that a job reached before
     // somebody stopped it says nothing about the memory that it needs.
-    let store = h.root.join("state/qex/usage.json");
+    let store = h.root.join("state/fairq/usage.json");
     assert!(
         !store.exists(),
         "a job that a command stopped must teach the learner nothing, and the store holds: {}",
@@ -20501,7 +20541,7 @@ fn a_job_that_a_user_killed_is_not_retried_and_teaches_the_learner_nothing() {
 
 /// NO SHIPPED WORD MAY PROMISE THE MEMORY LIMIT THAT WENT.
 ///
-/// qex limits no job, it raises no claim, and it starts no attempt of its own
+/// fairq limits no job, it raises no claim, and it starts no attempt of its own
 /// after a kill for memory. A reader who finds one of these words believes a
 /// promise that no code holds.
 ///
@@ -20520,14 +20560,14 @@ fn a_job_that_a_user_killed_is_not_retried_and_teaches_the_learner_nothing() {
 ///
 /// It reads the files that hold text FOR A READER, and A FIELD NAME IS SUCH
 /// TEXT: `src/job.rs` declares the record, and serde gives every field of it to
-/// `qex status --json`. A field that counts the raises after a kill for memory
+/// `fairq status --json`. A field that counts the raises after a kill for memory
 /// thus reached every agent, while a comment beside it said that no command
 /// prints it. The name of a field is shipped text.
 ///
 /// The gate must not read the rest, because a word that names a key that went
 /// HAS TO appear in the code that refuses that key: `src/config.rs` holds
 /// `mem_overcommit`, `use_systemd` and `[retry]` so that a file which sets one
-/// of them gets an answer, and `src/usage.rs` holds `lower-bound` so that qex
+/// of them gets an answer, and `src/usage.rs` holds `lower-bound` so that fairq
 /// can read the file of an earlier version. A gate over every file needs a list
 /// of exceptions, and such a list grows until it hides the thing that the gate
 /// looks for.
@@ -20552,10 +20592,13 @@ fn no_shipped_word_promises_the_limit_that_went() {
         ("mode = \"hard\"", "a mode that went"),
         // The words of the learner that went with the limit. A gate that names
         // the config keys only passed over two whole sections of prose.
-        ("lower bound", "a measurement that qex no longer writes"),
+        ("lower bound", "a measurement that fairq no longer writes"),
         ("lower-bound", "the same, in the words of the file"),
-        ("cgroup of the job", "a cgroup that qex no longer makes"),
-        ("raises the claim", "a correction that qex no longer makes"),
+        ("cgroup of the job", "a cgroup that fairq no longer makes"),
+        (
+            "raises the claim",
+            "a correction that fairq no longer makes",
+        ),
         ("raise the claim", "the same"),
         // The section name, with nothing after it. A page named the keys of
         // this section in a table, in the middle of a line.
@@ -20563,14 +20606,30 @@ fn no_shipped_word_promises_the_limit_that_went() {
         // The words of the raise, in the form that carries no verb. A gate
         // that names the verbs only passes over a description of the record,
         // and over a help topic that ended the sentence here with a full stop.
-        ("the new claim", "a claim that qex no longer makes"),
+        ("the new claim", "a claim that fairq no longer makes"),
         ("claim that failed", "the same, in the words of a record"),
     ];
 
+    for page in shipped_pages() {
+        let text = std::fs::read_to_string(&page)
+            .unwrap_or_else(|e| panic!("the gate must read {}: {e}", page.display()));
+        for (word, what) in refused {
+            assert!(
+                !text.contains(word),
+                "{} names `{word}` ({what}). fairq limits no job, so no shipped word may \
+                 promise that it does.",
+                page.display()
+            );
+        }
+    }
+}
+
+/// The pages that ship with fairq. Every gate over shipped text reads this one list.
+fn shipped_pages() -> Vec<std::path::PathBuf> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut pages: Vec<std::path::PathBuf> = vec![
         root.join("README.md"),
-        root.join("skills/qex/SKILL.md"),
+        root.join("skills/fairq/SKILL.md"),
         root.join("CONTRIBUTING.md"),
         root.join("SECURITY.md"),
         // The help topics, the command line help and the JSON schema ship
@@ -20578,7 +20637,7 @@ fn no_shipped_word_promises_the_limit_that_went() {
         root.join("src/help.rs"),
         root.join("src/cli.rs"),
         root.join("src/schema.rs"),
-        // The record itself. Every field name goes to `qex status --json`.
+        // The record itself. Every field name goes to `fairq status --json`.
         root.join("src/job.rs"),
     ];
     // Every page of `docs/` ships. Read the directory, so that a new page gets
@@ -20598,30 +20657,199 @@ fn no_shipped_word_promises_the_limit_that_went() {
         docs.len()
     );
     pages.append(&mut docs);
+    pages
+}
 
-    for page in pages {
-        let text = std::fs::read_to_string(&page)
-            .unwrap_or_else(|e| panic!("the gate must read {}: {e}", page.display()));
-        for (word, what) in refused {
-            assert!(
-                !text.contains(word),
-                "{} names `{word}` ({what}). qex limits no job, so no shipped word may \
-                 promise that it does.",
-                page.display()
-            );
+/// The sentence that names the project fairq comes from, on one line of each front page.
+const ATTRIBUTION: &str =
+    "fairq is an independently maintained fork of qex (https://github.com/stephenc/qex), Apache-2.0.";
+
+/// Says whether a line names the old program outside the forms that stay after the rename:
+/// a dated header, the attribution, upstream's repository, the schema ids and one comment.
+fn names_the_old_program(line: &str) -> bool {
+    if line.contains("Modified by the local-resource-coordinator fork, ") {
+        return false;
+    }
+    let rest = line
+        .replace(ATTRIBUTION, "")
+        .replace("upstream's or to `cargo install qex`", "")
+        .replace("stephenc/qex", "")
+        .replace("github.com/qex/schema", "");
+    rest.to_lowercase().contains("qex")
+}
+
+fn rust_files_under(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+    let entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("the gate must read {}: {e}", dir.display()));
+    for entry in entries {
+        let path = entry.expect("each directory entry must be readable").path();
+        if path.is_dir() {
+            rust_files_under(&path, found);
+        } else if path.extension().is_some_and(|x| x == "rs") {
+            found.push(path);
         }
     }
 }
 
-/// A configuration that names a key of an earlier qex must say what to do.
+/// No shipped page and no line of the program's source names the program qex.
+#[test]
+fn no_shipped_page_names_the_program_qex() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut sources = Vec::new();
+    rust_files_under(&root.join("src"), &mut sources);
+    assert!(
+        sources.len() >= 44,
+        "the gate must read every .rs file under src/, and it found {}",
+        sources.len()
+    );
+    let build = root.join("build.rs");
+
+    let mut misses = Vec::new();
+    for file in shipped_pages().iter().chain(&sources).chain([&build]) {
+        let text = std::fs::read_to_string(file)
+            .unwrap_or_else(|e| panic!("the gate must read {}: {e}", file.display()));
+        for (n, line) in text.lines().enumerate() {
+            if names_the_old_program(line) {
+                misses.push(format!("{}:{}: {line}", file.display(), n + 1));
+            }
+        }
+    }
+    assert!(
+        misses.is_empty(),
+        "the program is named fairq, and these lines name it qex:\n{}",
+        misses.join("\n")
+    );
+}
+
+/// The front pages say where fairq comes from, as the licence of the fork asks.
+#[test]
+fn the_readme_names_the_project_that_fairq_comes_from() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for page in ["README.md", "docs/index.md"] {
+        let text = std::fs::read_to_string(root.join(page))
+            .unwrap_or_else(|e| panic!("the test must read {page}: {e}"));
+        assert!(
+            text.lines().any(|l| l == ATTRIBUTION),
+            "{page} must hold this sentence on one line: {ATTRIBUTION}"
+        );
+    }
+}
+
+/// The items of a list that the program prints after `marker`, separated by commas.
+fn listed_after(text: &str, marker: &str, end: &str) -> Vec<String> {
+    let line = text
+        .lines()
+        .find_map(|l| l.split_once(marker).map(|(_, rest)| rest))
+        .unwrap_or_else(|| panic!("no line holds `{marker}`:\n{text}"));
+    let list = line.split(end).next().unwrap_or_default();
+    list.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// No help page, completion or schema that the program prints names it qex.
+#[test]
+fn no_help_page_of_the_program_names_qex() {
+    let h = Harness::with_default_config("help-names");
+    let mut outputs: Vec<(String, String)> = Vec::new();
+
+    let top = h.ok(&["--help"]);
+    let commands: Vec<String> = top
+        .lines()
+        .skip_while(|l| !l.starts_with("Commands:"))
+        .skip(1)
+        .take_while(|l| !l.trim().is_empty())
+        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+        .collect();
+    assert!(
+        commands.len() >= 25,
+        "the Commands section of --help must list every command, and it gave {commands:?}"
+    );
+    outputs.push(("--help".into(), top));
+    for command in &commands {
+        outputs.push((
+            format!("{command} --help"),
+            h.ok(&[command.as_str(), "--help"]),
+        ));
+    }
+
+    let help = h.ok(&["help"]);
+    let topics = listed_after(&help, "Topics for `fairq help <topic>`:", "\n");
+    assert!(
+        topics.len() >= 12,
+        "`help` must list the topics, and it gave {topics:?}"
+    );
+    outputs.push(("help".into(), help));
+    for topic in &topics {
+        outputs.push((format!("help {topic}"), h.ok(&["help", topic.as_str()])));
+    }
+
+    let shells = listed_after(&h.ok(&["completions", "--help"]), "[possible values:", "]");
+    assert!(
+        shells.len() >= 5,
+        "`completions --help` must list the shells, and it gave {shells:?}"
+    );
+    for shell in &shells {
+        outputs.push((
+            format!("completions {shell}"),
+            h.ok(&["completions", shell.as_str()]),
+        ));
+    }
+
+    let refused = h.fairq(&["schema"]);
+    let schemas = listed_after(
+        &String::from_utf8_lossy(&refused.stderr),
+        "The schemas are:",
+        "\n",
+    );
+    assert!(
+        schemas.len() >= 4,
+        "`schema` must list the schemas, and it gave {schemas:?}"
+    );
+    for schema in &schemas {
+        outputs.push((
+            format!("schema {schema}"),
+            h.ok(&["schema", schema.as_str()]),
+        ));
+    }
+
+    for (args, text) in &outputs {
+        assert!(!text.is_empty(), "`fairq {args}` printed nothing");
+        for line in text.lines() {
+            assert!(
+                !names_the_old_program(line),
+                "`fairq {args}` names the program qex: {line}"
+            );
+        }
+    }
+
+    for args in [&["--version"][..], &["version"][..]] {
+        let out = h.ok(args);
+        let first = out.lines().next().unwrap_or_default();
+        let version = first.strip_prefix("fairq ").unwrap_or_else(|| {
+            panic!(
+                "`fairq {}` must start with `fairq <version>`: {first}",
+                args.join(" ")
+            )
+        });
+        assert!(
+            !version.trim().is_empty() && !version.contains(' '),
+            "`fairq {}` must print `fairq <version>` first: {first}",
+            args.join(" ")
+        );
+    }
+}
+
+/// A configuration that names a key of an earlier fairq must say what to do.
 ///
-/// A reader wrote that key because an earlier qex asked for it. "unknown field"
-/// is true and it names no remedy, so qex names the key, says what it does now,
+/// A reader wrote that key because an earlier fairq asked for it. "unknown field"
+/// is true and it names no remedy, so fairq names the key, says what it does now,
 /// and gives the step.
 ///
 /// THE ANSWER MUST GIVE THE REMEDY FOR THE KEY THAT THE FILE HOLDS. Every
 /// message here says "does not limit a job", so a test for those words alone
-/// passes when qex gives the answer of one key for a different key.
+/// passes when fairq gives the answer of one key for a different key.
 ///
 /// A test that the message merely NAMES the key is not enough either. The
 /// answer for a bad value of `[enforce] mode` carries the words of the parser,
@@ -20653,7 +20881,7 @@ fn a_config_that_names_a_key_that_went_says_what_to_do() {
         ("[retry]", "on_oom = 2", "Delete `retry`", None),
         ("[enforce]", "mode = \"hard\"", "Use `cooperative`", None),
         // A VALUE, and not a key. The file is well formed and it holds no key
-        // that went, so qex names `[enforce] mode`, which the file DOES hold,
+        // that went, so fairq names `[enforce] mode`, which the file DOES hold,
         // and it asks the reader to delete nothing.
         (
             "[enforce]",
@@ -20663,16 +20891,16 @@ fn a_config_that_names_a_key_that_went_says_what_to_do() {
         ),
     ] {
         let h = Harness::new("wentkey", &format!("{section}\n{text}\n"));
-        let out = h.qex(&["config", "show"]);
+        let out = h.fairq(&["config", "show"]);
         let said = format!(
             "{}{}",
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
-        assert_ne!(out.status.code(), Some(0), "qex must refuse: {said}");
+        assert_ne!(out.status.code(), Some(0), "fairq must refuse: {said}");
         assert!(
             said.contains("does not limit a job"),
-            "the answer must say what qex does now, for `{section} {text}`: {said}"
+            "the answer must say what fairq does now, for `{section} {text}`: {said}"
         );
         assert!(
             said.contains(must_say),
@@ -20688,13 +20916,13 @@ fn a_config_that_names_a_key_that_went_says_what_to_do() {
     }
 }
 
-/// `qex config show` gives the values IN FORCE, in both of its forms.
+/// `fairq config show` gives the values IN FORCE, in both of its forms.
 ///
 /// `[enforce] mode` decides the budget, the reserve and the search for peers
 /// when the config file names none of them. The struct then holds an empty
 /// sentinel for each one. A reader of either form must never see that sentinel:
 /// an agent that reads `""` for the budget cannot size a claim, and it cannot
-/// recover the number that qex uses.
+/// recover the number that fairq uses.
 ///
 /// The pure function that fills the sentinels has its own test. THIS test reads
 /// the two forms that a reader gets, because a correct function that no command
@@ -20739,7 +20967,7 @@ fn config_show_gives_the_values_in_force_in_both_forms() {
         );
         assert_eq!(
             cfg["peers"]["enabled"], peers,
-            "{mode}: the JSON form must say if qex looks for peers: {out}"
+            "{mode}: the JSON form must say if fairq looks for peers: {out}"
         );
 
         // THE TEXT FORM. A person reads this one, and the line must name the
@@ -20755,14 +20983,14 @@ fn config_show_gives_the_values_in_force_in_both_forms() {
 
 /// A RERUN TAKES THE CLAIM OF THE SPECIFICATION, and not the claim of a record.
 ///
-/// For a job that this qex submits the two agree. They disagree for a record of
-/// an EARLIER qex, which could write a larger number in the record after a kill
+/// For a job that this fairq submits the two agree. They disagree for a record of
+/// an EARLIER fairq, which could write a larger number in the record after a kill
 /// for memory. A rerun that took that number would carry `learned` with it, and
-/// tell the reader that a job measured a value that qex invented.
+/// tell the reader that a job measured a value that fairq invented.
 ///
 /// This test writes the record of such a job, because this version cannot make
 /// one. It is a test of what `rerun` READS, and the shape it reads from disk is
-/// the shape that an earlier qex left there.
+/// the shape that an earlier fairq left there.
 #[test]
 fn a_rerun_takes_the_claim_of_the_specification_and_not_of_the_record() {
     let h = Harness::new("rerunclaim", "[peers]\nenabled = false\n");
@@ -20770,9 +20998,9 @@ fn a_rerun_takes_the_claim_of_the_specification_and_not_of_the_record() {
     let first = h.submit(&["submit", "--cpu", "1", "--mem", "300MB", "--", "true"]);
     h.ok(&["wait", &first, "--timeout", "60s"]);
 
-    // Put the record in the shape that an earlier qex left after a raise: the
+    // Put the record in the shape that an earlier fairq left after a raise: the
     // claim of the record is above the claim that the submission asked for.
-    let record = h.root.join(format!("state/qex/jobs/{first}/status.json"));
+    let record = h.root.join(format!("state/fairq/jobs/{first}/status.json"));
     let text = std::fs::read_to_string(&record).expect("the record must be readable");
     let mut value: serde_json::Value =
         serde_json::from_str(&text).expect("the record must be JSON");
@@ -20782,7 +21010,7 @@ fn a_rerun_takes_the_claim_of_the_specification_and_not_of_the_record() {
     std::fs::write(&record, value.to_string()).expect("the record must be writable");
 
     // THE INSTRUMENT MUST PROVE ITSELF, or this test judges nothing. Read the
-    // FILE back, and not `qex status`: that command asks the coordinator, which
+    // FILE back, and not `fairq status`: that command asks the coordinator, which
     // answers from the record that it holds in memory, and `rerun` reads the
     // file. A test that asked the coordinator here would find its own write
     // missing and blame the product.
@@ -20814,12 +21042,12 @@ fn a_rerun_takes_the_claim_of_the_specification_and_not_of_the_record() {
     );
 }
 
-/// qex makes NO cgroup for a job, in any configuration.
+/// fairq makes NO cgroup for a job, in any configuration.
 ///
 /// This is the property that the removal must hold. A test of the messages
 /// alone would pass while the code still made a cgroup for each job.
 #[test]
-fn qex_makes_no_cgroup_for_a_job() {
+fn fairq_makes_no_cgroup_for_a_job() {
     let h = Harness::new(
         "nocgroup",
         "[peers]\nenabled = false\n[enforce]\nmode = \"single-user\"\n",
@@ -20829,7 +21057,7 @@ fn qex_makes_no_cgroup_for_a_job() {
 
     // The record of the job must name no cgroup, and no file of the job may
     // hold one. `record_cgroup_path` wrote that file.
-    let dir = h.root.join("state/qex/jobs").join(&id);
+    let dir = h.root.join("state/fairq/jobs").join(&id);
     assert!(
         !dir.join("cgroup").exists(),
         "a job must have no cgroup file: {}",
@@ -20842,13 +21070,13 @@ fn qex_makes_no_cgroup_for_a_job() {
 
 /// No hint in the environment of a job carries memory.
 ///
-/// qex limits no job, so it must not tell a runtime to limit itself. A hint
+/// fairq limits no job, so it must not tell a runtime to limit itself. A hint
 /// that named a memory value would hold a Go job and a node job to the claim
 /// and leave every other program free.
 #[test]
 fn no_hint_in_the_environment_of_a_job_carries_memory() {
     // With the default `all`, an ambient NODE_OPTIONS or GOMEMLIMIT reached the job (issue #84).
-    // `minimal` keeps it out, and qex's own hints still reach the job: GOMAXPROCS is one.
+    // `minimal` keeps it out, and fairq's own hints still reach the job: GOMAXPROCS is one.
     let h = Harness::new(
         "nomemhint",
         "[peers]\nenabled = false\n[submit]\nenv_capture = \"minimal\"\n",
@@ -20862,11 +21090,11 @@ fn no_hint_in_the_environment_of_a_job_carries_memory() {
         "--",
         "sh",
         "-c",
-        "echo \"GOMAXPROCS=$GOMAXPROCS QEX_MEM=$QEX_MEM \
+        "echo \"GOMAXPROCS=$GOMAXPROCS FAIRQ_MEM=$FAIRQ_MEM \
          GOMEMLIMIT=[$GOMEMLIMIT] NODE_OPTIONS=[$NODE_OPTIONS]\"",
     ]);
     h.ok(&["wait", &id, "--timeout", "60s"]);
-    let out = h.qex(&["logs", &id]);
+    let out = h.fairq(&["logs", &id]);
     let said = String::from_utf8_lossy(&out.stdout).to_string();
 
     assert!(
@@ -20874,31 +21102,31 @@ fn no_hint_in_the_environment_of_a_job_carries_memory() {
         "a core hint must reach the job: {said}"
     );
     assert!(
-        said.contains("QEX_MEM=536870912"),
+        said.contains("FAIRQ_MEM=536870912"),
         "the claim must reach the job as a value to read: {said}"
     );
     assert!(
         said.contains("GOMEMLIMIT=[]"),
-        "qex must write no memory limit for Go: {said}"
+        "fairq must write no memory limit for Go: {said}"
     );
     assert!(
         said.contains("NODE_OPTIONS=[]"),
-        "qex must write no heap limit for node: {said}"
+        "fairq must write no heap limit for node: {said}"
     );
 }
 
-/// A kill for memory is REPORTED, and qex acts on it in no way.
+/// A kill for memory is REPORTED, and fairq acts on it in no way.
 ///
-/// qex reads the out-of-memory count of the cgroup of its own process. That
+/// fairq reads the out-of-memory count of the cgroup of its own process. That
 /// count also rises when the kernel stops a DIFFERENT program of the same user,
 /// and a machine that is short of memory is also the machine on which a person
 /// uses `kill -9`, so the two events arrive together.
 ///
-/// qex therefore names the state `oom` and stops. It starts no new attempt, it
+/// fairq therefore names the state `oom` and stops. It starts no new attempt, it
 /// changes no claim, and it teaches the learner nothing: the machine can be
 /// full while the claim of this job is correct.
 #[test]
-fn a_kill_for_memory_is_reported_and_qex_acts_on_it_in_no_way() {
+fn a_kill_for_memory_is_reported_and_fairq_acts_on_it_in_no_way() {
     let h = Harness::new(
         "oomsession",
         "[peers]\nenabled = false\n\
@@ -20916,14 +21144,14 @@ fn a_kill_for_memory_is_reported_and_qex_acts_on_it_in_no_way() {
     let id = h.submit(&["submit", "--mem", "128MB", "--", "bash", "-c", &script]);
     job.release(&h, &id);
 
-    let out = h.qex(&["wait", &id, "--timeout", "60s"]);
+    let out = h.fairq(&["wait", &id, "--timeout", "60s"]);
     assert_eq!(out.status.code(), Some(99), "got: {out:?}");
 
     let s = h.status_json(&id);
     // The report is correct: the kernel stopped the job for memory.
     assert_eq!(s["state"], "oom", "got: {s}");
     // No action may follow it.
-    assert_eq!(s["attempts"], 1, "qex must not start the job again: {s}");
+    assert_eq!(s["attempts"], 1, "fairq must not start the job again: {s}");
     assert_eq!(
         s["mem"].as_u64().unwrap(),
         128 * 1024 * 1024,
@@ -20933,7 +21161,7 @@ fn a_kill_for_memory_is_reported_and_qex_acts_on_it_in_no_way() {
     let note = s["error"].as_str().unwrap_or("");
     assert!(
         note.contains("no count that belongs to this job alone"),
-        "the record must say what qex holds: {note}"
+        "the record must say what fairq holds: {note}"
     );
     assert!(
         note.contains("THE CLAIM CAN BE CORRECT"),
@@ -20941,12 +21169,12 @@ fn a_kill_for_memory_is_reported_and_qex_acts_on_it_in_no_way() {
     );
     assert!(
         !note.contains("[enforce] mode"),
-        "no setting gives qex a count for one job, so the record must name none: {note}"
+        "no setting gives fairq a count for one job, so the record must name none: {note}"
     );
 
     // The learner must hold nothing. A job that did not COMPLETE is not a
     // measurement of the memory that the work needs.
-    let store = h.root.join("state/qex/usage.json");
+    let store = h.root.join("state/fairq/usage.json");
     assert!(
         !store.exists(),
         "a kill for memory must teach the learner nothing, and the store holds: {}",
@@ -20956,7 +21184,7 @@ fn a_kill_for_memory_is_reported_and_qex_acts_on_it_in_no_way() {
 
 /// A mark that says how an attempt stopped must not stay for the next attempt.
 ///
-/// A job with `--retries` can stop in two different ways. `qex kill` stopped
+/// A job with `--retries` can stop in two different ways. `fairq kill` stopped
 /// attempt 1 here, and attempt 2 ran to its end. The mark of the first attempt
 /// stayed before, so attempt 2 said that a command stopped it. The record then
 /// named a cause that no command made.
@@ -21023,7 +21251,7 @@ fn a_mark_from_one_attempt_does_not_decide_the_next_attempt() {
 
 /// Makes a directory that two coordinators share for their peer records.
 ///
-/// The directory needs the sticky bit, or qex refuses it and each coordinator
+/// The directory needs the sticky bit, or fairq refuses it and each coordinator
 /// then operates for one user only — and the test measures nothing.
 fn shared_peer_dir(tag: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
@@ -21056,7 +21284,7 @@ fn blocked_reason(h: &Harness, id: &str) -> String {
 /// THE MEASURED FAULT of issue #10.
 ///
 /// A job that cannot start because another user holds part of the budget must
-/// not keep the jobs behind it in the queue. qex does not control that user, so
+/// not keep the jobs behind it in the queue. fairq does not control that user, so
 /// an empty machine gives the job at the front nothing and stops every other
 /// job. The earlier code parked the whole queue and told each job behind it
 /// "waits for the job at the front of the queue", which names no cause.
@@ -21119,16 +21347,16 @@ fn a_job_that_another_user_holds_back_does_not_park_the_jobs_behind_it() {
         "the job at the front must not read a position sentence: {reason}"
     );
 
-    // `qex info` must say the same thing in one line.
+    // `fairq info` must say the same thing in one line.
     let info: serde_json::Value = serde_json::from_str(&mine.ok(&["info", "--json"])).unwrap();
     assert_eq!(info["queue_state"], "waits-for-peer", "info: {info}");
     assert!(
         info["peer_cpu"].as_u64().unwrap_or(0) >= 3,
-        "qex info must report the cores of the other user: {info}"
+        "fairq info must report the cores of the other user: {info}"
     );
 
     other.ok(&["kill", &held, "--grace", "1s"]);
-    mine.qex(&["cancel", &big]);
+    mine.fairq(&["cancel", &big]);
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -21156,7 +21384,7 @@ fn a_job_behind_a_job_that_keeps_no_capacity_gets_its_own_reason() {
     );
 
     // The job at the front needs the whole budget. The other user stops it, so
-    // qex keeps no capacity for it.
+    // fairq keeps no capacity for it.
     let big = mine.submit(&[
         "submit", "--cpu", "4", "--mem", "64MB", "--", "sleep", "300",
     ]);
@@ -21197,8 +21425,8 @@ fn a_job_behind_a_job_that_keeps_no_capacity_gets_its_own_reason() {
 
     other.ok(&["kill", &held, "--grace", "1s"]);
     for id in [&big, &a, &b] {
-        mine.qex(&["kill", id, "--grace", "1s"]);
-        mine.qex(&["cancel", id]);
+        mine.fairq(&["kill", id, "--grace", "1s"]);
+        mine.fairq(&["cancel", id]);
     }
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -21230,7 +21458,7 @@ fn a_job_blocked_by_a_peer_becomes_unpassable_when_the_holder_changes() {
     );
 
     // This job needs 3 cores. The other user holds 2, so it cannot start, and
-    // qex must keep no capacity for it.
+    // fairq must keep no capacity for it.
     let big = mine.submit(&[
         "submit", "--cpu", "3", "--mem", "64MB", "--", "sleep", "300",
     ]);
@@ -21298,11 +21526,11 @@ fn a_job_blocked_by_a_peer_becomes_unpassable_when_the_holder_changes() {
     );
     let reason = blocked_reason(&mine, &small[2]);
     assert!(
-        reason.contains("qex keeps the capacity for that job"),
-        "the job behind must read WHY qex holds it: {reason}"
+        reason.contains("fairq keeps the capacity for that job"),
+        "the job behind must read WHY fairq holds it: {reason}"
     );
     assert!(
-        blocked_reason(&mine, &big).contains("qex starts no other job before this one"),
+        blocked_reason(&mine, &big).contains("fairq starts no other job before this one"),
         "the job at the front must say that it keeps the capacity"
     );
 
@@ -21316,10 +21544,10 @@ fn a_job_blocked_by_a_peer_becomes_unpassable_when_the_holder_changes() {
     );
 
     for id in &small {
-        mine.qex(&["kill", id, "--grace", "1s"]);
-        mine.qex(&["cancel", id]);
+        mine.fairq(&["kill", id, "--grace", "1s"]);
+        mine.fairq(&["cancel", id]);
     }
-    mine.qex(&["kill", &big, "--grace", "1s"]);
+    mine.fairq(&["kill", &big, "--grace", "1s"]);
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -21346,7 +21574,7 @@ fn a_stream_of_small_jobs_does_not_pass_a_large_job_for_ever() {
     });
 
     // This job needs the whole budget, so the job above stops it. The jobs of
-    // this queue hold the capacity, and qex schedules their release.
+    // this queue hold the capacity, and fairq schedules their release.
     let big = h.submit(&["submit", "--cpu", "4", "--mem", "64MB", "--", "true"]);
 
     // Six small jobs, each of which stops immediately. Without a bound, all six
@@ -21374,12 +21602,12 @@ fn a_stream_of_small_jobs_does_not_pass_a_large_job_for_ever() {
     }
     assert_eq!(h.state_of(&big), "queued");
 
-    // `qex info` must know when a job last started. The health line answers
+    // `fairq info` must know when a job last started. The health line answers
     // "does the queue move", and it cannot answer it without this time.
     let info: serde_json::Value = serde_json::from_str(&h.ok(&["info", "--json"])).unwrap();
     assert!(
         info["last_start_at"].as_u64().is_some(),
-        "qex info must report the time of the last start: {info}"
+        "fairq info must report the time of the last start: {info}"
     );
 
     // The large job starts when the holder stops, and the rest follow.
@@ -21466,7 +21694,7 @@ fn max_bypass_zero_lets_no_job_pass_the_front_of_the_queue() {
 /// A job that is larger than the budget, and that the config keeps in the
 /// queue, must not park the jobs behind it.
 ///
-/// Such a job never starts, so capacity that qex keeps for it gives it nothing.
+/// Such a job never starts, so capacity that fairq keeps for it gives it nothing.
 /// This was the second head-of-line path: with `oversized = "queue"` the job
 /// stopped every job behind it FOR EVER.
 #[test]
@@ -21536,7 +21764,7 @@ fn pool_config(devices: &str, extra: &str) -> String {
 /// A machine with no GPU must schedule a GPU claim from the configuration, and
 /// it must give the job the index and the environment variable.
 ///
-/// Without this, qex would need a driver library to schedule a promise, and a
+/// Without this, fairq would need a driver library to schedule a promise, and a
 /// build machine could not run the test at all.
 #[test]
 fn a_machine_with_no_gpu_schedules_a_gpu_claim_from_the_configuration() {
@@ -21553,7 +21781,7 @@ fn a_machine_with_no_gpu_schedules_a_gpu_claim_from_the_configuration() {
         "--",
         "sh",
         "-c",
-        "echo cuda=$CUDA_VISIBLE_DEVICES; echo qex=$QEX_GPU_DEVICES; echo vram=$QEX_GPU_VRAM",
+        "echo cuda=$CUDA_VISIBLE_DEVICES; echo fairq=$FAIRQ_GPU_DEVICES; echo vram=$FAIRQ_GPU_VRAM",
     ]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
     assert_eq!(h.state_of(&id), "completed");
@@ -21564,8 +21792,8 @@ fn a_machine_with_no_gpu_schedules_a_gpu_claim_from_the_configuration() {
         "the pool must write its variable: {out}"
     );
     assert!(
-        out.contains("qex=0"),
-        "every indexed pool gets QEX_..._DEVICES: {out}"
+        out.contains("fairq=0"),
+        "every indexed pool gets FAIRQ_..._DEVICES: {out}"
     );
     assert!(
         out.contains(&format!("vram={}", 24u64 << 30)),
@@ -21582,7 +21810,7 @@ fn a_machine_with_no_gpu_schedules_a_gpu_claim_from_the_configuration() {
 /// and they must get DIFFERENT devices. A third job must wait.
 ///
 /// A fault here gives two jobs one card, and both jobs then meet a memory
-/// error on the device that qex said was free.
+/// error on the device that fairq said was free.
 #[test]
 fn two_gpu_jobs_get_different_devices_and_a_third_waits() {
     let h = Harness::new("gpushare", &pool_config("\"24GB\", \"24GB\"", ""));
@@ -21641,11 +21869,11 @@ fn two_gpu_jobs_get_different_devices_and_a_third_waits() {
     );
 
     for id in &ids {
-        h.qex(&["kill", id, "--grace", "1s"]);
+        h.fairq(&["kill", id, "--grace", "1s"]);
     }
 }
 
-/// qex must never add the memory of the devices together.
+/// fairq must never add the memory of the devices together.
 ///
 /// Four devices of 24GB are not 96GB for one job. An arithmetic that says they
 /// are admits a job that cannot run, and the job then fails on the card with a
@@ -21657,10 +21885,10 @@ fn a_vram_claim_above_the_largest_device_is_refused_at_the_submission() {
         &pool_config("\"24GB\", \"24GB\", \"24GB\", \"24GB\"", ""),
     );
 
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit", "--cpu", "1", "--mem", "64MB", "--gpu", "2", "--vram", "40GB", "--", "true",
     ]);
-    assert!(!out.status.success(), "qex must refuse this job");
+    assert!(!out.status.success(), "fairq must refuse this job");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("never start"),
@@ -21691,10 +21919,10 @@ fn a_gpu_claim_above_the_pool_total_is_refused_whatever_the_oversized_policy() {
         ),
     );
 
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit", "--cpu", "1", "--mem", "64MB", "--gpu", "8", "--", "true",
     ]);
-    assert!(!out.status.success(), "qex must refuse this job");
+    assert!(!out.status.success(), "fairq must refuse this job");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("never start"), "got: {err}");
 }
@@ -21720,7 +21948,7 @@ fn a_gpu_assignment_survives_a_coordinator_that_stops_and_starts() {
         .unwrap();
 
     // Take the pid from the coordinator itself. A search of the process list
-    // also matches the command that holds the letters `qex`.
+    // also matches the command that holds the letters `fairq`.
     let pid = h.coordinator_pid();
     unsafe {
         libc::kill(pid, libc::SIGKILL);
@@ -21752,7 +21980,7 @@ fn a_gpu_assignment_survives_a_coordinator_that_stops_and_starts() {
         "the only device is in use, so the second job must wait"
     );
 
-    h.qex(&["kill", &long, "--grace", "1s"]);
+    h.fairq(&["kill", &long, "--grace", "1s"]);
 }
 
 /// `--lock NAME` must behave exactly as before: no configuration, and two jobs
@@ -21793,7 +22021,7 @@ fn a_lock_needs_no_configuration_and_still_excludes() {
     h.ok(&["wait", &free, "--timeout", "45s"]);
     assert_eq!(h.state_of(&free), "completed");
 
-    h.qex(&["kill", &first, "--grace", "1s"]);
+    h.fairq(&["kill", &first, "--grace", "1s"]);
     h.ok(&["wait", &second, "--timeout", "45s"]);
     assert_eq!(h.state_of(&second), "completed");
 }
@@ -21830,12 +22058,12 @@ fn a_counted_pool_lets_n_jobs_operate_and_makes_the_next_one_wait() {
     );
 
     for id in &ids {
-        h.qex(&["kill", id, "--grace", "1s"]);
+        h.fairq(&["kill", id, "--grace", "1s"]);
     }
 }
 
 /// A pool name that the configuration does not declare is a lock of one unit,
-/// and more than one unit of it is a fault that qex must name.
+/// and more than one unit of it is a fault that fairq must name.
 #[test]
 fn an_undeclared_pool_is_a_lock_and_two_units_of_it_are_refused() {
     let h = Harness::with_default_config("undeclared");
@@ -21844,10 +22072,10 @@ fn an_undeclared_pool_is_a_lock_and_two_units_of_it_are_refused() {
     h.ok(&["wait", &one, "--timeout", "45s"]);
     assert_eq!(h.state_of(&one), "completed");
 
-    let out = h.qex(&["submit", "--claim", "thing=2", "--", "true"]);
+    let out = h.fairq(&["submit", "--claim", "thing=2", "--", "true"]);
     assert!(
         !out.status.success(),
-        "qex must refuse 2 of an undeclared pool"
+        "fairq must refuse 2 of an undeclared pool"
     );
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("lock of size 1"), "got: {err}");
@@ -21857,7 +22085,7 @@ fn an_undeclared_pool_is_a_lock_and_two_units_of_it_are_refused() {
     );
 }
 
-/// A pool with no devices must also reach the job, through `QEX_CLAIM_<NAME>`.
+/// A pool with no devices must also reach the job, through `FAIRQ_CLAIM_<NAME>`.
 ///
 /// A counted claim that the job cannot see is half a feature: a downloader that
 /// claims one of four network slots has no way to size its own parallelism.
@@ -21872,7 +22100,7 @@ fn a_pool_with_no_devices_gives_the_job_its_count() {
     );
 
     // The pre-condition: a job with no claim gets no such variable.
-    let plain = h.submit(&["submit", "--", "sh", "-c", "echo net=[$QEX_CLAIM_NET]"]);
+    let plain = h.submit(&["submit", "--", "sh", "-c", "echo net=[$FAIRQ_CLAIM_NET]"]);
     h.ok(&["wait", &plain, "--timeout", "45s"]);
     assert!(
         h.ok(&["logs", &plain, "--stdout"]).contains("net=[]"),
@@ -21886,7 +22114,7 @@ fn a_pool_with_no_devices_gives_the_job_its_count() {
         "--",
         "sh",
         "-c",
-        "echo net=[$QEX_CLAIM_NET]",
+        "echo net=[$FAIRQ_CLAIM_NET]",
     ]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
     assert_eq!(h.state_of(&id), "completed");
@@ -21899,7 +22127,7 @@ fn a_pool_with_no_devices_gives_the_job_its_count() {
 
 /// A REFUSED CLAIM MUST NOT KEEP THE DEDUPE KEY.
 ///
-/// `qex submit --dedupe-key K --gpu 8` against a pool of 2 is refused. If that
+/// `fairq submit --dedupe-key K --gpu 8` against a pool of 2 is refused. If that
 /// refusal left the key in the coordinator, every later submission with the
 /// same key would give the id of a job that does not exist, and no job would
 /// ever free the key. A script that retries would then never run again.
@@ -21907,7 +22135,7 @@ fn a_pool_with_no_devices_gives_the_job_its_count() {
 fn a_pool_claim_that_is_refused_gives_the_dedupe_key_back() {
     let h = Harness::new("pooldedupe", &pool_config("\"24GB\", \"24GB\"", ""));
 
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--dedupe-key",
         "poolkey",
@@ -21922,7 +22150,7 @@ fn a_pool_claim_that_is_refused_gives_the_dedupe_key_back() {
     );
 
     // The key must be free. This submission must START A JOB, and not give the
-    // id of the job that qex refused.
+    // id of the job that fairq refused.
     let id = h.submit(&["submit", "--dedupe-key", "poolkey", "--", "true"]);
     h.ok(&["wait", &id, "--timeout", "45s"]);
     assert_eq!(
@@ -21963,7 +22191,7 @@ fn assert_the_key_kept_gives(h: &Harness, job: &str, what: &str) {
 fn a_pool_refusal_keeps_the_key_of_an_earlier_completed_job() {
     let (h, done) = a_completed_job_under_the_key_kept("poolkeeps");
     // No window, so the submission misses the completed job and reaches the pool test.
-    let out = h.qex(&["submit", "--dedupe-key", "kept", "--gpu", "8", "--", "true"]);
+    let out = h.fairq(&["submit", "--dedupe-key", "kept", "--gpu", "8", "--", "true"]);
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(
         !out.status.success() && said.contains("of the pool `gpu`"),
@@ -21976,7 +22204,7 @@ fn a_pool_refusal_keeps_the_key_of_an_earlier_completed_job() {
 #[test]
 fn a_size_refusal_keeps_the_key_of_an_earlier_completed_job() {
     let (h, done) = a_completed_job_under_the_key_kept("sizekeeps");
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--dedupe-key",
         "kept",
@@ -22004,7 +22232,7 @@ fn a_failed_record_write_keeps_the_key_of_an_earlier_completed_job() {
         return;
     }
     let (h, done) = a_completed_job_under_the_key_kept("writekeeps");
-    let jobs = h.root.join("state/qex/jobs");
+    let jobs = h.root.join("state/fairq/jobs");
     // The spec of the completed job carries the key with no window, so the key misses.
     let request = submit_request(&h, &done, &uuid::Uuid::new_v4().to_string());
     std::fs::set_permissions(&jobs, std::fs::Permissions::from_mode(0o500)).unwrap();
@@ -22020,13 +22248,13 @@ fn a_failed_record_write_keeps_the_key_of_an_earlier_completed_job() {
     assert_the_key_kept_gives(&h, &next, "the next job");
 }
 
-/// A job that claims a GPU must not also set the variable that qex writes.
-/// The two values would disagree, and the job would then use a card that qex
+/// A job that claims a GPU must not also set the variable that fairq writes.
+/// The two values would disagree, and the job would then use a card that fairq
 /// gave to a different job.
 #[test]
 fn a_job_that_sets_the_device_variable_itself_is_refused() {
     let h = Harness::new("cudaconflict", &pool_config("\"24GB\"", ""));
-    let out = h.qex(&[
+    let out = h.fairq(&[
         "submit",
         "--gpu",
         "1",
@@ -22035,7 +22263,7 @@ fn a_job_that_sets_the_device_variable_itself_is_refused() {
         "--",
         "true",
     ]);
-    assert!(!out.status.success(), "qex must refuse this job");
+    assert!(!out.status.success(), "fairq must refuse this job");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("would disagree"), "got: {err}");
 }
@@ -22052,7 +22280,7 @@ fn a_job_that_sets_the_device_variable_itself_is_refused() {
 /// test gives `publish` a device list that the test itself wrote. Neither one
 /// reaches `device_indices`, so its body could be replaced with an empty map
 /// and nothing failed. The two users then each start a job on the device 0, and
-/// both meet a memory error on a card that qex said was free.
+/// both meet a memory error on a card that fairq said was free.
 ///
 /// The pool has ONE device, so the answer is not ambiguous: the second user has
 /// no other card to take.
@@ -22111,7 +22339,7 @@ fn two_users_do_not_both_get_the_one_device() {
     let reason = blocked_reason(&mine, &want);
     assert!(
         reason.contains("`gpu`") && reason.contains("no known end"),
-        "the reason must name the pool and say that qex cannot schedule the end: {reason}"
+        "the reason must name the pool and say that fairq cannot schedule the end: {reason}"
     );
     assert!(
         !reason.contains("front of the queue"),
@@ -22128,12 +22356,12 @@ fn two_users_do_not_both_get_the_one_device() {
         || mine.state_of(&behind) == "completed",
     );
 
-    // `qex info` must say the same thing, and it must mark the device.
+    // `fairq info` must say the same thing, and it must mark the device.
     let info: serde_json::Value = serde_json::from_str(&mine.ok(&["info", "--json"])).unwrap();
     assert_eq!(info["queue_state"], "waits-for-peer", "info: {info}");
     assert_eq!(
         info["pools"][0]["devices"][0]["peer"], true,
-        "qex info must mark the device that another user holds: {info}"
+        "fairq info must mark the device that another user holds: {info}"
     );
 
     // The other user gives the device back, and this job then gets it.
@@ -22150,7 +22378,7 @@ fn two_users_do_not_both_get_the_one_device() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// `qex info` must report the pools, and a coordinator that cannot answer must
+/// `fairq info` must report the pools, and a coordinator that cannot answer must
 /// give `null` and never `0`. A defaulted number would read as "no other user
 /// holds anything", which can be a lie.
 #[test]
@@ -22306,7 +22534,7 @@ fn a_held_pid_file(path: &Path) -> std::fs::File {
     file
 }
 
-/// A socket that a live process holds, and never accepts, must not stop qex.
+/// A socket that a live process holds, and never accepts, must not stop fairq.
 ///
 /// THIS TEST HOLDS TWO PROPERTIES TOGETHER: the command finishes, and the
 /// directory of the process that holds that socket stays. It does not hold the
@@ -22329,7 +22557,7 @@ fn a_socket_that_never_answers_does_not_stop_a_command() {
     let tmp = h.root.join("t");
     std::fs::create_dir_all(&tmp).unwrap();
     let uid = unsafe { libc::getuid() };
-    let stuck = tmp.join(format!("qex-{uid}-stuck"));
+    let stuck = tmp.join(format!("fairq-{uid}-stuck"));
     std::fs::create_dir_all(&stuck).unwrap();
     let Some(_open) = a_socket_that_never_answers(&stuck.join("s")) else {
         // This system refuses a connection when the queue of a socket is full,
@@ -22345,7 +22573,7 @@ fn a_socket_that_never_answers_does_not_stop_a_command() {
     h.extra_env
         .push(("TMPDIR".into(), tmp.display().to_string()));
 
-    let out = h.qex(&["info", "--json"]);
+    let out = h.fairq(&["info", "--json"]);
 
     // WATCH THE DIRECTORY, AND DO NOT READ IT ONE TIME. The command gives an
     // answer in a few milliseconds, and the sweep runs on a thread of the
@@ -22387,7 +22615,7 @@ fn a_coordinator_holds_the_lock_on_its_pid_file() {
     let h = Harness::with_default_config("pidfile");
     let info: serde_json::Value = serde_json::from_str(&h.ok(&["info", "--json"])).unwrap();
     let pid = info["pid"].as_i64().expect("info must give the pid");
-    let path = h.root.join("state/qex/run/pid");
+    let path = h.root.join("state/fairq/run/pid");
 
     // The lock is the evidence that the coordinator operates.
     // Open for writing as well: an exclusive lock needs a descriptor that can
@@ -22430,8 +22658,9 @@ fn a_socket_with_no_answer_stops_a_new_coordinator() {
     let mut h = Harness::with_default_config("ownstuck");
     // A coordinator that starts here is a failure of this test. Give it a
     // short life, so the test reports that failure and does not wait.
-    h.extra_env.push(("QEX_IDLE_EXIT_SECS".into(), "1".into()));
-    let run = h.root.join("state/qex/run");
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let socket = run.join("s");
     let Some(_open) = a_socket_that_never_answers(&socket) else {
@@ -22446,7 +22675,7 @@ fn a_socket_with_no_answer_stops_a_new_coordinator() {
     };
     let before = std::fs::symlink_metadata(&socket).unwrap();
 
-    let out = h.qex(&["daemon"]);
+    let out = h.fairq(&["daemon"]);
     let after = std::fs::symlink_metadata(&socket);
 
     assert!(
@@ -22462,15 +22691,15 @@ fn a_socket_with_no_answer_stops_a_new_coordinator() {
     );
 }
 
-/// A symbolic link with no target must not stop qex for ever.
+/// A symbolic link with no target must not stop fairq for ever.
 ///
 /// Such a link occupies the socket path. A test that follows the link says that
 /// the path is free, and `bind` then fails with "Address already in use" at
-/// every start. qex tests the LINK, so it clears the link and starts.
+/// every start. fairq tests the LINK, so it clears the link and starts.
 #[test]
 fn a_symbolic_link_with_no_target_does_not_stop_a_coordinator() {
     let h = Harness::with_default_config("danglink");
-    let run = h.root.join("state/qex/run");
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     std::os::unix::fs::symlink(h.root.join("no-such-target"), run.join("s")).unwrap();
 
@@ -22491,13 +22720,13 @@ fn a_symbolic_link_with_no_target_does_not_stop_a_coordinator() {
     );
 }
 
-/// A file that qex cannot use must not stop qex for ever with no way out.
+/// A file that fairq cannot use must not stop fairq for ever with no way out.
 ///
-/// qex keeps the directory and stops, because it cannot prove that no
+/// fairq keeps the directory and stops, because it cannot prove that no
 /// coordinator operates. That state stays until a person acts, so the message
 /// must name the file and the one step that clears it.
 #[test]
-fn a_pid_file_that_qex_cannot_open_names_the_way_out() {
+fn a_pid_file_that_fairq_cannot_open_names_the_way_out() {
     use std::os::unix::fs::PermissionsExt;
 
     // The root user opens every file, so this test measures nothing there.
@@ -22506,14 +22735,15 @@ fn a_pid_file_that_qex_cannot_open_names_the_way_out() {
     }
 
     let mut h = Harness::with_default_config("badpid");
-    h.extra_env.push(("QEX_IDLE_EXIT_SECS".into(), "1".into()));
-    let run = h.root.join("state/qex/run");
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let pid = run.join("pid");
     std::fs::write(&pid, b"").unwrap();
     std::fs::set_permissions(&pid, std::fs::Permissions::from_mode(0o000)).unwrap();
 
-    let out = h.qex(&["daemon"]);
+    let out = h.fairq(&["daemon"]);
     let made_a_socket = run.join("s").exists();
 
     std::fs::set_permissions(&pid, std::fs::Permissions::from_mode(0o600)).unwrap();
@@ -22525,7 +22755,7 @@ fn a_pid_file_that_qex_cannot_open_names_the_way_out() {
     );
     assert!(
         !made_a_socket,
-        "qex cannot test the file, so it must not start a second coordinator"
+        "fairq cannot test the file, so it must not start a second coordinator"
     );
     let log = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -22540,7 +22770,7 @@ fn a_pid_file_that_qex_cannot_open_names_the_way_out() {
 
 /// A socket that ANSWERS must stop a new coordinator, with no lock to help.
 ///
-/// A coordinator that started before qex made a pid file leaves this state: its
+/// A coordinator that started before fairq made a pid file leaves this state: its
 /// socket answers, and no process holds a lock. The answer of the socket is
 /// then the one guard, and it must stop a second coordinator.
 ///
@@ -22558,10 +22788,10 @@ fn a_socket_that_answers_stops_a_new_coordinator() {
     // Delete the pid file. The coordinator keeps its lock on a file with no
     // name, so a new coordinator takes the lock of a NEW file and the lock
     // cannot stop it. Only the answer of the socket can.
-    let run = h.root.join("state/qex/run");
+    let run = h.root.join("state/fairq/run");
     std::fs::remove_file(run.join("pid")).unwrap();
 
-    let out = h.qex(&["daemon"]);
+    let out = h.fairq(&["daemon"]);
 
     assert!(
         out.status.success(),
@@ -22592,14 +22822,15 @@ fn a_socket_that_answers_stops_a_new_coordinator() {
 #[test]
 fn a_lock_with_no_socket_file_stops_a_new_coordinator() {
     let mut h = Harness::with_default_config("nosocket");
-    h.extra_env.push(("QEX_IDLE_EXIT_SECS".into(), "1".into()));
-    let run = h.root.join("state/qex/run");
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let socket = run.join("s");
     // NO socket file. The lock is the only evidence.
     let held = a_held_pid_file(&run.join("pid"));
 
-    let out = h.qex(&["daemon"]);
+    let out = h.fairq(&["daemon"]);
     let made_a_socket = socket.exists();
 
     drop(held);
@@ -22631,15 +22862,16 @@ fn a_locked_pid_file_stops_a_new_coordinator() {
     let mut h = Harness::with_default_config("ownpid");
     // A coordinator that starts here is a failure of this test. Give it a
     // short life, so the test reports that failure and does not wait.
-    h.extra_env.push(("QEX_IDLE_EXIT_SECS".into(), "1".into()));
-    let run = h.root.join("state/qex/run");
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let socket = run.join("s");
     // A socket file that no process holds. Alone, it lets a coordinator start.
     std::fs::write(&socket, b"").unwrap();
     let held = a_held_pid_file(&run.join("pid"));
 
-    let out = h.qex(&["daemon"]);
+    let out = h.fairq(&["daemon"]);
     let kind = std::fs::symlink_metadata(&socket).map(|m| m.file_type());
 
     drop(held);
@@ -22659,7 +22891,7 @@ fn a_locked_pid_file_stops_a_new_coordinator() {
 /// `describe_stream` must separate a command that wrote NOTHING from a command
 /// that stopped in the middle of its output.
 ///
-/// The failure message of `qex_within` is the only evidence of a fault on a
+/// The failure message of `fairq_within` is the only evidence of a fault on a
 /// build machine, because nobody runs the command again there. A message that
 /// loses the difference between "no output" and "some output" sends the reader
 /// to look for a fault of the wrong shape.
@@ -22699,16 +22931,16 @@ fn a_message_names_what_a_command_wrote() {
 
 /// A signal that this command cannot catch must not leave a job in the queue.
 ///
-/// The job of `qex run` has one reader, and it is that command. A job that
+/// The job of `fairq run` has one reader, and it is that command. A job that
 /// keeps a place in the queue for a reader that went away holds every job
 /// behind it, and it later takes a claim for output that nobody reads.
 ///
 /// The test uses SIGKILL, because the client runs NO code for it. The signal
-/// handler of `qex run` cannot cover this case, and neither can any other code
+/// handler of `fairq run` cannot cover this case, and neither can any other code
 /// in the command. Only the coordinator can, and it reads the connection that
 /// the kernel closes.
 #[test]
-fn a_kill_of_qex_run_cancels_a_job_that_never_started() {
+fn a_kill_of_fairq_run_cancels_a_job_that_never_started() {
     let h = Harness::new("runkill", "[budget]\ncpu = \"1\"\n");
 
     // The BUDGET holds the queue, and not the memory of the machine.
@@ -22725,9 +22957,11 @@ fn a_kill_of_qex_run_cancels_a_job_that_never_started() {
     });
 
     let (mut child, id) = h.run_bg(&["--cpu", "1", "--mem", "64MB", "--", "sleep", "5"]);
-    h.until("the job of qex run waits", Duration::from_secs(30), || {
-        h.state_of(&id) == "queued"
-    });
+    h.until(
+        "the job of fairq run waits",
+        Duration::from_secs(30),
+        || h.state_of(&id) == "queued",
+    );
 
     // SIGKILL. The command runs no code after this point.
     unsafe { libc::kill(child.id() as i32, libc::SIGKILL) };
@@ -22744,7 +22978,7 @@ fn a_kill_of_qex_run_cancels_a_job_that_never_started() {
     let error = status["error"].as_str().unwrap_or("");
     assert!(
         error.contains("the command that started this job stopped"),
-        "the record must say why qex cancelled the job: {status}"
+        "the record must say why fairq cancelled the job: {status}"
     );
 
     h.ok(&["kill", &blocker]);
@@ -22757,10 +22991,10 @@ fn a_kill_of_qex_run_cancels_a_job_that_never_started() {
 /// would destroy work that a reader can still use.
 ///
 /// This test holds the boundary of the rule above it. Both tests must pass
-/// together: one says that qex cancels a job that never started, and this one
-/// says that qex stops there.
+/// together: one says that fairq cancels a job that never started, and this one
+/// says that fairq stops there.
 #[test]
-fn a_kill_of_qex_run_leaves_a_job_that_operates() {
+fn a_kill_of_fairq_run_leaves_a_job_that_operates() {
     let h = Harness::new("runkillrun", "");
 
     // A small memory claim, so this job starts on a machine of any size.
@@ -22785,8 +23019,8 @@ fn a_kill_of_qex_run_leaves_a_job_that_operates() {
 
 /// A command that does not own its job must leave that job in the queue.
 ///
-/// `qex submit --wait` puts the job in the queue to live on its own. A reader
-/// that stops the wait has not asked qex to throw the work away, so the job
+/// `fairq submit --wait` puts the job in the queue to live on its own. A reader
+/// that stops the wait has not asked fairq to throw the work away, so the job
 /// waits for a reader that attaches again.
 ///
 /// This test holds the boundary from the other side. Nothing else fails when
@@ -22842,7 +23076,7 @@ fn a_kill_of_submit_with_a_wait_leaves_the_job_in_the_queue() {
     assert_eq!(
         h.state_of(&id),
         "queued",
-        "a job of `qex submit --wait` must wait for a reader that attaches again"
+        "a job of `fairq submit --wait` must wait for a reader that attaches again"
     );
 
     h.ok(&["cancel", &id]);
@@ -22862,7 +23096,7 @@ fn the_ownership_of_a_job_survives_a_new_coordinator() {
 
 /// A question that meets the coordinator as it dies is not a fault of the test.
 ///
-/// The test above kills the coordinator and then asks `qex status` until a new
+/// The test above kills the coordinator and then asks `fairq status` until a new
 /// one answers. A question that the dying coordinator accepted gets no answer,
 /// and the command fails ("reading the answer of the coordinator"): 2 runs in 10
 /// locally, and once in CI. This test holds the coordinator with SIGSTOP, lets a
@@ -22885,9 +23119,11 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
     });
 
     let (mut child, id) = h.run_bg(&["--cpu", "1", "--mem", "64MB", "--", "sleep", "5"]);
-    h.until("the job of qex run waits", Duration::from_secs(30), || {
-        h.state_of(&id) == "queued"
-    });
+    h.until(
+        "the job of fairq run waits",
+        Duration::from_secs(30),
+        || h.state_of(&id) == "queued",
+    );
 
     // Stop the coordinator. The supervisor of the blocker continues, and a
     // later command starts a new coordinator that reads the same records.
@@ -22915,7 +23151,7 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
     let met_the_death = std::sync::atomic::AtomicUsize::new(0);
     let ask = |args: &[&str]| -> Option<serde_json::Value> {
         let old_not_collected = unsafe { libc::kill(pid, 0) } == 0;
-        let out = h.qex(args);
+        let out = h.fairq(args);
         if out.status.success() {
             return Some(serde_json::from_slice(&out.stdout).unwrap());
         }
@@ -22929,7 +23165,7 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
         .any(|m| err.contains(m));
         assert!(
             old_not_collected && lost,
-            "`qex {}` failed with {:?}, and not because the killed coordinator died \
+            "`fairq {}` failed with {:?}, and not because the killed coordinator died \
              (it was {} when the question began): {err}",
             args.join(" "),
             out.status.code(),
@@ -22943,7 +23179,7 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
         use std::io::Write as _;
         writeln!(
             std::io::stderr(),
-            "{name}: `qex {}` met the coordinator as it died ({}); asking again",
+            "{name}: `fairq {}` met the coordinator as it died ({}); asking again",
             args.join(" "),
             err.trim()
         )
@@ -22979,7 +23215,7 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
         unsafe { libc::kill(pid, libc::SIGKILL) };
     }
 
-    // `qex run` meets the loss, finds the new coordinator, and asks it again.
+    // `fairq run` meets the loss, finds the new coordinator, and asks it again.
     //
     // Measure how long the new coordinator takes to answer. A reconnect that
     // ends before it binds loses the ownership in silence, so the number
@@ -22989,7 +23225,7 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
 
     let new_coordinator_took = killed_at.elapsed();
 
-    // `qex run` must MEET the loss and ask the new coordinator before this test
+    // `fairq run` must MEET the loss and ask the new coordinator before this test
     // takes the command away. The command reads the state every 80ms, so this
     // wait is far longer than it needs.
     std::thread::sleep(Duration::from_secs(3));
@@ -23007,7 +23243,7 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
 
     // SAY WHY, ON FAILURE ONLY.
     //
-    // The question is one thing: did `qex run` ask the NEW coordinator for the
+    // The question is one thing: did `fairq run` ask the NEW coordinator for the
     // ownership of its job, and what did that coordinator answer? Its stderr
     // holds the client half, and the log of the coordinator holds the other.
     // A test that fails in silence costs a whole run of CI and teaches nothing.
@@ -23021,7 +23257,7 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
         std::thread::sleep(Duration::from_millis(200));
     }
     if !cancelled {
-        let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log"))
+        let log = std::fs::read_to_string(h.root.join("state/fairq/run/daemon.log"))
             .unwrap_or_else(|e| format!("(no log: {e})"));
         // REPORT WHAT THE CLIENT DID, AND MATCH NOTHING BY ACCIDENT.
         //
@@ -23047,9 +23283,9 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
              \n--- did the client MEET the loss and reconnect? ---\n{}\n\
              \n--- did the new coordinator refuse the ownership? ---\n{}\n\
              \n--- the lines about the ownership ---\n{}\n\
-             \n--- stderr of the `qex run` that had to ask again ---\n{}\n\
+             \n--- stderr of the `fairq run` that had to ask again ---\n{}\n\
              \n--- the log of the coordinator ---\n{}\n\
-             \n--- qex list ---\n{}",
+             \n--- fairq list ---\n{}",
             h.state_of(&id),
             new_coordinator_took,
             noticed,
@@ -23079,8 +23315,8 @@ fn ownership_survives_a_new_coordinator(name: &str, in_flight: bool) {
 const COORDINATOR_LIMIT_SECS: u64 = 3;
 
 /// Names the variable that gives the ceiling for a coordinator a short value.
-fn qex_ceiling_variable() -> String {
-    "QEX_COORDINATOR_CEILING_SECS".to_string()
+fn fairq_ceiling_variable() -> String {
+    "FAIRQ_COORDINATOR_CEILING_SECS".to_string()
 }
 
 /// A command must end when a socket gives no answer.
@@ -23094,8 +23330,9 @@ fn a_socket_that_gives_no_answer_does_not_stop_a_command() {
     // The ceiling for a coordinator is long on purpose: a loaded machine
     // answers late, and a short ceiling gives a FALSE failure. A test
     // cannot wait that long, so it gives the product a short ceiling.
-    h.extra_env.push((qex_ceiling_variable(), "3".to_string()));
-    let run = h.root.join("state/qex/run");
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let Some(_open) = a_socket_that_never_answers(&run.join("s")) else {
         eprintln!(
@@ -23105,7 +23342,7 @@ fn a_socket_that_gives_no_answer_does_not_stop_a_command() {
         return;
     };
 
-    let out = h.qex_within(&["list"], Duration::from_secs(COORDINATOR_LIMIT_SECS + 20));
+    let out = h.fairq_within(&["list"], Duration::from_secs(COORDINATOR_LIMIT_SECS + 20));
 
     assert_eq!(
         out.status.code(),
@@ -23116,10 +23353,10 @@ fn a_socket_that_gives_no_answer_does_not_stop_a_command() {
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(
         said.contains("gave no answer"),
-        "the message must name what qex tried: {said}"
+        "the message must name what fairq tried: {said}"
     );
     assert!(
-        said.contains("qex info --no-start"),
+        said.contains("fairq info --no-start"),
         "the message must name the step for the reader: {said}"
     );
 }
@@ -23136,8 +23373,9 @@ fn a_spawn_lock_that_nobody_gives_back_does_not_stop_a_command() {
     // The ceiling for a coordinator is long on purpose: a loaded machine
     // answers late, and a short ceiling gives a FALSE failure. A test
     // cannot wait that long, so it gives the product a short ceiling.
-    h.extra_env.push((qex_ceiling_variable(), "3".to_string()));
-    let run = h.root.join("state/qex/run");
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let path = run.join("spawn.lock");
     let held = std::fs::OpenOptions::new()
@@ -23149,7 +23387,7 @@ fn a_spawn_lock_that_nobody_gives_back_does_not_stop_a_command() {
     let rc = unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     assert_eq!(rc, 0, "the test cannot hold the spawn lock");
 
-    let out = h.qex_within(&["list"], Duration::from_secs(COORDINATOR_LIMIT_SECS + 20));
+    let out = h.fairq_within(&["list"], Duration::from_secs(COORDINATOR_LIMIT_SECS + 20));
 
     assert_eq!(
         out.status.code(),
@@ -23167,7 +23405,7 @@ fn a_spawn_lock_that_nobody_gives_back_does_not_stop_a_command() {
 /// A limit must NOT start a second coordinator.
 ///
 /// Two coordinators on one state directory each hold the whole budget, and the
-/// machine then gets the kill for memory that qex exists to prevent. A socket
+/// machine then gets the kill for memory that fairq exists to prevent. A socket
 /// that gives no answer proves nothing about the process that holds it, so it
 /// can never authorise a second coordinator.
 #[test]
@@ -23176,8 +23414,9 @@ fn a_socket_that_gives_no_answer_starts_no_second_coordinator() {
     // The ceiling for a coordinator is long on purpose: a loaded machine
     // answers late, and a short ceiling gives a FALSE failure. A test
     // cannot wait that long, so it gives the product a short ceiling.
-    h.extra_env.push((qex_ceiling_variable(), "3".to_string()));
-    let run = h.root.join("state/qex/run");
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let socket = run.join("s");
     let Some(_open) = a_socket_that_never_answers(&socket) else {
@@ -23188,7 +23427,7 @@ fn a_socket_that_gives_no_answer_starts_no_second_coordinator() {
         return;
     };
 
-    let out = h.qex_within(
+    let out = h.fairq_within(
         &["submit", "--", "true"],
         Duration::from_secs(COORDINATOR_LIMIT_SECS + 20),
     );
@@ -23202,15 +23441,15 @@ fn a_socket_that_gives_no_answer_starts_no_second_coordinator() {
         "the socket of the process that holds it must stay"
     );
     assert!(
-        !h.root.join("state/qex/run/daemon.log").exists()
-            || std::fs::read_to_string(h.root.join("state/qex/run/daemon.log"))
+        !h.root.join("state/fairq/run/daemon.log").exists()
+            || std::fs::read_to_string(h.root.join("state/fairq/run/daemon.log"))
                 .unwrap_or_default()
                 .is_empty(),
         "no coordinator of this command may have started"
     );
 }
 
-/// `qex wait` must not take the spawn lock to print a notice.
+/// `fairq wait` must not take the spawn lock to print a notice.
 ///
 /// The notice about a pause is a courtesy, and the command already drops its
 /// result. A full connect takes the spawn lock and can start a coordinator, so
@@ -23221,7 +23460,7 @@ fn a_wait_does_not_take_the_spawn_lock_for_a_notice() {
     use std::os::unix::io::AsRawFd;
 
     let h = Harness::with_default_config("waitnolock");
-    let run = h.root.join("state/qex/run");
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let held = std::fs::OpenOptions::new()
         .create(true)
@@ -23235,7 +23474,7 @@ fn a_wait_does_not_take_the_spawn_lock_for_a_notice() {
     // No coordinator operates, and the id names nothing. The answer is "there
     // is no job with that id", and the lock must not delay it.
     let start = Instant::now();
-    let out = h.qex_within(
+    let out = h.fairq_within(
         &["wait", "11111111-2222-3333-4444-555555555555"],
         Duration::from_secs(COORDINATOR_LIMIT_SECS + 20),
     );
@@ -23253,22 +23492,23 @@ fn a_wait_does_not_take_the_spawn_lock_for_a_notice() {
     );
 }
 
-/// `qex top --once` is a QUERY, and a query that qex could not answer gives 124.
+/// `fairq top --once` is a QUERY, and a query that fairq could not answer gives 124.
 ///
 /// The page that a person watches keeps drawing and gives 0, because a display
 /// that drew did its work. An agent scripts `--once`, and 0 from a query says
-/// that qex answered the question. A page that qex could not fill must not
+/// that fairq answered the question. A page that fairq could not fill must not
 /// carry that code: the agent reads an empty page as the state of the machine.
 ///
 /// Both forms write the SAME page. Only the code differs.
 #[test]
-fn a_page_that_qex_could_not_fill_gives_124_for_a_query() {
+fn a_page_that_fairq_could_not_fill_gives_124_for_a_query() {
     let mut h = Harness::with_default_config("topquery");
     // The ceiling for a coordinator is long on purpose: a loaded machine
     // answers late, and a short ceiling gives a FALSE failure. A test
     // cannot wait that long, so it gives the product a short ceiling.
-    h.extra_env.push((qex_ceiling_variable(), "3".to_string()));
-    let run = h.root.join("state/qex/run");
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let Some(_open) = a_socket_that_never_answers(&run.join("s")) else {
         eprintln!(
@@ -23278,7 +23518,7 @@ fn a_page_that_qex_could_not_fill_gives_124_for_a_query() {
         return;
     };
 
-    let out = h.qex_within(
+    let out = h.fairq_within(
         &["top", "--once"],
         Duration::from_secs(COORDINATOR_LIMIT_SECS + 20),
     );
@@ -23286,7 +23526,7 @@ fn a_page_that_qex_could_not_fill_gives_124_for_a_query() {
     assert_eq!(
         out.status.code(),
         Some(124),
-        "a query that qex could not answer gives 124: {}",
+        "a query that fairq could not answer gives 124: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     // The page is still there. The two forms write one page, and a reader who
@@ -23306,13 +23546,13 @@ fn a_page_that_qex_could_not_fill_gives_124_for_a_query() {
 /// NO COORDINATOR IS AN ANSWER, and it gives 0.
 ///
 /// The records on the disk describe a machine with no coordinator, so the page
-/// is true and the query succeeded. Only a coordinator that qex could not reach
+/// is true and the query succeeded. Only a coordinator that fairq could not reach
 /// gives 124.
 #[test]
 fn a_page_with_no_coordinator_gives_zero_for_a_query() {
     let h = Harness::with_default_config("topnocoord");
 
-    let out = h.qex_within(&["top", "--once"], Duration::from_secs(30));
+    let out = h.fairq_within(&["top", "--once"], Duration::from_secs(30));
 
     assert_eq!(
         out.status.code(),
@@ -23323,7 +23563,7 @@ fn a_page_with_no_coordinator_gives_zero_for_a_query() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("budget"));
 }
 
-/// `qex top` measures a job process whose command name is not UTF-8 (#131).
+/// `fairq top` measures a job process whose command name is not UTF-8 (#131).
 #[test]
 #[cfg(target_os = "linux")]
 fn top_measures_a_job_process_whose_name_is_not_utf8() {
@@ -23374,7 +23614,7 @@ impl Drop for ProcessGroup {
     }
 }
 
-/// `qex watchers` gives the age of a monitor whose command name is not UTF-8 (#131).
+/// `fairq watchers` gives the age of a monitor whose command name is not UTF-8 (#131).
 #[test]
 #[cfg(target_os = "linux")]
 fn watchers_gives_the_age_of_a_monitor_whose_name_is_not_utf8() {
@@ -23395,7 +23635,7 @@ fn watchers_gives_the_age_of_a_monitor_whose_name_is_not_utf8() {
         || name_has_ff(pid),
     );
     std::thread::sleep(Duration::from_millis(2500));
-    let out = h.qex(&["watchers", "--json"]);
+    let out = h.fairq(&["watchers", "--json"]);
     drop(monitor);
     let found: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)
         .unwrap_or_else(|e| panic!("no JSON: {e}: {}", String::from_utf8_lossy(&out.stdout)));
@@ -23409,7 +23649,7 @@ fn watchers_gives_the_age_of_a_monitor_whose_name_is_not_utf8() {
     );
 }
 
-/// `qex watchers` never reports a process that started it, above a parent whose command name
+/// `fairq watchers` never reports a process that started it, above a parent whose command name
 /// is not UTF-8 (#131).
 #[test]
 #[cfg(target_os = "linux")]
@@ -23418,14 +23658,14 @@ fn watchers_never_reports_a_process_above_a_parent_whose_name_is_not_utf8() {
     let h = Harness::with_default_config("watchanc");
     let sh = non_utf8_link(&h.root, b"s\xffh", "sh");
     let (out_file, comm_file) = (h.root.join("watchers.json"), h.root.join("comm"));
-    // The outer loop looks like a monitor; the shell named with 0xff runs `qex watchers` and,
+    // The outer loop looks like a monitor; the shell named with 0xff runs `fairq watchers` and,
     // with the `true` after it, stays its parent.
     let inner = r#"cat /proc/$$/comm > "$2"; "$0" watchers --json > "$1"; true"#;
     let outer_script = r#"for i in 1; do "$0" -c "$4" "$1" "$2" "$3"; sleep 30; done"#;
     let mut cmd = Command::new("sh");
     cmd.args(["-c", outer_script])
         .arg(&sh)
-        .arg(env!("CARGO_BIN_EXE_qex"))
+        .arg(env!("CARGO_BIN_EXE_fairq"))
         .arg(&out_file)
         .arg(&comm_file)
         .arg(inner)
@@ -23435,7 +23675,7 @@ fn watchers_never_reports_a_process_above_a_parent_whose_name_is_not_utf8() {
     let outer_pid = outer.0.id() as i32;
     let mut inside: Vec<serde_json::Value> = Vec::new();
     Harness::poll_until(
-        "qex watchers ran below the shell",
+        "fairq watchers ran below the shell",
         Duration::from_secs(30),
         || match serde_json::from_slice(&std::fs::read(&out_file).unwrap_or_default()) {
             Ok(v) => {
@@ -23445,12 +23685,12 @@ fn watchers_never_reports_a_process_above_a_parent_whose_name_is_not_utf8() {
             Err(_) => false,
         },
     );
-    let control = h.qex(&["watchers", "--json"]);
+    let control = h.fairq(&["watchers", "--json"]);
     drop(outer);
     let comm = std::fs::read(&comm_file).unwrap();
     assert!(
         comm.contains(&0xff),
-        "the parent of qex carries the 0xff name: {comm:?}"
+        "the parent of fairq carries the 0xff name: {comm:?}"
     );
     let control: Vec<serde_json::Value> = serde_json::from_slice(&control.stdout).unwrap();
     let reports = |v: &[serde_json::Value]| {
@@ -23463,14 +23703,14 @@ fn watchers_never_reports_a_process_above_a_parent_whose_name_is_not_utf8() {
     );
     assert!(
         !reports(&inside),
-        "qex watchers reported a process that started it: {inside:?}"
+        "fairq watchers reported a process that started it: {inside:?}"
     );
 }
 
 /// Answers the connect and NEVER answers a request.
 ///
 /// The helper that fills a backlog exercises the CONNECT. This one exercises
-/// the READ: qex reaches the coordinator, sends its request, and the answer
+/// the READ: fairq reaches the coordinator, sends its request, and the answer
 /// never arrives. The two faults are different, and a test of one says nothing
 /// about the other.
 ///
@@ -23527,12 +23767,12 @@ fn a_socket_that_accepts_and_says_nothing(path: &Path) -> ASocketThatAcceptsAndS
 #[test]
 fn a_coordinator_that_answers_nothing_does_not_stop_a_command() {
     let h = Harness::with_default_config("readstall");
-    let run = h.root.join("state/qex/run");
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let _silent = a_socket_that_accepts_and_says_nothing(&run.join("s"));
 
     let start = Instant::now();
-    let out = h.qex_within(&["wait", "--timeout", "3s", "abc"], Duration::from_secs(60));
+    let out = h.fairq_within(&["wait", "--timeout", "3s", "abc"], Duration::from_secs(60));
     let took = start.elapsed();
 
     assert!(
@@ -23556,8 +23796,9 @@ fn a_coordinator_that_answers_nothing_does_not_stop_a_command() {
 #[test]
 fn a_coordinator_that_answers_nothing_is_not_no_such_job() {
     let mut h = Harness::with_default_config("notnosuchjob");
-    h.extra_env.push((qex_ceiling_variable(), "3".to_string()));
-    let run = h.root.join("state/qex/run");
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let _silent = a_socket_that_accepts_and_says_nothing(&run.join("s"));
 
@@ -23567,11 +23808,11 @@ fn a_coordinator_that_answers_nothing_is_not_no_such_job() {
         vec!["cancel", "abc"],
         vec!["kill", "abc"],
     ] {
-        let out = h.qex_within(&form, Duration::from_secs(60));
+        let out = h.fairq_within(&form, Duration::from_secs(60));
         assert_ne!(
             out.status.code(),
             Some(127),
-            "`qex {}` said that a job does not exist, and the coordinator gave no answer: {}",
+            "`fairq {}` said that a job does not exist, and the coordinator gave no answer: {}",
             form.join(" "),
             String::from_utf8_lossy(&out.stderr)
         );
@@ -23626,7 +23867,7 @@ impl Drop for ASlowCoordinator {
 
 /// Puts a slow coordinator in front of a real one.
 ///
-/// `front` is the socket that qex reaches. `real` is the socket of the
+/// `front` is the socket that fairq reaches. `real` is the socket of the
 /// coordinator that answers.
 fn a_coordinator_that_answers_late(front: &Path, real: &Path, delay: Duration) -> ASlowCoordinator {
     use std::io::{BufRead, BufReader, Write};
@@ -23655,7 +23896,7 @@ fn a_coordinator_that_answers_late(front: &Path, real: &Path, delay: Duration) -
                     // moment the client is slow to send its next request. A
                     // proxy that reads that answer as an end of file serves one
                     // request and closes, and the client then meets a broken
-                    // pipe that qex did not cause.
+                    // pipe that fairq did not cause.
                     front_side.set_nonblocking(false).unwrap();
                     let real = real.clone();
                     let first = held_one.clone();
@@ -23667,19 +23908,19 @@ fn a_coordinator_that_answers_late(front: &Path, real: &Path, delay: Duration) -
                         let Ok(back) = std::os::unix::net::UnixStream::connect(&real) else {
                             return;
                         };
-                        let mut from_qex = BufReader::new(front_side.try_clone().unwrap());
+                        let mut from_fairq = BufReader::new(front_side.try_clone().unwrap());
                         let mut to_real = back.try_clone().unwrap();
                         let mut from_real = BufReader::new(back);
-                        let mut to_qex = front_side;
+                        let mut to_fairq = front_side;
                         let mut line = String::new();
                         let mut served = 0usize;
                         // One request, one answer, and the FIRST answer waits.
                         // AN ERROR IS NOT AN END OF FILE: a proxy that reads it
                         // as one closes the connection under the client, and the
-                        // failure then names qex for a fault of this helper.
+                        // failure then names fairq for a fault of this helper.
                         loop {
                             line.clear();
-                            match from_qex.read_line(&mut line) {
+                            match from_fairq.read_line(&mut line) {
                                 Ok(0) => {
                                     note.lock().unwrap_or_else(|e| e.into_inner()).push(format!(
                                         "{:?} the client closed after {} requests",
@@ -23738,7 +23979,7 @@ fn a_coordinator_that_answers_late(front: &Path, real: &Path, delay: Duration) -
                                 answer.len(),
                                 held
                             ));
-                            if to_qex.write_all(answer.as_bytes()).is_err() {
+                            if to_fairq.write_all(answer.as_bytes()).is_err() {
                                 note.lock().unwrap_or_else(|e| e.into_inner()).push(format!(
                                     "{:?} WRITING ANSWER {} FAILED",
                                     began.elapsed(),
@@ -23746,7 +23987,7 @@ fn a_coordinator_that_answers_late(front: &Path, real: &Path, delay: Duration) -
                                 ));
                                 return;
                             }
-                            to_qex.flush().ok();
+                            to_fairq.flush().ok();
                         }
                     }));
                 }
@@ -23781,21 +24022,21 @@ fn a_coordinator_that_answers_late_is_answered_and_not_refused() {
     // A step of the wait is one second, so the answer arrives after several
     // steps and the client must keep waiting through them.
     h.extra_env
-        .push(("QEX_SAY_WAITING_AFTER_SECS".into(), "1".into()));
+        .push(("FAIRQ_SAY_WAITING_AFTER_SECS".into(), "1".into()));
 
     // A real coordinator, and its socket.
-    let first = h.qex(&["submit", "--", "sh", "-c", "exit 7"]);
+    let first = h.fairq(&["submit", "--", "sh", "-c", "exit 7"]);
     assert!(first.status.success(), "the test needs a real coordinator");
     let id = String::from_utf8_lossy(&first.stdout).trim().to_string();
-    h.qex(&["wait", &id]);
+    h.fairq(&["wait", &id]);
 
-    let run = h.root.join("state/qex/run");
+    let run = h.root.join("state/fairq/run");
     let real = run.join("real");
     std::fs::rename(run.join("s"), &real).unwrap();
     let _slow = a_coordinator_that_answers_late(&run.join("s"), &real, Duration::from_secs(3));
 
     let started = Instant::now();
-    let out = h.qex_within(&["status", &id, "--json"], Duration::from_secs(60));
+    let out = h.fairq_within(&["status", &id, "--json"], Duration::from_secs(60));
     let took = started.elapsed();
 
     // THE PROXY MUST PROVE ITS OWN BEHAVIOUR.
@@ -23803,18 +24044,18 @@ fn a_coordinator_that_answers_late_is_answered_and_not_refused() {
     // This helper is an instrument, and an instrument that is wrong in a way
     // that looks like a product fault costs a whole run of CI. If the proxy
     // served fewer requests than the command sent, the failure must name the
-    // PROXY and not qex.
+    // PROXY and not fairq.
     let what_the_proxy_did = _slow.what_it_did();
     assert!(
         !what_the_proxy_did.contains("READING THE REQUEST FAILED")
             && !what_the_proxy_did.contains("FORWARDING REQUEST")
             && !what_the_proxy_did.contains("WRITING ANSWER")
             && !what_the_proxy_did.contains("GAVE NO ANSWER"),
-        "THE PROXY OF THIS TEST FAILED, and qex is not the cause:\n{what_the_proxy_did}"
+        "THE PROXY OF THIS TEST FAILED, and fairq is not the cause:\n{what_the_proxy_did}"
     );
 
     // SAY WHY, ON FAILURE ONLY. An exit status with no code means a SIGNAL
-    // ended the command, which is this test taking it away rather than qex
+    // ended the command, which is this test taking it away rather than fairq
     // refusing. The proxy log then says whether it wrote when it was told to.
     if out.status.code() != Some(0) {
         use std::os::unix::process::ExitStatusExt as _;
@@ -23836,7 +24077,7 @@ fn a_coordinator_that_answers_late_is_answered_and_not_refused() {
         .unwrap_or_else(|e| panic!("the answer must be whole and correct: {e}: {said}"));
     assert_eq!(
         record["exit_code"], 7,
-        "the answer must belong to the question that qex asked: {said}"
+        "the answer must belong to the question that fairq asked: {said}"
     );
 }
 
@@ -23871,15 +24112,15 @@ fn a_coordinator_that_cuts_its_answer(front: &Path, real: &Path) -> ASlowCoordin
                         let Ok(back) = std::os::unix::net::UnixStream::connect(&real) else {
                             return;
                         };
-                        let mut from_qex = BufReader::new(front_side.try_clone().unwrap());
+                        let mut from_fairq = BufReader::new(front_side.try_clone().unwrap());
                         let mut to_real = back.try_clone().unwrap();
                         let mut from_real = BufReader::new(back);
-                        let mut to_qex = front_side;
+                        let mut to_fairq = front_side;
                         // ONE request, and half of ONE answer. This helper never
                         // serves a second question: the connection it cut can
                         // carry no more answers, which is the state under test.
                         let mut line = String::new();
-                        if from_qex.read_line(&mut line).unwrap_or(0) > 0 {
+                        if from_fairq.read_line(&mut line).unwrap_or(0) > 0 {
                             if to_real.write_all(line.as_bytes()).is_err() {
                                 return;
                             }
@@ -23904,10 +24145,10 @@ fn a_coordinator_that_cuts_its_answer(front: &Path, real: &Path) -> ASlowCoordin
                                 at -= 1;
                             }
                             let half = &answer.as_bytes()[..at];
-                            if to_qex.write_all(half).is_err() {
+                            if to_fairq.write_all(half).is_err() {
                                 return;
                             }
-                            to_qex.flush().ok();
+                            to_fairq.flush().ok();
                             // Hold the connection open and write nothing more.
                             while !mine.load(std::sync::atomic::Ordering::SeqCst) {
                                 std::thread::sleep(Duration::from_millis(50));
@@ -23931,27 +24172,28 @@ fn a_coordinator_that_cuts_its_answer(front: &Path, real: &Path) -> ASlowCoordin
 
 /// READABLE IS NOT ANSWERED.
 ///
-/// A wait ends when qex holds the WHOLE answer, or when the budget is gone. It
+/// A wait ends when fairq holds the WHOLE answer, or when the budget is gone. It
 /// never ends because the first byte arrived. A coordinator stopped between two
 /// writes leaves a line with no end, and a read with no limit then waits for
 /// ever — with no message, and with no limit of the reader reaching it.
 #[test]
 fn an_answer_that_never_finishes_does_not_stop_a_command() {
     let mut h = Harness::with_default_config("cutanswer");
-    h.extra_env.push((qex_ceiling_variable(), "4".to_string()));
+    h.extra_env
+        .push((fairq_ceiling_variable(), "4".to_string()));
 
-    let first = h.qex(&["submit", "--", "true"]);
+    let first = h.fairq(&["submit", "--", "true"]);
     assert!(first.status.success(), "the test needs a real coordinator");
     let id = String::from_utf8_lossy(&first.stdout).trim().to_string();
-    h.qex(&["wait", &id]);
+    h.fairq(&["wait", &id]);
 
-    let run = h.root.join("state/qex/run");
+    let run = h.root.join("state/fairq/run");
     let real = run.join("real");
     std::fs::rename(run.join("s"), &real).unwrap();
     let _cut = a_coordinator_that_cuts_its_answer(&run.join("s"), &real);
 
     let start = Instant::now();
-    let out = h.qex_within(&["list", "--json"], Duration::from_secs(60));
+    let out = h.fairq_within(&["list", "--json"], Duration::from_secs(60));
     let took = start.elapsed();
 
     assert!(
@@ -24010,7 +24252,7 @@ fn harnesses_made_at_once_with_one_name_get_their_own_roots() {
 /// A test that hides the socket must still stop its coordinator.
 ///
 /// The tests that put a proxy in front of a real coordinator used to leave
-/// that coordinator after `cargo test` returned. Drop asked `qex info`, which
+/// that coordinator after `cargo test` returned. Drop asked `fairq info`, which
 /// talks to the proxy or to nobody. Drop now stops any process that still
 /// holds a file under the harness, including `daemon.log`.
 #[test]
@@ -24021,7 +24263,7 @@ fn the_harness_stops_a_coordinator_whose_socket_it_cannot_reach() {
         unsafe { libc::kill(pid, 0) } == 0,
         "the test needs a coordinator that operates"
     );
-    let run = h.root.join("state/qex/run");
+    let run = h.root.join("state/fairq/run");
     std::fs::rename(run.join("s"), run.join("real")).unwrap();
     drop(h);
     assert!(
@@ -24129,7 +24371,7 @@ fn a_drop_with_a_process_that_stayed_keeps_the_directory_and_says_so() {
         "the failure must name the process {pid} and the directory: {message}"
     );
     assert!(
-        root.join("cfg/qex.toml").exists(),
+        root.join("cfg/fairq.toml").exists(),
         "the drop deleted the directory while the process {pid} held it"
     );
     assert!(
@@ -24153,7 +24395,7 @@ fn a_drop_with_a_process_that_stayed_keeps_the_directory_and_says_so() {
     .join();
     assert!(joined.is_err(), "the thread must end with its own failure");
     assert!(
-        root.join("cfg/qex.toml").exists(),
+        root.join("cfg/fairq.toml").exists(),
         "the drop deleted the directory while the process {pid} held it"
     );
     clean(&root, pid);
@@ -24200,7 +24442,7 @@ fn a_drop_that_could_not_look_asks_the_socket_and_says_so() {
         "the message must give the remedy: {message}"
     );
     assert!(
-        root.join("cfg/qex.toml").exists(),
+        root.join("cfg/fairq.toml").exists(),
         "the drop deleted the directory and it never looked for the coordinator {pid}"
     );
     assert!(
@@ -24240,7 +24482,7 @@ fn a_drop_that_could_not_look_asks_the_socket_and_says_so() {
 /// so it sent the reader to find a process that did not exist.
 ///
 /// The state here has NO coordinator. A listener of the test itself accepts
-/// the connection and never answers, so `qex info --no-start` waits without
+/// the connection and never answers, so `fairq info --no-start` waits without
 /// end. The harness must stop that command at its limit, or Drop never
 /// returns. The two parts:
 ///
@@ -24261,7 +24503,7 @@ fn a_drop_that_could_not_look_says_only_what_it_saw() {
     // THE LISTENER IS IN THE RUN DIRECTORY.
     let mut h = Harness::with_default_config("dropsilent");
     let root = h.root.clone();
-    let run = root.join("state/qex/run");
+    let run = root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     let listener = std::os::unix::net::UnixListener::bind(run.join("s")).unwrap();
     h.look_fails = true;
@@ -24294,8 +24536,8 @@ fn a_drop_that_could_not_look_says_only_what_it_saw() {
     let mut h = Harness::with_default_config("dropunknown");
     let root = h.root.clone();
     let elsewhere = std::env::temp_dir().join(format!("qx{}-elsewhere", std::process::id()));
-    std::fs::create_dir_all(elsewhere.join("qex/run")).unwrap();
-    let listener = std::os::unix::net::UnixListener::bind(elsewhere.join("qex/run/s")).unwrap();
+    std::fs::create_dir_all(elsewhere.join("fairq/run")).unwrap();
+    let listener = std::os::unix::net::UnixListener::bind(elsewhere.join("fairq/run/s")).unwrap();
     h.extra_env.push((
         "XDG_STATE_HOME".to_string(),
         elsewhere.to_str().unwrap().to_string(),
@@ -24419,13 +24661,13 @@ fn the_harness_reads_a_process_whose_name_is_not_utf8() {
 /// A test that deletes the pid file must still stop its coordinator.
 ///
 /// `a_socket_that_answers_stops_a_new_coordinator` unlinks that file. A later
-/// `qex daemon` then writes a new file with its own number and exits. Drop
+/// `fairq daemon` then writes a new file with its own number and exits. Drop
 /// that trusted the file alone left the first coordinator.
 #[test]
 fn the_harness_stops_a_coordinator_whose_pid_file_is_gone() {
     let h = Harness::with_default_config("dropnopid");
     let pid = h.coordinator_pid();
-    std::fs::remove_file(h.root.join("state/qex/run/pid")).unwrap();
+    std::fs::remove_file(h.root.join("state/fairq/run/pid")).unwrap();
     drop(h);
     assert!(
         Harness::stopped(pid),
@@ -24435,18 +24677,18 @@ fn the_harness_stops_a_coordinator_whose_pid_file_is_gone() {
 
 /// A long state path must still stop its coordinator.
 ///
-/// When `state/qex/run/s` is longer than 100 bytes, the pid file lives in a
+/// When `state/fairq/run/s` is longer than 100 bytes, the pid file lives in a
 /// short directory under the temporary directory, not under the harness root.
-/// Drop that read only `state/qex/run/pid` left that coordinator.
+/// Drop that read only `state/fairq/run/pid` left that coordinator.
 #[test]
 fn the_harness_stops_a_coordinator_on_a_long_socket_path() {
-    // `/tmp/qx1-<name>-0/state/qex/run/s` is 27 bytes plus the name. The name
+    // `/tmp/qx1-<name>-0/state/fairq/run/s` is 27 bytes plus the name. The name
     // must pass 73 bytes so the path is longer than 100 when TMPDIR is `/tmp`
     // and the pid and the counter are one digit.
     let h = Harness::with_default_config(
         "dropcoord-long-name-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     );
-    let preferred = h.root.join("state/qex/run/s");
+    let preferred = h.root.join("state/fairq/run/s");
     assert!(
         preferred.as_os_str().len() > 100,
         "this test needs a socket path that does not fit: {}",
@@ -24454,7 +24696,7 @@ fn the_harness_stops_a_coordinator_on_a_long_socket_path() {
     );
     let pid = h.coordinator_pid();
     assert!(
-        !h.root.join("state/qex/run/pid").exists(),
+        !h.root.join("state/fairq/run/pid").exists(),
         "the pid file must be in the short directory, not under the harness"
     );
     drop(h);
@@ -24464,7 +24706,7 @@ fn the_harness_stops_a_coordinator_on_a_long_socket_path() {
     );
 }
 
-/// A coordinator that a test starts must not write into `/tmp/qex`.
+/// A coordinator that a test starts must not write into `/tmp/fairq`.
 ///
 /// The default config enables the peer system and names that directory. A
 /// test that forgets `[peers] enabled = false` used to publish there, next
@@ -24500,7 +24742,7 @@ fn the_suite_does_not_write_into_the_live_peer_directory() {
 fn a_config_that_names_the_live_peer_directory_gets_a_private_one() {
     let isolated = PathBuf::from("/tmp/qx-isolated-peers");
     assert_eq!(
-        peers_dir_for_test("[peers]\ndir = \"/tmp/qex\"\n", &isolated),
+        peers_dir_for_test("[peers]\ndir = \"/tmp/fairq\"\n", &isolated),
         isolated
     );
     assert_eq!(
@@ -24519,7 +24761,7 @@ fn a_config_that_names_the_live_peer_directory_gets_a_private_one() {
 
 /// A coordinator that closes the connection must not KILL the command.
 ///
-/// `main` restores the default action of SIGPIPE, so that `qex list | head`
+/// `main` restores the default action of SIGPIPE, so that `fairq list | head`
 /// ends in silence like every other tool. That is right for the pipe of the
 /// reader. It is WRONG for the socket of the coordinator: a coordinator that
 /// closes a connection in the middle of a conversation would then stop the
@@ -24538,8 +24780,9 @@ fn a_coordinator_that_closes_the_connection_does_not_kill_the_command() {
     use std::io::{BufRead, BufReader, Write};
 
     let mut h = Harness::with_default_config("closemid");
-    h.extra_env.push((qex_ceiling_variable(), "5".to_string()));
-    let run = h.root.join("state/qex/run");
+    h.extra_env
+        .push((fairq_ceiling_variable(), "5".to_string()));
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
 
     // Answer the FIRST request, then close. The command asks more than one
@@ -24556,7 +24799,7 @@ fn a_coordinator_that_closes_the_connection_does_not_kill_the_command() {
             let mut writer = client;
             let mut line = String::new();
             if reader.read_line(&mut line).unwrap_or(0) > 0 {
-                // One answer that qex cannot use, and then the door shuts.
+                // One answer that fairq cannot use, and then the door shuts.
                 let _ = writer.write_all(b"{\"kind\":\"error\",\"message\":\"go away\"}\n");
                 let _ = writer.flush();
             }
@@ -24565,7 +24808,7 @@ fn a_coordinator_that_closes_the_connection_does_not_kill_the_command() {
         }
     });
 
-    let out = h.qex_within(&["list"], Duration::from_secs(40));
+    let out = h.fairq_within(&["list"], Duration::from_secs(40));
 
     stop.store(true, std::sync::atomic::Ordering::SeqCst);
     std::os::unix::net::UnixStream::connect(run.join("s")).ok();
@@ -24589,16 +24832,17 @@ fn a_coordinator_that_closes_the_connection_does_not_kill_the_command() {
 
 /// A coordinator that did not answer must not read as NO coordinator.
 ///
-/// `qex version` reports whether a coordinator operates and which version it
-/// is. Reporting `none` for one that qex could not reach answers the question
+/// `fairq version` reports whether a coordinator operates and which version it
+/// is. Reporting `none` for one that fairq could not reach answers the question
 /// wrongly AND exits 0, so an agent reads a false success. The exit-code table
 /// promises 124 for this state in every command, and a promise that one command
 /// breaks is a promise that an agent cannot use.
 #[test]
 fn a_command_that_asks_about_a_coordinator_does_not_report_absence_for_silence() {
     let mut h = Harness::with_default_config("askscoord");
-    h.extra_env.push((qex_ceiling_variable(), "3".to_string()));
-    let run = h.root.join("state/qex/run");
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
+    let run = h.root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     // A SOCKET THAT DOES NOT ACCEPT, so the CONNECT reaches the limit.
     //
@@ -24614,11 +24858,11 @@ fn a_command_that_asks_about_a_coordinator_does_not_report_absence_for_silence()
     };
 
     for form in [vec!["version"], vec!["version", "--json"], vec!["pause"]] {
-        let out = h.qex_within(&form, Duration::from_secs(60));
+        let out = h.fairq_within(&form, Duration::from_secs(60));
         assert_eq!(
             out.status.code(),
             Some(124),
-            "`qex {}` must say that it stopped waiting, and not that no coordinator \
+            "`fairq {}` must say that it stopped waiting, and not that no coordinator \
              operates: {}",
             form.join(" "),
             String::from_utf8_lossy(&out.stderr)
@@ -24627,24 +24871,24 @@ fn a_command_that_asks_about_a_coordinator_does_not_report_absence_for_silence()
 }
 
 // ---------------------------------------------------------------------------
-// qex abort
+// fairq abort
 // ---------------------------------------------------------------------------
 
-/// The configuration for the tests of `qex abort`: one core, so one job
+/// The configuration for the tests of `fairq abort`: one core, so one job
 /// operates and every other job waits.
 const ABORT_CONFIG: &str = "[budget]\ncpu = \"1\"\nmem = \"1GB\"\n\
      [peers]\nenabled = false\n\
      [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n";
 
 impl Harness {
-    /// Runs `qex abort` with these options, and gives its JSON answer.
+    /// Runs `fairq abort` with these options, and gives its JSON answer.
     fn abort_json(&self, args: &[&str]) -> serde_json::Value {
         let mut full = vec!["abort", "--json", "--grace", "1s"];
         full.extend_from_slice(args);
-        let out = self.qex_within(&full, Duration::from_secs(60));
+        let out = self.fairq_within(&full, Duration::from_secs(60));
         assert!(
             out.status.success(),
-            "`qex {}` failed with the code {:?}\nstdout: {}\nstderr: {}",
+            "`fairq {}` failed with the code {:?}\nstdout: {}\nstderr: {}",
             full.join(" "),
             out.status.code(),
             String::from_utf8_lossy(&out.stdout),
@@ -24656,11 +24900,11 @@ impl Harness {
     /// Submits a job from a process tree that is NOT the tree of this test.
     ///
     /// The instrument: a copy of `sh` under the name `tmux`, which the
-    /// context rule of qex treats as the end of a session. The submission
-    /// runs as `tmux -c 'sh -c "qex submit ..."'`, so the chain of the job is
-    /// `qex <- sh <- tmux <- this test`. Its context is the one `sh`, which
+    /// context rule of fairq treats as the end of a session. The submission
+    /// runs as `tmux -c 'sh -c "fairq submit ..."'`, so the chain of the job is
+    /// `fairq <- sh <- tmux <- this test`. Its context is the one `sh`, which
     /// no other command shares. `direct` runs the submit as a child of the
-    /// copy itself, so the chain is `qex <- tmux <- this test` and the
+    /// copy itself, so the chain is `fairq <- tmux <- this test` and the
     /// context is EMPTY: a job with no context is outside every default
     /// scope.
     fn submit_from_another_context(
@@ -24695,7 +24939,9 @@ impl Harness {
             cmd.arg("-c")
                 .arg("sh -c '\"$0\" \"$@\"; exit $?' \"$0\" \"$@\"; exit $?");
         }
-        cmd.arg(env!("CARGO_BIN_EXE_qex")).arg("submit").args(args);
+        cmd.arg(env!("CARGO_BIN_EXE_fairq"))
+            .arg("submit")
+            .args(args);
         isolate(&mut cmd, &self.root, &self.peers_dir);
         if let Some(dir) = dir {
             cmd.current_dir(dir);
@@ -24712,15 +24958,15 @@ impl Harness {
     }
 }
 
-/// `qex abort` stops the jobs that operate, empties the queue, and leaves the
+/// `fairq abort` stops the jobs that operate, empties the queue, and leaves the
 /// queue paused so that nothing new starts until a resume.
 ///
 /// THE PROPERTIES OF THE COMMAND, in the order that the assertions test them:
 ///
 ///   * a job that was queued before the command is gone, and it never starts;
 ///   * the counts in the report are what the coordinator did;
-///   * the job that operated stops, through the kill mechanism of qex;
-///   * a job submitted after the command waits until `qex resume`.
+///   * the job that operated stops, through the kill mechanism of fairq;
+///   * a job submitted after the command waits until `fairq resume`.
 #[test]
 fn abort_stops_the_running_job_and_empties_the_queue() {
     let h = Harness::new("abort", ABORT_CONFIG);
@@ -24757,7 +25003,7 @@ fn abort_stops_the_running_job_and_empties_the_queue() {
     assert_eq!(report["queue_paused"], true, "the report: {report}");
 
     // The queued jobs are cancelled, and their records stay, as after
-    // `qex cancel`. `qex clean cancelled` then deletes them.
+    // `fairq cancel`. `fairq clean cancelled` then deletes them.
     for id in &queued {
         assert_eq!(
             h.state_of(id),
@@ -24783,7 +25029,7 @@ fn abort_stops_the_running_job_and_empties_the_queue() {
         "only the signalled job keeps a record"
     );
 
-    // The running job stops, and its state says that qex stopped it.
+    // The running job stops, and its state says that fairq stopped it.
     h.until("the running job stops", Duration::from_secs(30), || {
         h.state_of(&running) == "killed"
     });
@@ -24860,7 +25106,7 @@ fn abort_keep_running_leaves_the_job_that_operates() {
 
 /// The three levels of the scope, and the tag that narrows each one.
 ///
-/// THE PROPERTY: when `qex abort` returns with no scope option, no job of a
+/// THE PROPERTY: when `fairq abort` returns with no scope option, no job of a
 /// different context or of a different directory has changed state; with
 /// `--cwd`, no job of a different directory has; with `--all`, the queue is
 /// empty. Every submitter here is THE SAME UNIX USER, which is the population
@@ -24964,14 +25210,14 @@ fn abort_touches_only_the_jobs_of_the_caller() {
     );
 }
 
-/// Gives the chain of the caller, as `qex abort --json` reports its scope.
+/// Gives the chain of the caller, as `fairq abort --json` reports its scope.
 ///
 /// A dry form: the scope of a `--keep-running` abort on a tag that no job
 /// carries touches no job, and it carries the chain that the CLI sent.
 ///
 /// CALL IT ON A PAUSED QUEUE ONLY. Every abort pauses the queue first, so on
 /// a queue that operates this helper would pause it, with the reason
-/// `qex abort`, and the test would then measure a queue that it changed.
+/// `fairq abort`, and the test would then measure a queue that it changed.
 fn report_scope_chain(h: &Harness) -> String {
     let report = h.abort_json(&["--keep-running", "--tag", "no-such-tag-for-the-chain"]);
     report["scope"]["submitter"].to_string()
@@ -25021,7 +25267,7 @@ fn abort_counts_what_it_did_and_keeps_a_record_that_another_job_needs() {
     );
     // The abort did not touch the dependent. The SCHEDULER then skips it,
     // because the job that it needs did not succeed; that is the rule for a
-    // dependency, and `qex cancel` on the cause gives the same result.
+    // dependency, and `fairq cancel` on the cause gives the same result.
     let state = h.state_of(&dependent);
     assert!(
         state == "queued" || state == "skipped",
@@ -25033,7 +25279,7 @@ fn abort_counts_what_it_did_and_keeps_a_record_that_another_job_needs() {
     );
 }
 
-/// A coordinator that cannot obey `qex abort` must REFUSE it, by name.
+/// A coordinator that cannot obey `fairq abort` must REFUSE it, by name.
 ///
 /// An earlier coordinator does not know the request. It would answer with an
 /// error and change nothing, and a reader who did not see that answer would
@@ -25043,7 +25289,7 @@ fn a_coordinator_that_cannot_abort_refuses_the_command() {
     use std::io::{BufRead, BufReader, Write};
 
     let root = std::env::temp_dir().join(format!("qxoldabort{}", std::process::id()));
-    let run = root.join("state/qex/run");
+    let run = root.join("state/fairq/run");
     std::fs::create_dir_all(&run).unwrap();
     std::fs::create_dir_all(root.join("cfg")).unwrap();
     let socket = run.join("s");
@@ -25068,7 +25314,7 @@ fn a_coordinator_that_cannot_abort_refuses_the_command() {
             } else {
                 serde_json::json!({
                     "result": "error", "kind": "internal",
-                    "message": "qex could not read this request",
+                    "message": "fairq could not read this request",
                 })
             };
             writeln!(writer, "{answer}").ok();
@@ -25078,10 +25324,10 @@ fn a_coordinator_that_cannot_abort_refuses_the_command() {
 
     let peers = root.join("peers");
     std::fs::create_dir_all(&peers).ok();
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_qex"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_fairq"));
     cmd.args(["abort", "--all"]);
     isolate(&mut cmd, &root, &peers);
-    let out = cmd.output().expect("qex did not start");
+    let out = cmd.output().expect("fairq did not start");
     let err = String::from_utf8_lossy(&out.stderr).to_string();
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     drop(server);
@@ -25093,7 +25339,7 @@ fn a_coordinator_that_cannot_abort_refuses_the_command() {
         "the command must fail. stdout: {stdout} stderr: {err}"
     );
     assert!(
-        err.contains("cannot obey `qex abort`"),
+        err.contains("cannot obey `fairq abort`"),
         "the message must say what happened: {err}"
     );
     assert!(
@@ -25103,7 +25349,7 @@ fn a_coordinator_that_cannot_abort_refuses_the_command() {
 }
 
 /// The record of a job shows the chain of its submitter, so a reader can see
-/// why `qex abort` did, or did not, take it.
+/// why `fairq abort` did, or did not, take it.
 #[test]
 fn a_record_shows_the_chain_of_its_submitter() {
     let h = Harness::with_default_config("chain");
@@ -25141,7 +25387,7 @@ fn a_submitter_whose_name_is_not_utf8_is_in_the_chain() {
     let sh = non_utf8_link(&h.root, b"s\xffh", "sh");
     let mut cmd = Command::new(&sh);
     cmd.args(["-c", r#""$0" submit -- true; true"#])
-        .arg(env!("CARGO_BIN_EXE_qex"));
+        .arg(env!("CARGO_BIN_EXE_fairq"));
     isolate(&mut cmd, &h.root, &h.peers_dir);
     cmd.envs(h.extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     let out = cmd.output().unwrap();
@@ -25168,7 +25414,7 @@ fn a_submitter_whose_name_is_not_utf8_is_in_the_chain() {
     h.ok(&["wait", &id]);
 }
 
-/// `qex pause` with no word reports, and it says how to pause when nothing is
+/// `fairq pause` with no word reports, and it says how to pause when nothing is
 /// paused. A reader who typed it to pause must not read "nothing is paused"
 /// as "my pause did not take".
 #[test]
@@ -25177,24 +25423,24 @@ fn pause_with_no_word_says_how_to_pause() {
     h.ok(&["info"]);
     let text = h.ok(&["pause"]);
     assert!(
-        text.contains("qex pause queue"),
+        text.contains("fairq pause queue"),
         "the report must name the command that pauses: {text}"
     );
 }
 
 /// After an abort, every reader that asks about a cancelled job gets the
-/// answer that it gets after `qex cancel` of that job.
+/// answer that it gets after `fairq cancel` of that job.
 ///
-/// THE READERS: `qex wait`, `qex submit --wait`, `qex run` (each gives 125),
-/// `qex status` (the state `cancelled`), the stop hook (one line for each
-/// job), and `qex status` after `qex clean` (the job never ran).
+/// THE READERS: `fairq wait`, `fairq submit --wait`, `fairq run` (each gives 125),
+/// `fairq status` (the state `cancelled`), the stop hook (one line for each
+/// job), and `fairq status` after `fairq clean` (the job never ran).
 #[test]
 fn after_an_abort_every_reader_gets_the_answer_of_a_cancel() {
     let h = Harness::new("abortreaders", ABORT_CONFIG);
     let mark = h.root.join("hook.txt");
     h.write_config(&format!(
         "{ABORT_CONFIG}[hooks]\non_stop_states = [\"cancelled\"]\n\
-         on_stop = [\"sh\", \"-c\", \"echo \\\"$QEX_STATE $QEX_JOB_NAME\\\" >> {}\"]\n",
+         on_stop = [\"sh\", \"-c\", \"echo \\\"$FAIRQ_STATE $FAIRQ_JOB_NAME\\\" >> {}\"]\n",
         mark.display()
     ));
 
@@ -25229,11 +25475,11 @@ fn after_an_abort_every_reader_gets_the_answer_of_a_cancel() {
     let report = h.abort_json(&[]);
     assert_eq!(report["cancelled"], 3, "the report: {report}");
 
-    let out = wait_for_child(waiter, Duration::from_secs(30), "qex wait after an abort");
+    let out = wait_for_child(waiter, Duration::from_secs(30), "fairq wait after an abort");
     assert_eq!(
         out.status.code(),
         Some(125),
-        "`qex wait` must give 125 for a cancelled job: {}",
+        "`fairq wait` must give 125 for a cancelled job: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let out = wait_for_child(
@@ -25244,14 +25490,14 @@ fn after_an_abort_every_reader_gets_the_answer_of_a_cancel() {
     assert_eq!(
         out.status.code(),
         Some(125),
-        "`qex submit --wait` must give 125 for a cancelled job: {}",
+        "`fairq submit --wait` must give 125 for a cancelled job: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let out = wait_run(run, "an abort cancelled the job of `qex run`");
+    let out = wait_run(run, "an abort cancelled the job of `fairq run`");
     assert_eq!(
         out.status.code(),
         Some(125),
-        "`qex run` must give 125 for a cancelled job: {}",
+        "`fairq run` must give 125 for a cancelled job: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 
@@ -25273,9 +25519,9 @@ fn after_an_abort_every_reader_gets_the_answer_of_a_cancel() {
         "the stop hook must run for each cancelled job"
     );
 
-    // After `qex clean`, the history says that the job never ran.
+    // After `fairq clean`, the history says that the job never ran.
     h.ok(&["clean", "cancelled"]);
-    let out = h.qex(&["status", &waited]);
+    let out = h.fairq(&["status", &waited]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success());
     assert!(
@@ -25283,7 +25529,7 @@ fn after_an_abort_every_reader_gets_the_answer_of_a_cancel() {
         "a cancelled job never ran, and the reader must not repeat nothing: {err}"
     );
 
-    h.qex(&["kill", &occupier, "--grace", "1s"]);
+    h.fairq(&["kill", &occupier, "--grace", "1s"]);
 }
 
 /// An abort that arrives at the moment of a resume accounts for every job:
@@ -25334,7 +25580,7 @@ fn an_abort_at_the_moment_of_a_resume_accounts_for_every_job() {
 /// the abort, before any answer, through a variable that exists for this test.
 /// The cancel of each job must be on the disk by then: a record that was
 /// cancelled in memory only comes back as a queued job, and one
-/// `qex resume queue` then starts the work that the abort stopped.
+/// `fairq resume queue` then starts the work that the abort stopped.
 #[test]
 fn a_coordinator_that_dies_during_an_abort_leaves_every_cancel_on_the_disk() {
     // The switch that stops the coordinator exists in a debug build only.
@@ -25344,7 +25590,7 @@ fn a_coordinator_that_dies_during_an_abort_leaves_every_cancel_on_the_disk() {
     }
     let mut h = Harness::new("abortcrash", ABORT_CONFIG);
     h.extra_env
-        .push(("QEX_TEST_CRASH_AFTER_ABORT_PLAN".into(), "1".into()));
+        .push(("FAIRQ_TEST_CRASH_AFTER_ABORT_PLAN".into(), "1".into()));
     h.ok(&["pause", "queue"]);
     let mut ids = Vec::new();
     for _ in 0..12 {
@@ -25352,11 +25598,11 @@ fn a_coordinator_that_dies_during_an_abort_leaves_every_cancel_on_the_disk() {
     }
     let coordinator = h.coordinator_pid();
 
-    let out = h.qex_within(&["abort", "--all"], Duration::from_secs(60));
+    let out = h.fairq_within(&["abort", "--all"], Duration::from_secs(60));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "the connection must end: {err}");
     assert!(
-        err.contains("Run `qex abort` again"),
+        err.contains("Run `fairq abort` again"),
         "the command must say what the reader does next: {err}"
     );
     h.until("the coordinator stopped", Duration::from_secs(30), || {
@@ -25386,7 +25632,7 @@ fn a_coordinator_that_dies_during_an_abort_leaves_every_cancel_on_the_disk() {
 
 /// The report never counts as cancelled a job whose cancel is not on the disk.
 ///
-/// A record that qex could not write would come back as a queued job at the
+/// A record that fairq could not write would come back as a queued job at the
 /// next coordinator, so the abort leaves such a job in the queue, names it,
 /// and gives the exit code 1.
 #[test]
@@ -25411,7 +25657,7 @@ fn an_abort_does_not_count_a_cancel_that_did_not_reach_the_disk() {
     std::fs::rename(dir.join("status.json"), &saved).unwrap();
     std::fs::create_dir_all(dir.join("status.json/in-the-way")).unwrap();
 
-    let out = h.qex_within(&["abort", "--all", "--json"], Duration::from_secs(60));
+    let out = h.fairq_within(&["abort", "--all", "--json"], Duration::from_secs(60));
     std::fs::remove_dir_all(dir.join("status.json")).unwrap();
     std::fs::rename(&saved, dir.join("status.json")).unwrap();
     let report: serde_json::Value =
@@ -25440,13 +25686,13 @@ fn an_abort_does_not_count_a_cancel_that_did_not_reach_the_disk() {
 
 /// Gives the two streams of a command that must end with 124.
 fn streams_of_a_wait_at_its_limit(h: &Harness, args: &[&str]) -> (String, String) {
-    let out = h.qex_within(args, Duration::from_secs(60));
+    let out = h.fairq_within(args, Duration::from_secs(60));
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     assert_eq!(
         out.status.code(),
         Some(124),
-        "`qex {}` must reach the limit of the reader: {stderr}",
+        "`fairq {}` must reach the limit of the reader: {stderr}",
         args.join(" ")
     );
     (stdout, stderr)
@@ -25456,7 +25702,7 @@ fn streams_of_a_wait_at_its_limit(h: &Harness, args: &[&str]) -> (String, String
 /// reports no limit that it never waited for.
 ///
 /// The limit of the reader spans the command, so the wait for the job uses all
-/// of it. The read of the record then got a deadline in the past: qex asked a
+/// of it. The read of the record then got a deadline in the past: fairq asked a
 /// coordinator that ANSWERED nothing at all, reported "no answer in 1 seconds",
 /// sent the reader to the log of the coordinator, and lost the record.
 ///
@@ -25471,11 +25717,11 @@ fn a_wait_at_the_limit_of_the_reader_gives_the_record_and_the_same_limit() {
     let (stdout, stderr) =
         streams_of_a_wait_at_its_limit(&h, &["status", id, "--wait", "--timeout", "1s"]);
     assert!(
-        !stderr.contains("gave no answer") && !stderr.contains("qex info --no-start"),
+        !stderr.contains("gave no answer") && !stderr.contains("fairq info --no-start"),
         "the coordinator answered, so no message may say that it did not: {stderr}"
     );
     assert!(
-        stderr.contains(&format!("qex status {id} --wait --timeout 1s")),
+        stderr.contains(&format!("fairq status {id} --wait --timeout 1s")),
         "the hint must carry the limit of the reader: {stderr}"
     );
     assert!(
@@ -25483,11 +25729,11 @@ fn a_wait_at_the_limit_of_the_reader_gives_the_record_and_the_same_limit() {
         "the reader asked for the record, and the record exists: {stdout}"
     );
 
-    // `qex wait` writes one line for each job that stopped, and none stopped.
+    // `fairq wait` writes one line for each job that stopped, and none stopped.
     let (_, stderr) = streams_of_a_wait_at_its_limit(&h, &["wait", id, "--timeout", "1s"]);
     assert!(
-        stderr.contains(&format!("qex status {id} --wait --timeout 1s")),
-        "the hint of `qex wait` must carry the limit of the reader: {stderr}"
+        stderr.contains(&format!("fairq status {id} --wait --timeout 1s")),
+        "the hint of `fairq wait` must carry the limit of the reader: {stderr}"
     );
 
     // `--follow` asks for the state of the job in each step. A step after the
@@ -25499,7 +25745,7 @@ fn a_wait_at_the_limit_of_the_reader_gives_the_record_and_the_same_limit() {
         "the coordinator operates, so no message may say that it stopped: {stderr}"
     );
     assert!(
-        stderr.contains(&format!("qex status {id} --follow --timeout 1s")),
+        stderr.contains(&format!("fairq status {id} --follow --timeout 1s")),
         "the hint of `--follow` must carry the limit of the reader: {stderr}"
     );
 
@@ -25507,15 +25753,15 @@ fn a_wait_at_the_limit_of_the_reader_gives_the_record_and_the_same_limit() {
     let (_, stderr) =
         streams_of_a_wait_at_its_limit(&h, &["wait", "--next", id, "--timeout", "1s"]);
     assert!(
-        stderr.contains(&format!("qex wait --next {id} --timeout 1s")),
+        stderr.contains(&format!("fairq wait --next {id} --timeout 1s")),
         "the hint of `--next` must carry the limit of the reader: {stderr}"
     );
 
     h.ok(&["kill", id]);
 }
 
-/// `qex submit --wait` gives the record and the same limit at the limit of the
-/// reader, in the same way as `qex status --wait`.
+/// `fairq submit --wait` gives the record and the same limit at the limit of the
+/// reader, in the same way as `fairq status --wait`.
 #[test]
 fn a_submit_that_waits_gives_the_record_and_the_same_limit() {
     let h = Harness::with_default_config("submitlimitrecord");
@@ -25544,10 +25790,10 @@ fn a_submit_that_waits_gives_the_record_and_the_same_limit() {
         "the reader asked for the record, and the record exists: {stdout}"
     );
     // Stop the job, so that it does not hold the machine after the test.
-    h.qex(&["abort", "--all"]);
+    h.fairq(&["abort", "--all"]);
 }
 
-/// `qex events` names the limit that ended it.
+/// `fairq events` names the limit that ended it.
 ///
 /// The code 124 alone says nothing about the limit that the reader gave, and a
 /// stream that ends with no word looks like a coordinator that stopped.
@@ -25577,10 +25823,10 @@ fn a_limit_that_passed_gives_the_result_of_a_job_that_stopped() {
     let h = Harness::with_default_config("waitlimitresult");
     let id = h.ok(&["submit", "--", "sh", "-c", "exit 7"]);
     let id = id.trim();
-    h.qex_within(&["wait", id], Duration::from_secs(60));
+    h.fairq_within(&["wait", id], Duration::from_secs(60));
 
     // One millisecond passes before the command reaches its wait.
-    let out = h.qex_within(
+    let out = h.fairq_within(
         &["wait", id, "--timeout", "0.001s"],
         Duration::from_secs(60),
     );
@@ -25599,26 +25845,26 @@ fn a_limit_that_passed_gives_the_result_of_a_job_that_stopped() {
 /// A coordinator that gave no answer for the whole limit is named as that,
 /// also when the first caller drops the error.
 ///
-/// `qex events` asks for the version as a courtesy and drops the error of that
+/// `fairq events` asks for the version as a courtesy and drops the error of that
 /// question. The next question then finds the limit spent. It must not say
-/// that qex waited no time: the reader then loses the one fact that is true,
+/// that fairq waited no time: the reader then loses the one fact that is true,
 /// and the remedy for it.
 #[test]
 fn a_silent_coordinator_is_named_when_it_used_the_limit() {
     let h = Harness::with_default_config("eventssilent");
     let pid = h.coordinator_pid();
     unsafe { libc::kill(pid, libc::SIGSTOP) };
-    let out = h.qex_within(&["events", "--timeout", "2s"], Duration::from_secs(60));
+    let out = h.fairq_within(&["events", "--timeout", "2s"], Duration::from_secs(60));
     unsafe { libc::kill(pid, libc::SIGCONT) };
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(124), "{stderr}");
     assert!(
-        stderr.contains("gave no answer in") && stderr.contains("qex info --no-start"),
+        stderr.contains("gave no answer in") && stderr.contains("fairq info --no-start"),
         "the coordinator gave no answer, and the message must say so: {stderr}"
     );
     assert!(
         !stderr.contains("waited no time"),
-        "qex waited the whole limit for the coordinator: {stderr}"
+        "fairq waited the whole limit for the coordinator: {stderr}"
     );
     assert!(
         stderr.lines().all(|line| !line.starts_with(' ')) && !stderr.contains("  "),
@@ -25645,7 +25891,7 @@ impl ARecordingCoordinator {
 
         let root = std::env::temp_dir().join(format!("qx{name}{}", std::process::id()));
         std::fs::remove_dir_all(&root).ok();
-        let run = root.join("state/qex/run");
+        let run = root.join("state/fairq/run");
         std::fs::create_dir_all(&run).unwrap();
         std::fs::create_dir_all(root.join("cfg")).unwrap();
         std::fs::create_dir_all(root.join("peers")).unwrap();
@@ -25765,7 +26011,7 @@ impl ARecordingCoordinator {
                             }),
                             _ => serde_json::json!({
                                 "result": "error", "kind": "internal",
-                                "message": "qex could not read this request",
+                                "message": "fairq could not read this request",
                             }),
                         };
                         writeln!(writer, "{answer}").ok();
@@ -25778,11 +26024,11 @@ impl ARecordingCoordinator {
         Self { root, requests }
     }
 
-    fn qex(&self, args: &[&str]) -> Output {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_qex"));
+    fn fairq(&self, args: &[&str]) -> Output {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_fairq"));
         cmd.args(args);
         isolate(&mut cmd, &self.root, &self.root.join("peers"));
-        cmd.output().expect("qex did not start")
+        cmd.output().expect("fairq did not start")
     }
 
     /// The names of the requests that arrived, in their order.
@@ -25806,10 +26052,10 @@ impl Drop for ARecordingCoordinator {
 }
 
 /// No command asks a coordinator of this version for the whole list to find a
-/// job, and `qex cancel` of many ids is ONE request.
+/// job, and `fairq cancel` of many ids is ONE request.
 ///
 /// The measured fault: every command that took an id asked for every record of
-/// every job, one time for each id. With 3,000 jobs in the queue, `qex cancel`
+/// every job, one time for each id. With 3,000 jobs in the queue, `fairq cancel`
 /// of 100 ids took 18 seconds, and a sweep of 20,000 submissions took hours.
 ///
 /// The test reads the REQUESTS, because the answer of the old path and of the
@@ -25818,7 +26064,7 @@ impl Drop for ARecordingCoordinator {
 fn a_command_that_names_a_job_never_asks_for_the_whole_list() {
     let c = ARecordingCoordinator::new("nolist", &["resolve", "query", "stop-many"]);
 
-    let out = c.qex(&["cancel", "11111111", "build", "nothing"]);
+    let out = c.fairq(&["cancel", "11111111", "build", "nothing"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -25842,15 +26088,15 @@ fn a_command_that_names_a_job_never_asks_for_the_whole_list() {
         vec!["submit", "--needs", "build", "--", "true"],
         vec!["submit", "--after", "11111111", "--", "true"],
     ] {
-        c.qex(&args);
+        c.fairq(&args);
     }
     // A deletion that names its records needs those records only. The whole
     // list costs the coordinator one read of the disk for each job that
     // stopped, so a long history made this command slow.
-    let cleaned = c.qex(&["clean", "11111111", "test"]);
+    let cleaned = c.fairq(&["clean", "11111111", "test"]);
     assert_eq!(
         String::from_utf8_lossy(&cleaned.stdout).trim(),
-        "qex deleted 2 records",
+        "fairq deleted 2 records",
         "stderr: {}",
         String::from_utf8_lossy(&cleaned.stderr)
     );
@@ -25869,7 +26115,7 @@ fn a_command_that_names_a_job_never_asks_for_the_whole_list() {
         "the commands must use the requests of this version: {ops:?}"
     );
 
-    let listed = c.qex(&["list", "--tag", "build"]);
+    let listed = c.fairq(&["list", "--tag", "build"]);
     let table = String::from_utf8_lossy(&listed.stdout);
     assert!(
         table.contains("11111111") && !table.contains("22222222"),
@@ -25888,7 +26134,7 @@ fn a_command_that_names_a_job_never_asks_for_the_whole_list() {
 fn an_earlier_coordinator_gets_the_earlier_requests() {
     let c = ARecordingCoordinator::new("oldlist", &["locks", "retries"]);
 
-    let out = c.qex(&["cancel", "11111111", "test"]);
+    let out = c.fairq(&["cancel", "11111111", "test"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(
@@ -25903,20 +26149,20 @@ fn an_earlier_coordinator_gets_the_earlier_requests() {
     );
     assert!(
         stderr.is_empty(),
-        "the answer is the same and only slower, so qex says nothing: {stderr}"
+        "the answer is the same and only slower, so fairq says nothing: {stderr}"
     );
 
-    let listed = c.qex(&["list", "--tag", "test"]);
+    let listed = c.fairq(&["list", "--tag", "test"]);
     let table = String::from_utf8_lossy(&listed.stdout);
     assert!(
         table.contains("22222222") && !table.contains("11111111"),
         "the CLI must apply the filter itself: {table}"
     );
 
-    let cleaned = c.qex(&["clean", "11111111"]);
+    let cleaned = c.fairq(&["clean", "11111111"]);
     assert_eq!(
         String::from_utf8_lossy(&cleaned.stdout).trim(),
-        "qex deleted 1 record",
+        "fairq deleted 1 record",
         "stderr: {}",
         String::from_utf8_lossy(&cleaned.stderr)
     );
@@ -25966,7 +26212,7 @@ fn a_job_that_stopped_answers_from_its_record_on_the_disk() {
         id.as_str(),
         "a name must still find it"
     );
-    assert_eq!(h.qex(&["wait", &id]).status.code(), Some(3));
+    assert_eq!(h.fairq(&["wait", &id]).status.code(), Some(3));
     assert!(h.ok(&["logs", &id, "--stdout"]).contains("out"));
     assert!(h.ok(&["list"]).contains(&id[..8]));
     assert!(h.ok(&["list", "--tag", "old"]).contains(&id[..8]));
@@ -25985,13 +26231,13 @@ fn a_job_that_stopped_answers_from_its_record_on_the_disk() {
         h.state_of(&after) == "skipped"
     });
 
-    let kill = h.qex(&["kill", &id]);
+    let kill = h.fairq(&["kill", &id]);
     assert!(
         String::from_utf8_lossy(&kill.stderr).contains("stopped. Its state is `failed`"),
         "{}",
         String::from_utf8_lossy(&kill.stderr)
     );
-    let cancel = h.qex(&["cancel", &id]);
+    let cancel = h.fairq(&["cancel", &id]);
     assert!(
         String::from_utf8_lossy(&cancel.stderr).contains("is in the state `failed`"),
         "{}",
@@ -26001,12 +26247,12 @@ fn a_job_that_stopped_answers_from_its_record_on_the_disk() {
     // The record of the cause stays while a job names it, and goes after.
     h.ok(&["clean", &after]);
     h.ok(&["clean", &id]);
-    let gone = h.qex(&["status", &id]);
+    let gone = h.fairq(&["status", &id]);
     assert_eq!(gone.status.code(), Some(127));
     assert!(String::from_utf8_lossy(&gone.stderr).contains("existed"));
 }
 
-/// `qex list` with no option leaves out a job that stopped long ago, and it
+/// `fairq list` with no option leaves out a job that stopped long ago, and it
 /// says how many. An option that selects jobs gives them all.
 #[test]
 fn a_list_leaves_out_old_jobs_and_says_how_many() {
@@ -26029,7 +26275,7 @@ fn a_list_leaves_out_old_jobs_and_says_how_many() {
     record["finished_at"] = serde_json::json!(end);
     std::fs::write(&path, serde_json::to_string(&record).unwrap()).unwrap();
 
-    let plain = h.qex(&["list"]);
+    let plain = h.fairq(&["list"]);
     let table = String::from_utf8_lossy(&plain.stdout);
     let note = String::from_utf8_lossy(&plain.stderr);
     assert!(
@@ -26037,7 +26283,7 @@ fn a_list_leaves_out_old_jobs_and_says_how_many() {
         "{table}"
     );
     assert!(
-        note.contains("leaves out 1 job") && note.contains("qex list --all"),
+        note.contains("leaves out 1 job") && note.contains("fairq list --all"),
         "the list must say what it left out, and how to see it: {note}"
     );
 
@@ -26046,7 +26292,7 @@ fn a_list_leaves_out_old_jobs_and_says_how_many() {
         vec!["list", "--state", "done"],
         vec!["list", "--tag", "sweep"],
     ] {
-        let out = h.qex(&args);
+        let out = h.fairq(&args);
         let table = String::from_utf8_lossy(&out.stdout);
         assert!(
             table.contains(&id[..8]) && table.contains(&recent[..8]),
@@ -26058,7 +26304,7 @@ fn a_list_leaves_out_old_jobs_and_says_how_many() {
         );
     }
 
-    let limited = h.qex(&["list", "--all", "--limit", "1"]);
+    let limited = h.fairq(&["list", "--all", "--limit", "1"]);
     let table = String::from_utf8_lossy(&limited.stdout);
     assert!(
         table.contains(&recent[..8]) && !table.contains(&id[..8]),
@@ -26067,7 +26313,7 @@ fn a_list_leaves_out_old_jobs_and_says_how_many() {
     assert!(String::from_utf8_lossy(&limited.stderr).contains("`--limit` leaves out 1 job"));
 }
 
-/// `qex cancel` and `qex kill` of many ids give one line for each job, and the
+/// `fairq cancel` and `fairq kill` of many ids give one line for each job, and the
 /// code of the first fault, from one request.
 #[test]
 fn a_cancel_of_many_ids_gives_a_line_for_each() {
@@ -26077,7 +26323,7 @@ fn a_cancel_of_many_ids_gives_a_line_for_each() {
     let b = h.submit(&["submit", "--name", "twin", "--", "true"]);
     let c = h.submit(&["submit", "--name", "twin", "--", "true"]);
 
-    let out = h.qex(&["cancel", &a, "twin", &b[..8], "nothing", &a]);
+    let out = h.fairq(&["cancel", &a, "twin", &b[..8], "nothing", &a]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stdout.contains(&format!("{a} left the queue")), "{stdout}");
@@ -26095,9 +26341,9 @@ fn a_cancel_of_many_ids_gives_a_line_for_each() {
     );
     assert_ne!(out.status.code(), Some(0));
 
-    let kill = h.qex(&["kill", &c]);
+    let kill = h.fairq(&["kill", &c]);
     assert!(
-        String::from_utf8_lossy(&kill.stderr).contains("Use `qex cancel"),
+        String::from_utf8_lossy(&kill.stderr).contains("Use `fairq cancel"),
         "a kill of one job that waits names the command that fits"
     );
 }
@@ -26125,14 +26371,14 @@ fn leave_a_queued_record(h: &Harness) -> String {
     h.ok(&["pause", "queue"]);
     let id = h.submit(&["submit", "--", "true"]);
     h.stop_coordinator();
-    std::fs::remove_file(h.root.join("state/qex/run/paused.json")).unwrap();
+    std::fs::remove_file(h.root.join("state/fairq/run/paused.json")).unwrap();
     id
 }
 
 /// Requires a refusal that names the refused path and the remedy.
 fn assert_refused(out: &Output, component: &Path) {
     let err = String::from_utf8_lossy(&out.stderr);
-    assert_ne!(out.status.code(), Some(0), "qex must refuse: {err}");
+    assert_ne!(out.status.code(), Some(0), "fairq must refuse: {err}");
     assert!(
         err.contains(&component.display().to_string()),
         "the refusal must name {}: {err}",
@@ -26169,7 +26415,7 @@ fn assert_unchanged(target: &Path) {
     assert_eq!(mode, 0o644, "the target keeps its mode");
 }
 
-/// qex uses a state directory only when the user that runs it owns it.
+/// fairq uses a state directory only when the user that runs it owns it.
 #[test]
 fn a_state_directory_another_user_owns_is_refused() {
     let limit = Duration::from_secs(60);
@@ -26177,22 +26423,22 @@ fn a_state_directory_another_user_owns_is_refused() {
         // A link to `/`, which this user does not own. Never as root: the code before
         // this check would change the mode of `/run`.
         let h = Harness::with_default_config("ownlink");
-        std::os::unix::fs::symlink("/", h.root.join("state/qex")).unwrap();
-        let out = h.qex_within(&["submit", "--wait", "--", "true"], limit);
-        assert_refused(&out, &h.root.join("state/qex"));
+        std::os::unix::fs::symlink("/", h.root.join("state/fairq")).unwrap();
+        let out = h.fairq_within(&["submit", "--wait", "--", "true"], limit);
+        assert_refused(&out, &h.root.join("state/fairq"));
         // The harness looks for processes under its root, and must not look in `/`.
-        std::fs::remove_file(h.root.join("state/qex")).unwrap();
+        std::fs::remove_file(h.root.join("state/fairq")).unwrap();
         return;
     }
 
     // A link in the state directory of another user.
     let h = Harness::with_default_config("ownhist");
     let target = a_target_file(&h);
-    let state = h.root.join("state/qex");
+    let state = h.root.join("state/fairq");
     std::fs::create_dir(&state).unwrap();
     std::os::unix::fs::symlink(&target, state.join("history.jsonl")).unwrap();
     give_tree_to(&state, ANOTHER_UID);
-    let out = h.qex_within(&["submit", "--wait", "--", "true"], limit);
+    let out = h.fairq_within(&["submit", "--wait", "--", "true"], limit);
     assert_refused(&out, &state);
     assert_unchanged(&target);
 
@@ -26201,9 +26447,9 @@ fn a_state_directory_another_user_owns_is_refused() {
     let id = leave_a_queued_record(&h);
     let status = h.job_dir(&id).join("status.json");
     let before = std::fs::read(&status).unwrap();
-    give_tree_to(&h.root.join("state/qex"), ANOTHER_UID);
-    let out = h.qex_within(&["submit", "--wait", "--", "true"], limit);
-    assert_refused(&out, &h.root.join("state/qex"));
+    give_tree_to(&h.root.join("state/fairq"), ANOTHER_UID);
+    let out = h.fairq_within(&["submit", "--wait", "--", "true"], limit);
+    assert_refused(&out, &h.root.join("state/fairq"));
     assert_eq!(
         std::fs::read(&status).unwrap(),
         before,
@@ -26213,7 +26459,7 @@ fn a_state_directory_another_user_owns_is_refused() {
     // A missing state directory in a directory of another user.
     let h = Harness::with_default_config("ownparent");
     give_tree_to(&h.root.join("state"), ANOTHER_UID);
-    let out = h.qex_within(&["submit", "--wait", "--", "true"], limit);
+    let out = h.fairq_within(&["submit", "--wait", "--", "true"], limit);
     assert_refused(&out, &h.root.join("state"));
 
     // XDG_STATE_HOME is a link that another user owns, and the state directory is missing.
@@ -26223,7 +26469,7 @@ fn a_state_directory_another_user_owns_is_refused() {
     std::fs::remove_dir(h.root.join("state")).unwrap();
     std::os::unix::fs::symlink(&target, h.root.join("state")).unwrap();
     give_tree_to(&h.root.join("state"), ANOTHER_UID);
-    let out = h.qex_within(&["submit", "--wait", "--", "true"], limit);
+    let out = h.fairq_within(&["submit", "--wait", "--", "true"], limit);
     assert_refused(&out, &h.root.join("state"));
     assert_eq!(
         std::fs::read_dir(&target).unwrap().count(),
@@ -26246,9 +26492,9 @@ fn a_link_whose_target_passes_through_another_users_directory_is_refused() {
     std::fs::create_dir(&foreign).unwrap();
     std::os::unix::fs::symlink(&real, foreign.join("hop")).unwrap();
     std::os::unix::fs::chown(&foreign, Some(ANOTHER_UID), Some(ANOTHER_UID)).unwrap();
-    std::os::unix::fs::symlink(foreign.join("hop/state"), h.root.join("state/qex")).unwrap();
+    std::os::unix::fs::symlink(foreign.join("hop/state"), h.root.join("state/fairq")).unwrap();
 
-    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    let out = h.fairq_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
     assert_refused(&out, &foreign);
     assert_eq!(
         std::fs::read_dir(real.join("state")).unwrap().count(),
@@ -26272,15 +26518,15 @@ fn a_job_record_another_user_owns_is_not_read() {
     for name in ["spec.json", "status.json"] {
         std::os::unix::fs::chown(dir.join(name), Some(ANOTHER_UID), Some(ANOTHER_UID)).unwrap();
     }
-    // A record that qex never accepted has no line in the history.
-    std::fs::remove_file(h.root.join("state/qex/history.jsonl")).unwrap();
+    // A record that fairq never accepted has no line in the history.
+    std::fs::remove_file(h.root.join("state/fairq/history.jsonl")).unwrap();
 
-    // `qex du` reads the disk and starts no coordinator.
+    // `fairq du` reads the disk and starts no coordinator.
     let du = json_of(&h.ok(&["du", "--json"]));
     assert_eq!(du["job_count"], 0, "{du}");
     assert_eq!(du["directories_with_no_record"], 1, "{du}");
 
-    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    let out = h.fairq_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -26289,12 +26535,12 @@ fn a_job_record_another_user_owns_is_not_read() {
     );
     let list = h.ok(&["list"]);
     assert!(!list.contains(&id[..8]), "the record is not listed: {list}");
-    let status_out = h.qex(&["status", &id]);
+    let status_out = h.fairq(&["status", &id]);
     assert_eq!(status_out.status.code(), Some(127));
     assert_eq!(
         String::from_utf8_lossy(&status_out.stderr).trim_end(),
         format!(
-            "qex: there is no job with the id {id}, and qex has no record of one. \
+            "fairq: there is no job with the id {id}, and fairq has no record of one. \
              Test the id, or submit the job."
         )
     );
@@ -26303,7 +26549,7 @@ fn a_job_record_another_user_owns_is_not_read() {
         before,
         "the record stays as it was"
     );
-    let log = std::fs::read_to_string(h.root.join("state/qex/run/daemon.log")).unwrap();
+    let log = std::fs::read_to_string(h.root.join("state/fairq/run/daemon.log")).unwrap();
     assert!(
         log.lines()
             .any(|l| l.contains(&id) && l.contains("skipped: not owned by this user")),
@@ -26317,8 +26563,8 @@ fn a_state_directory_behind_your_own_link_still_works() {
     let h = Harness::with_default_config("ownmine");
     let elsewhere = h.root.join("elsewhere");
     std::fs::create_dir(&elsewhere).unwrap();
-    std::os::unix::fs::symlink(&elsewhere, h.root.join("state/qex")).unwrap();
-    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    std::os::unix::fs::symlink(&elsewhere, h.root.join("state/fairq")).unwrap();
+    let out = h.fairq_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -26328,7 +26574,7 @@ fn a_state_directory_behind_your_own_link_still_works() {
     assert!(elsewhere.join("jobs").is_dir());
 }
 
-/// A directory that qex makes in the state directory must be the user's own.
+/// A directory that fairq makes in the state directory must be the user's own.
 #[test]
 fn a_jobs_directory_another_user_owns_is_refused() {
     use std::os::unix::fs::PermissionsExt;
@@ -26337,14 +26583,14 @@ fn a_jobs_directory_another_user_owns_is_refused() {
         return;
     }
     let h = Harness::with_default_config("ownjobs");
-    let jobs = h.root.join("state/qex/jobs");
+    let jobs = h.root.join("state/fairq/jobs");
     std::fs::create_dir_all(&jobs).unwrap();
     std::fs::set_permissions(&jobs, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::os::unix::fs::chown(&jobs, Some(ANOTHER_UID), Some(ANOTHER_UID)).unwrap();
 
-    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    let out = h.fairq_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
     let err = String::from_utf8_lossy(&out.stderr);
-    assert_ne!(out.status.code(), Some(0), "qex must refuse: {err}");
+    assert_ne!(out.status.code(), Some(0), "fairq must refuse: {err}");
     assert!(err.contains(&jobs.display().to_string()), "{err}");
     let mode = std::fs::metadata(&jobs).unwrap().permissions().mode() & 0o7777;
     assert_eq!(mode, 0o755, "the directory keeps its mode");
@@ -26355,10 +26601,10 @@ fn a_jobs_directory_another_user_owns_is_refused() {
 fn an_open_state_directory_is_made_private() {
     use std::os::unix::fs::PermissionsExt;
     let h = Harness::with_default_config("ownopen");
-    let state = h.root.join("state/qex");
+    let state = h.root.join("state/fairq");
     std::fs::create_dir(&state).unwrap();
     std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o777)).unwrap();
-    // `qex du` makes no directory and starts no coordinator: only the state check narrows it.
+    // `fairq du` makes no directory and starts no coordinator: only the state check narrows it.
     h.ok(&["du", "--json"]);
     let mode = std::fs::metadata(&state).unwrap().permissions().mode() & 0o7777;
     assert_eq!(mode, 0o700);
@@ -26368,12 +26614,12 @@ fn an_open_state_directory_is_made_private() {
 /// Requires a refusal of the config file that names it and the remedy.
 fn assert_config_refused(out: &Output, file: &Path) {
     let err = String::from_utf8_lossy(&out.stderr);
-    assert_ne!(out.status.code(), Some(0), "qex must refuse: {err}");
+    assert_ne!(out.status.code(), Some(0), "fairq must refuse: {err}");
     assert!(err.contains(&file.display().to_string()), "{err}");
     assert!(err.contains("XDG_CONFIG_HOME"), "{err}");
 }
 
-/// qex reads a config file only when the user or root owns it.
+/// fairq reads a config file only when the user or root owns it.
 #[test]
 fn a_config_file_another_user_owns_is_refused() {
     // Only root can plant a file that another user owns; CI runs as a normal user.
@@ -26381,10 +26627,10 @@ fn a_config_file_another_user_owns_is_refused() {
         return;
     }
     let h = Harness::with_default_config("owncfg");
-    let file = h.root.join("cfg/qex.toml");
+    let file = h.root.join("cfg/fairq.toml");
     std::os::unix::fs::chown(&file, Some(ANOTHER_UID), Some(ANOTHER_UID)).unwrap();
-    assert_config_refused(&h.qex(&["config", "show"]), &file);
-    let submit = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    assert_config_refused(&h.fairq(&["config", "show"]), &file);
+    let submit = h.fairq_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
     assert_config_refused(&submit, &file);
 }
 
@@ -26393,9 +26639,9 @@ fn a_config_file_another_user_owns_is_refused() {
 fn a_world_writable_config_file_is_refused() {
     use std::os::unix::fs::PermissionsExt;
     let h = Harness::with_default_config("cfgopen");
-    let file = h.root.join("cfg/qex.toml");
+    let file = h.root.join("cfg/fairq.toml");
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666)).unwrap();
-    assert_config_refused(&h.qex(&["config", "show"]), &file);
+    assert_config_refused(&h.fairq(&["config", "show"]), &file);
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o664)).unwrap();
     h.ok(&["config", "show"]);
 }
@@ -26406,11 +26652,11 @@ fn a_config_reload_names_why_it_was_refused() {
     use std::os::unix::fs::PermissionsExt;
     let h = Harness::with_default_config("cfgreload");
     h.ok(&["info"]);
-    let file = h.root.join("cfg/qex.toml");
+    let file = h.root.join("cfg/fairq.toml");
     let text = std::fs::read_to_string(&file).unwrap();
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666)).unwrap();
     std::fs::write(&file, format!("{text}# changed\n")).unwrap();
-    let log = h.root.join("state/qex/run/daemon.log");
+    let log = h.root.join("state/fairq/run/daemon.log");
     h.until(
         "the coordinator logs the refusal",
         Duration::from_secs(45),
@@ -26419,7 +26665,7 @@ fn a_config_reload_names_why_it_was_refused() {
     let text = std::fs::read_to_string(&log).unwrap();
     assert!(text.contains(&file.display().to_string()), "{text}");
     assert!(
-        !text.contains("the file is empty, or qex cannot read it"),
+        !text.contains("the file is empty, or fairq cannot read it"),
         "{text}"
     );
 }
@@ -26431,11 +26677,11 @@ fn a_question_about_the_coordinator_names_a_refused_state_directory() {
     let h = Harness::with_default_config("ownask");
     let state = h.root.join("state");
     std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o777)).unwrap();
-    let out = h.qex(&["info", "--no-start"]);
+    let out = h.fairq(&["info", "--no-start"]);
     assert_refused(&out, &state);
     let said = String::from_utf8_lossy(&out.stdout);
     assert!(!said.contains("no coordinator operates"), "{said}");
-    // `qex version` still gives the version.
+    // `fairq version` still gives the version.
     assert!(h.ok(&["version"]).contains("coordinator: none operates"));
     // The harness asks `info --no-start` when it cannot see the processes.
     std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -26443,7 +26689,7 @@ fn a_question_about_the_coordinator_names_a_refused_state_directory() {
 
 /// Puts a symbolic link to `target` at `name` in the state directory.
 fn plant_state(h: &Harness, name: &str, target: &Path) {
-    let link = h.root.join("state/qex").join(name);
+    let link = h.root.join("state/fairq").join(name);
     std::fs::create_dir_all(link.parent().unwrap()).unwrap();
     std::os::unix::fs::symlink(target, link).unwrap();
 }
@@ -26469,21 +26715,21 @@ fn is_link(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
 }
 
-/// qex adds to its history without following a link at the file's name (issue #88).
+/// fairq adds to its history without following a link at the file's name (issue #88).
 #[test]
 fn history_is_not_appended_through_a_link() {
     let h = Harness::with_default_config("histlink");
     let target = a_target_file(&h);
     plant_state(&h, "history.jsonl", &target);
 
-    let out = h.qex_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
+    let out = h.fairq_within(&["submit", "--wait", "--", "true"], Duration::from_secs(60));
 
     assert_unchanged(&target);
     assert!(
         out.status.success(),
-        "a history that qex cannot write never stops a command: {out:?}"
+        "a history that fairq cannot write never stops a command: {out:?}"
     );
-    assert!(is_link(&h.root.join("state/qex/history.jsonl")));
+    assert!(is_link(&h.root.join("state/fairq/history.jsonl")));
 }
 
 /// The lock of the usage record is not opened through a link (issue #88).
@@ -26513,7 +26759,7 @@ fn the_usage_lock_is_not_opened_through_a_link() {
     assert_unchanged(&target);
     let rss = h.status_json(&id)["usage"]["max_rss"].as_u64().unwrap_or(0);
     assert!(rss > 0, "the job must reach the usage record");
-    assert!(!h.root.join("state/qex/usage.json").exists());
+    assert!(!h.root.join("state/fairq/usage.json").exists());
 }
 
 /// A link at the spawn lock stops the start, and nothing is made through it (issue #88).
@@ -26523,11 +26769,11 @@ fn a_spawn_lock_link_stops_the_start_and_makes_nothing() {
     let target = a_missing_target(&h);
     plant_state(&h, "run/spawn.lock", &target);
 
-    let out = h.qex_within(&["info"], Duration::from_secs(60));
+    let out = h.fairq_within(&["info"], Duration::from_secs(60));
 
     no_file_at(&target);
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success(), "qex must refuse the link: {err}");
+    assert!(!out.status.success(), "fairq must refuse the link: {err}");
     assert!(
         err.contains("spawn.lock"),
         "the refusal names the file: {err}"
@@ -26541,11 +26787,11 @@ fn a_daemon_log_link_stops_the_start_and_leaves_its_target() {
     let target = a_target_file(&h);
     plant_state(&h, "run/daemon.log", &target);
 
-    let out = h.qex_within(&["info"], Duration::from_secs(60));
+    let out = h.fairq_within(&["info"], Duration::from_secs(60));
 
     assert_unchanged(&target);
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success(), "qex must refuse the link: {err}");
+    assert!(!out.status.success(), "fairq must refuse the link: {err}");
     // The generic "did not start" text names daemon.log too; match the refused open.
     assert!(
         err.contains("opening the log file") && err.contains("daemon.log"),
@@ -26558,13 +26804,14 @@ fn a_daemon_log_link_stops_the_start_and_leaves_its_target() {
 fn a_pid_file_link_stops_the_coordinator_and_leaves_its_target() {
     let mut h = Harness::with_default_config("pidlink");
     // Without the idle exit, a coordinator that took the file would run for ever.
-    h.extra_env.push(("QEX_IDLE_EXIT_SECS".into(), "1".into()));
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "1".into()));
     let target = a_target_file(&h);
     plant_state(&h, "run/pid", &target);
-    let pid = h.root.join("state/qex/run/pid");
+    let pid = h.root.join("state/fairq/run/pid");
 
-    let out = h.qex_within(&["daemon"], Duration::from_secs(60));
-    let made_a_socket = h.root.join("state/qex/run/s").exists();
+    let out = h.fairq_within(&["daemon"], Duration::from_secs(60));
+    let made_a_socket = h.root.join("state/fairq/run/s").exists();
 
     assert_unchanged(&target);
     assert!(
@@ -26588,7 +26835,7 @@ fn a_coordinator_starts_when_a_sweep_deletes_its_new_socket_directory() {
         "swept",
         |_, pause| {
             (
-                "QEX_TEST_PAUSE_BEFORE_PID_LOCK_MS",
+                "FAIRQ_TEST_PAUSE_BEFORE_PID_LOCK_MS",
                 pause.as_millis().to_string(),
             )
         },
@@ -26605,7 +26852,7 @@ fn a_coordinator_starts_when_a_sweep_deletes_its_socket_directory_after_the_mkdi
         "mkswept",
         |tmp, pause| {
             (
-                "QEX_TEST_PAUSE_AFTER_MKDIR_IN",
+                "FAIRQ_TEST_PAUSE_AFTER_MKDIR_IN",
                 format!("{} {}", pause.as_millis(), tmp.display()),
             )
         },
@@ -26622,7 +26869,7 @@ fn a_coordinator_starts_when_a_sweep_deletes_its_socket_directory_through_a_link
         "lnswept",
         |tmp, pause| {
             (
-                "QEX_TEST_PAUSE_AFTER_MKDIR_IN",
+                "FAIRQ_TEST_PAUSE_AFTER_MKDIR_IN",
                 format!("{} {}", pause.as_millis(), tmp.display()),
             )
         },
@@ -26678,7 +26925,7 @@ fn a_coordinator_starts_after_a_sweep_in_its_pause(
         .stdout(log.try_clone().unwrap())
         .stderr(log)
         .spawn()
-        .expect("qex daemon did not start");
+        .expect("fairq daemon did not start");
     let read_log = || std::fs::read_to_string(&log_path).unwrap_or_default();
     a.until("A pauses", Duration::from_secs(60), || {
         read_log().contains(marker)
@@ -26686,7 +26933,7 @@ fn a_coordinator_starts_after_a_sweep_in_its_pause(
     let paused = Instant::now();
 
     let uid = unsafe { libc::getuid() };
-    let prefix = format!("qex-{uid}-");
+    let prefix = format!("fairq-{uid}-");
     let dirs: Vec<PathBuf> = std::fs::read_dir(&tmp)
         .unwrap()
         .flatten()
@@ -26742,7 +26989,7 @@ fn a_socket_directory_makes_no_pid_file_through_a_link() {
     let tmp = h.root.join("t");
     std::fs::create_dir_all(&tmp).unwrap();
     let uid = unsafe { libc::getuid() };
-    let longest = format!("{}/qex-{uid}-{}/s", tmp.display(), "0".repeat(16));
+    let longest = format!("{}/fairq-{uid}-{}/s", tmp.display(), "0".repeat(16));
     assert!(
         longest.len() <= 100,
         "the private TMPDIR leaves room for the socket path: {longest}"
@@ -26755,15 +27002,15 @@ fn a_socket_directory_makes_no_pid_file_through_a_link() {
     for (key, value) in [
         ("XDG_STATE_HOME", deep.display().to_string()),
         ("TMPDIR", tmp.display().to_string()),
-        ("QEX_IDLE_EXIT_SECS", "1".to_string()),
+        ("FAIRQ_IDLE_EXIT_SECS", "1".to_string()),
     ] {
         h.extra_env.push((key.into(), value));
     }
 
     // The first start makes the directory, whose name is a hash of the state path.
-    let first = h.qex_within(&["daemon"], Duration::from_secs(60));
+    let first = h.fairq_within(&["daemon"], Duration::from_secs(60));
     assert!(first.status.success(), "the first start: {first:?}");
-    let prefix = format!("qex-{uid}-");
+    let prefix = format!("fairq-{uid}-");
     let dirs: Vec<PathBuf> = std::fs::read_dir(&tmp)
         .unwrap()
         .flatten()
@@ -26778,11 +27025,11 @@ fn a_socket_directory_makes_no_pid_file_through_a_link() {
     assert_eq!(dirs.len(), 1, "one socket directory: {dirs:?}");
     let pid = dirs[0].join("pid");
     std::fs::remove_file(&pid).unwrap();
-    // A dangling link: a target that exists would make qex skip the open.
+    // A dangling link: a target that exists would make fairq skip the open.
     let target = a_missing_target(&h);
     std::os::unix::fs::symlink(&target, &pid).unwrap();
 
-    let out = h.qex_within(&["daemon"], Duration::from_secs(60));
+    let out = h.fairq_within(&["daemon"], Duration::from_secs(60));
 
     no_file_at(&target);
     assert!(
@@ -26803,8 +27050,8 @@ fn the_sweep_keeps_a_directory_whose_pid_file_is_a_link() {
     let mut h = Harness::with_default_config("sweeplink");
     let tmp = h.root.join("t");
     let uid = unsafe { libc::getuid() };
-    let linked = tmp.join(format!("qex-{uid}-linked"));
-    let control = tmp.join(format!("qex-{uid}-control"));
+    let linked = tmp.join(format!("fairq-{uid}-linked"));
+    let control = tmp.join(format!("fairq-{uid}-control"));
     std::fs::create_dir_all(&linked).unwrap();
     std::fs::create_dir_all(&control).unwrap();
     let target = a_target_file(&h);
@@ -26812,7 +27059,7 @@ fn the_sweep_keeps_a_directory_whose_pid_file_is_a_link() {
     h.extra_env
         .push(("TMPDIR".into(), tmp.display().to_string()));
 
-    let out = h.qex_within(&["info", "--json"], Duration::from_secs(60));
+    let out = h.fairq_within(&["info", "--json"], Duration::from_secs(60));
 
     // The sweep runs on a thread of the coordinator; watch for longer than its limit.
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -26826,7 +27073,7 @@ fn the_sweep_keeps_a_directory_whose_pid_file_is_a_link() {
     }
 
     assert_unchanged(&target);
-    assert!(out.status.success(), "qex info: {out:?}");
+    assert!(out.status.success(), "fairq info: {out:?}");
     assert!(survived, "the sweep keeps a directory it cannot lock");
     assert!(!control.exists(), "the sweep ran inside the window");
     assert!(is_link(&linked.join("pid")));
@@ -26850,13 +27097,14 @@ fn the_update_lock_is_not_followed() {
     let control = Harness::with_default_config("updctl");
     config(&control);
     control.ok(&["info"]);
-    let record = control.root.join("state/qex/update.json");
+    let record = control.root.join("state/fairq/update.json");
     control.until("the update record", Duration::from_secs(45), || {
         record.exists()
     });
 
     let mut h = Harness::with_default_config("updlink");
-    h.extra_env.push(("QEX_IDLE_EXIT_SECS".into(), "5".into()));
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".into(), "5".into()));
     config(&h);
     let target = a_missing_target(&h);
     plant_state(&h, "update.lock", &target);
@@ -26869,7 +27117,7 @@ fn the_update_lock_is_not_followed() {
     );
 
     no_file_at(&target);
-    assert!(!h.root.join("state/qex/update.json").exists());
+    assert!(!h.root.join("state/fairq/update.json").exists());
 }
 
 /// Puts a symbolic link to `target` at `name` in the directory of a job.
@@ -26886,13 +27134,13 @@ fn run_with_a_link(h: &Harness, name: &str, target: &Path, job: &[&str]) -> Stri
     let id = h.submit(&args);
     plant_job(&h.job_dir(&id), name, target);
     h.ok(&["resume", "queue", "--all"]);
-    h.qex_within(&["wait", &id, "--timeout", "30s"], Duration::from_secs(60));
+    h.fairq_within(&["wait", &id, "--timeout", "30s"], Duration::from_secs(60));
     id
 }
 
 /// Waits for the supervisor's line about the stop hook, and gives its log.
 ///
-/// qex prints that line after both opens of hook.log, whether they succeed or fail.
+/// fairq prints that line after both opens of hook.log, whether they succeed or fail.
 fn the_hook_line(h: &Harness, id: &str) -> String {
     let log = h.job_dir(id).join("supervisor.log");
     let said = format!("the stop hook of the job {id}");
@@ -26917,7 +27165,7 @@ fn a_supervisor_log_link_fails_the_job() {
     assert_eq!(status["state"], "failed", "{status}");
     let error = status["error"].as_str().unwrap_or("");
     assert!(
-        error.contains("qex could not start the job") && error.contains("supervisor.log"),
+        error.contains("fairq could not start the job") && error.contains("supervisor.log"),
         "{error}"
     );
 }
@@ -26980,7 +27228,7 @@ fn a_tail_file_link_is_refused_and_the_job_completes() {
     assert!(log.contains("making the file for the last output"), "{log}");
 }
 
-/// A link at hook.log is refused where qex opens it for the hook's output (issue #88).
+/// A link at hook.log is refused where fairq opens it for the hook's output (issue #88).
 #[test]
 fn a_hook_log_link_is_refused_and_the_job_keeps_its_result() {
     let h = Harness::new(
@@ -27003,7 +27251,7 @@ fn a_hook_log_link_is_refused_and_the_job_keeps_its_result() {
     assert!(log.contains(&said), "{log}");
 }
 
-/// `qex kill` does not write its mark through a link (issue #88).
+/// `fairq kill` does not write its mark through a link (issue #88).
 #[test]
 fn a_killed_by_user_link_is_not_written() {
     let h = Harness::with_default_config("killlink");
@@ -27016,7 +27264,7 @@ fn a_killed_by_user_link_is_not_written() {
 
     // The coordinator writes the mark before it sends the signal, and answers after both.
     h.ok(&["kill", &id, "--grace", "1s"]);
-    h.qex_within(&["wait", &id, "--timeout", "30s"], Duration::from_secs(60));
+    h.fairq_within(&["wait", &id, "--timeout", "30s"], Duration::from_secs(60));
 
     assert_unchanged(&target);
     assert_eq!(h.state_of(&id), "killed");
@@ -27030,7 +27278,7 @@ fn the_hook_verdict_is_not_appended_through_a_link() {
     // The hook replaces hook.log with a link after `run` opened it, so only
     // the append of the verdict meets the link.
     let script = format!(
-        r#"rm "$QEX_JOB_DIR/hook.log" && ln -s {} "$QEX_JOB_DIR/hook.log""#,
+        r#"rm "$FAIRQ_JOB_DIR/hook.log" && ln -s {} "$FAIRQ_JOB_DIR/hook.log""#,
         target.display()
     );
     h.write_config(&format!(
@@ -27042,7 +27290,7 @@ fn the_hook_verdict_is_not_appended_through_a_link() {
     ));
 
     let id = h.submit(&["submit", "--", "true"]);
-    h.qex_within(&["wait", &id, "--timeout", "30s"], Duration::from_secs(60));
+    h.fairq_within(&["wait", &id, "--timeout", "30s"], Duration::from_secs(60));
     let log = the_hook_line(&h, &id);
 
     assert_unchanged(&target);

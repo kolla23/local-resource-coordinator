@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 #
 # A `gh` that answers from a local git repository, for `test.sh`.
 #
 # `compute-version.sh` reads the GitHub API, so a test of it needs an API. This
 # file is a MODEL of the four endpoints that the driver calls, built from the
-# repository in `QEX_TEST_REPO`. The test copies it to a directory called `gh`
+# repository in `FAIRQ_TEST_REPO`. The test copies it to a directory called `gh`
 # on the PATH, so the driver runs with no change of its own.
 #
 # The model gives the SHAPES that the driver reads, and the driver applies its
@@ -12,17 +13,17 @@
 # tested here. The shapes come from the API of GitHub, and a change there is
 # what this file cannot see; keep the JSON below beside the documentation.
 #
-# `QEX_TEST_GH_FAIL=1` makes every call fail, which is how the test proves that
+# `FAIRQ_TEST_GH_FAIL=1` makes every call fail, which is how the test proves that
 # a call that fails stops the driver and does not go out as an empty answer.
 
 set -euo pipefail
 
-if [ "${QEX_TEST_GH_FAIL:-}" = "1" ]; then
+if [ "${FAIRQ_TEST_GH_FAIL:-}" = "1" ]; then
     echo "gh: the API said no (this is the stub, and it fails on purpose)" >&2
     exit 1
 fi
 
-repo="${QEX_TEST_REPO:?the stub needs QEX_TEST_REPO}"
+repo="${FAIRQ_TEST_REPO:?the stub needs FAIRQ_TEST_REPO}"
 
 [ "${1:-}" = "api" ] || {
     echo "the stub knows \`gh api\` only, and it got \`${1:-}\`" >&2

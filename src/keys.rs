@@ -1,6 +1,7 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module reads one key at a time from the terminal.
 //!
-//! `qex top` uses it to move the selection and to act on a job. A terminal
+//! `fairq top` uses it to move the selection and to act on a job. A terminal
 //! normally gives a line to a program when the user presses Enter, so this
 //! module turns that behaviour off while the command operates.
 //!

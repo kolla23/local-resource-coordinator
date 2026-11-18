@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 #
 # Gives the version of a commit from the GITHUB API, with no clone of the
 # history.
@@ -18,7 +19,7 @@
 #
 # # THE TRAP: the tags are not in the history of `main`
 #
-# qex uses fishbone tagging. The commit that holds the release number hangs OFF
+# fairq uses fishbone tagging. The commit that holds the release number hangs OFF
 # `main` and is never ON it:
 #
 #     main:  A --- B --- C            <- the spine, always 0.0.0-dev

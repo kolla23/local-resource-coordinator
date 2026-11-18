@@ -1,41 +1,42 @@
 ---
-title: qex security
-description: What qex writes to the disk, who can read it, and where the trust boundaries are.
+title: fairq security
+description: What fairq writes to the disk, who can read it, and where the trust boundaries are.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the state directory, job records and the config file must be yours (issue #88). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: qex opens the files it writes in the state and job directories without following a symbolic link (issue #88). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: reports go to this repository's advisories (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
 # Security
 
-## What qex writes, and who can read it
+## What fairq writes, and who can read it
 
 | Path | Mode | What it holds |
 | ---- | ---- | ------------- |
-| `~/.local/state/qex/jobs/<uuid>/` | 0700 | one job |
+| `~/.local/state/fairq/jobs/<uuid>/` | 0700 | one job |
 | `spec.json` | 0600 | the command, the directory, the claims and THE CAPTURED ENVIRONMENT |
 | `status.json` | 0600 | the state, the exit code, the times and the measured use |
 | `stdout.log`, `stderr.log` | 0600 | everything that the job wrote |
 | `hook.log` | 0600 | everything that the stop hook wrote |
-| `~/.config/qex.toml` | your mode | the configuration |
-| `/tmp/qex/u<uid>/` | 0755 | the claims of your coordinator, for the other users |
+| `~/.config/fairq.toml` | your mode | the configuration |
+| `/tmp/fairq/u<uid>/` | 0755 | the claims of your coordinator, for the other users |
 
 The job directory and the files in it are for you only. No other user of the
 machine can read the environment of your job, or its output.
 
-## Whose files qex uses
+## Whose files fairq uses
 
-qex uses a state directory only if you own it and no other user can replace it
+fairq uses a state directory only if you own it and no other user can replace it
 or a directory above it: each directory on the way must be yours or root's and
 must not be writable by every user (a sticky directory such as `/tmp` is), and
-qex follows a symbolic link only when you or root own it. The state directory
-itself is never left writable by group or others: qex sets it to 0700. qex reads
+fairq follows a symbolic link only when you or root own it. The state directory
+itself is never left writable by group or others: fairq sets it to 0700. fairq reads
 a job record only if you own it, and the config file only if you or root own it
 and other users cannot write it.
 
-qex opens the files it writes in the state directory and in a job directory
+fairq opens the files it writes in the state directory and in a job directory
 without following a symbolic link at their name, so a link planted there makes
 the open fail instead of writing elsewhere.
 
@@ -43,41 +44,41 @@ A directory above the state directory, and the config file, may be writable by a
 group, and the members of that group can still change them. On a system that
 gives each user a private group, that group is you alone.
 
-So `sudo -E qex` on the files of another user stops with a message. Set
+So `sudo -E fairq` on the files of another user stops with a message. Set
 `XDG_STATE_HOME` and `XDG_CONFIG_HOME` to directories that you own. Inside a
 sandbox with its own user namespace, put `XDG_STATE_HOME` under `/tmp`.
 
 ## The environment
 
-`qex submit` copies your environment by default, because a job must operate in
+`fairq submit` copies your environment by default, because a job must operate in
 the same way as a command that you type now. **That environment goes to the disk
 in `spec.json`.** A shell that holds a token gives that token to the file.
 
 Three answers:
 
 ```sh
-qex submit --env-capture minimal -- ...   # PATH, HOME, USER, LOGNAME, SHELL, LANG, TZ
-qex submit --no-env-capture -- ...        # nothing at all
-qex submit --env-capture all -- ...       # everything (the default)
+fairq submit --env-capture minimal -- ...   # PATH, HOME, USER, LOGNAME, SHELL, LANG, TZ
+fairq submit --no-env-capture -- ...        # nothing at all
+fairq submit --env-capture all -- ...       # everything (the default)
 ```
 
-`qex status` hides the environment, and `qex status --json` hides it as well.
+`fairq status` hides the environment, and `fairq status --json` hides it as well.
 Add `--show-env` to see it. This is deliberate: an agent that writes the output
-of `qex status --json` into a log must not write your token into that log.
+of `fairq status --json` into a log must not write your token into that log.
 
-**The command line is not hidden.** `qex list` and `qex status` show the program
+**The command line is not hidden.** `fairq list` and `fairq status` show the program
 and its arguments, and the directory. Put a secret in the environment or in a
 file, and never in an argument.
 
 ## The command when a job stops
 
-`[hooks] on_stop` names a command that qex starts each time a job stops. The
-command is in your config file, so it is your command, and qex trusts it in the
+`[hooks] on_stop` names a command that fairq starts each time a job stops. The
+command is in your config file, so it is your command, and fairq trusts it in the
 same way as it trusts a job that you submit.
 
 **The data of the job is not yours.** A job name comes from the person or the
 agent that submitted the job, and the output of a job comes from the program.
-qex therefore gives the values of the job to the hook IN THE ENVIRONMENT, and it
+fairq therefore gives the values of the job to the hook IN THE ENVIRONMENT, and it
 builds no command line from them. A job with the name `; rm -rf ~` reaches the
 hook as a variable, and never as a command.
 
@@ -91,16 +92,16 @@ The size limit bounds the standard output and the standard error of the hook,
 and nothing else. A hook that opens a file of its own and writes to it is a
 program that you chose to run.
 
-qex starts no shell for the hook, in the same way as for a job. A shell that you
+fairq starts no shell for the hook, in the same way as for a job. A shell that you
 name in `on_stop` reads the variables, and the quotation is then yours to write.
 
 **A terminal needs no shell to be attacked.** A hook of two words that writes
-`$QEX_JOB_NAME` to a screen is enough. A name with an ESC byte in it moves the
+`$FAIRQ_JOB_NAME` to a screen is enough. A name with an ESC byte in it moves the
 cursor and writes over the text around it, and a name with a newline in it makes
-a second line that the reader takes for a message of qex. `QEX_JOB_NAME`
+a second line that the reader takes for a message of fairq. `FAIRQ_JOB_NAME`
 therefore holds the SAFE form of the name — the letters, the numbers and `-_.`
-— which is the one form of a name that qex shows anywhere. `QEX_TAGS` and
-`QEX_CWD` keep their text, and qex replaces each control character in them with
+— which is the one form of a name that fairq shows anywhere. `FAIRQ_TAGS` and
+`FAIRQ_CWD` keep their text, and fairq replaces each control character in them with
 a space.
 
 A NUL byte is the other reason for that rule. The system takes no environment
@@ -109,52 +110,52 @@ starting at all, and the message named the config file. Job data must never
 decide that a notification does not arrive.
 
 The hook has a time limit and a size limit, and the size limit fails closed: the
-hook writes into a pipe, so qex stops reading at the limit and the disk stops
+hook writes into a pipe, so fairq stops reading at the limit and the disk stops
 growing there. A log that nobody reads must never fill the file system of a
 machine that other people work on. Its output goes to `hook.log` in the
-job directory with mode 0600, and `qex logs <id> --hook` reads that file. A hook
+job directory with mode 0600, and `fairq logs <id> --hook` reads that file. A hook
 that fails changes no job.
 
 ## The several-user accounting
 
-Each coordinator writes its claims to `/tmp/qex/u<uid>/`, and it reads the
+Each coordinator writes its claims to `/tmp/fairq/u<uid>/`, and it reads the
 records of the other users before it starts a job.
 
 **This method is cooperative, and it is not a control.** A different user can
-write an incorrect value, and qex will believe it. The threat model is a
+write an incorrect value, and fairq will believe it. The threat model is a
 colleague or an agent that does not know about your work. It is not a person who
 wants to damage your work.
 
-qex protects the method against the usual faults of a directory that everybody
+fairq protects the method against the usual faults of a directory that everybody
 can write:
 
-- `/tmp/qex` must be a directory, and it must have the sticky bit, and it must
-  belong to root or to you. Without those, the accounting stops and qex operates
+- `/tmp/fairq` must be a directory, and it must have the sticky bit, and it must
+  belong to root or to you. Without those, the accounting stops and fairq operates
   for one user only.
-- qex reads the owner of each file, and it discards a file whose owner does not
+- fairq reads the owner of each file, and it discards a file whose owner does not
   agree with the name of its directory.
-- qex opens each file without following a symbolic link.
-- qex discards a record that is old, or whose process is dead, or that comes
+- fairq opens each file without following a symbolic link.
+- fairq discards a record that is old, or whose process is dead, or that comes
   from an earlier start of the machine.
-- A file that qex cannot read gives no error. It is discarded.
+- A file that fairq cannot read gives no error. It is discarded.
 
-qex also tests the free memory of the machine before each start, so it finds a
+fairq also tests the free memory of the machine before each start, so it finds a
 load that no coordinator reports.
 
 Turn the method off with `[peers] enabled = false`.
 
 ## The limits on a job
 
-**qex applies no limit to a job.** A claim controls the queue only: it decides
+**fairq applies no limit to a job.** A claim controls the queue only: it decides
 what STARTS and when. A job that claims 2GB and uses 20GB still fills the
-machine, and qex says so.
+machine, and fairq says so.
 
-qex does test the free memory of the machine before it starts a job, and it
+fairq does test the free memory of the machine before it starts a job, and it
 refuses to start one that the machine cannot hold. That test limits the damage,
 and it is not a limit on a job that already runs.
 
-A configuration file that qex cannot read gives the job the default values, and
-the record of that job says so, where `qex status` shows it.
+A configuration file that fairq cannot read gives the job the default values, and
+the record of that job says so, where `fairq status` shows it.
 
 ## The coordinator and the version
 
@@ -162,7 +163,7 @@ A coordinator can operate for hours, and a new build can replace the program in
 that time. The CLI then holds options that the coordinator does not know, and a
 JSON field that a program does not know is IGNORED, in silence.
 
-qex asks the coordinator what it can do, and it REFUSES a job that needs
+fairq asks the coordinator what it can do, and it REFUSES a job that needs
 something the coordinator cannot obey. A user who writes `--lock target` against
 an earlier coordinator gets an error and a remedy, and not a job id for a job
 that would run with no lock.

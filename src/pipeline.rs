@@ -1,7 +1,8 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module reads a file that describes several jobs, and submits them
 //! together.
 //!
-//! The key in the file is `[[jobs]]`, and each entry becomes a qex job with its
+//! The key in the file is `[[jobs]]`, and each entry becomes a fairq job with its
 //! own id, its own record and its own log file. This module says `job` for that
 //! reason, and not `stage`.
 //!
@@ -13,7 +14,7 @@
 //! it needs the agent to keep each id between the commands.
 //!
 //! A pipeline file removes the choice. The names in the file belong to that
-//! file and to that one submission. qex reads them, changes each one into the
+//! file and to that one submission. fairq reads them, changes each one into the
 //! id that it made a moment before, and no name leaves the file. A second run
 //! of the same file makes new jobs with new ids, and the two runs never meet.
 //!
@@ -29,7 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct PipelineFile {
-    /// A name for the whole pipeline, for `qex list` to show.
+    /// A name for the whole pipeline, for `fairq list` to show.
     pub name: Option<String>,
     /// The jobs. Each one is a job file with a name.
     pub jobs: Vec<Stage>,
@@ -226,7 +227,7 @@ fn error(path: &std::path::Path, detail: &str) -> anyhow::Error {
          \x20   name = \"test\"\n\
          \x20   command = [\"make\", \"test\"]\n\
          \x20   needs = [\"build\"]\n\n\
-         For every field, run `qex help pipeline`.",
+         For every field, run `fairq help pipeline`.",
         path.display()
     )
 }
@@ -234,7 +235,7 @@ fn error(path: &std::path::Path, detail: &str) -> anyhow::Error {
 /// Makes the specification of one stage.
 ///
 /// The dependencies are not here. The caller adds them, because it holds the
-/// id that qex made for each earlier stage.
+/// id that fairq made for each earlier stage.
 pub fn stage_spec(
     stage: &Stage,
     cfg: &crate::config::Config,
@@ -265,7 +266,7 @@ pub fn stage_spec(
         // pipeline, and would receive a shape that no file describes.
         //
         // A pipeline needs one key for the whole group, and that is a
-        // different feature. qex does not accept a part of it in silence.
+        // different feature. fairq does not accept a part of it in silence.
         dedupe_key: None,
         dedupe_window: None,
         resources: stage.resources.clone(),
@@ -453,7 +454,7 @@ needs = ["a"]
         assert!(err.contains("circle"), "got: {err}");
     }
 
-    /// A name that no stage has is a fault of the file, and qex must find it
+    /// A name that no stage has is a fault of the file, and fairq must find it
     /// before it submits anything.
     #[test]
     fn a_dependency_on_a_stage_that_does_not_exist_is_refused() {
@@ -505,7 +506,7 @@ command = ["false"]
         assert!(file("").unwrap_err().to_string().contains("no job"));
     }
 
-    /// A stage name with the form of an id would break the rule that qex uses
+    /// A stage name with the form of an id would break the rule that fairq uses
     /// to choose between a name and an id.
     #[test]
     fn a_stage_name_with_the_form_of_an_id_is_refused() {

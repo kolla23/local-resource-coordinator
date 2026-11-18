@@ -1,12 +1,13 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: the peer test holds the env lock (issue #5); tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-01: test State gains the config-look fields; the config read takes its clocks before the lock (issue #17).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module decides when each job starts.
 //!
 //! The rule is simple: a job starts when the machine has capacity for its
 //! claim. The claims stop two agents from starting too much work together.
 //!
 //! One job type does not follow the rule. A job with a claim that is larger
-//! than the full budget can never meet the test. qex starts such a job alone
+//! than the full budget can never meet the test. fairq starts such a job alone
 //! when no other job operates. The job can then swap or stop with an
 //! out-of-memory error. That result is data for the agent. A job that waits for
 //! ever gives no data.
@@ -93,7 +94,7 @@ fn is_a_lock(pools: &[Pool], name: &str) -> bool {
 /// machine, and that result is data for the agent. A fault that THIS function
 /// finds can never become correct on this machine. An empty machine does not
 /// make a fifth device, so the job waits for a change that no scheduler can
-/// make. qex therefore refuses it at the submission, whatever `[queue]
+/// make. fairq therefore refuses it at the submission, whatever `[queue]
 /// oversized` says, and the message gives the correction.
 pub fn pool_check(cfg: &Config, spec: &JobSpec) -> Result<(), String> {
     let pools = cfg.pools().map_err(|e| e.to_string())?;
@@ -117,17 +118,17 @@ pub fn pool_check(cfg: &Config, spec: &JobSpec) -> Result<(), String> {
         let Some(pool) = declared else {
             // A name that the configuration does not declare is a lock, and a
             // lock needs no configuration. That rule holds for one unit only:
-            // qex cannot invent a second unit of something that nobody
+            // fairq cannot invent a second unit of something that nobody
             // declared.
             //
             // The name `gpu` is the one exception, because `--gpu` promises a
             // device index and an environment variable. A silent lock would
-            // give the job neither, and the job would then use a card that qex
+            // give the job neither, and the job would then use a card that fairq
             // is not accounting for.
             if name == crate::config::GPU_POOL {
                 return Err(format!(
-                    "there is no pool `{name}` in the configuration, so qex cannot give this \
-                     job a GPU. Add a pool to ~/.config/qex.toml:\n\n\
+                    "there is no pool `{name}` in the configuration, so fairq cannot give this \
+                     job a GPU. Add a pool to ~/.config/fairq.toml:\n\n\
                      \x20   [[pool]]\n\
                      \x20   name    = \"gpu\"\n\
                      \x20   size    = \"vram\"\n\
@@ -138,8 +139,8 @@ pub fn pool_check(cfg: &Config, spec: &JobSpec) -> Result<(), String> {
             if claim.count > 1 || claim.size.is_some() {
                 return Err(format!(
                     "the job claims {} of `{name}`, and the configuration does not declare \
-                     that pool, so qex treats it as a lock of size 1. This job can never \
-                     start. Add the pool to ~/.config/qex.toml:\n\n\
+                     that pool, so fairq treats it as a lock of size 1. This job can never \
+                     start. Add the pool to ~/.config/fairq.toml:\n\n\
                      \x20   [[pool]]\n\
                      \x20   name  = \"{name}\"\n\
                      \x20   count = 4\n\n\
@@ -160,7 +161,7 @@ pub fn pool_check(cfg: &Config, spec: &JobSpec) -> Result<(), String> {
             return Err(format!(
                 "the job claims {} of the pool `{name}` and the pool has {}. This job can \
                  never start. Claim {} or fewer, or add the devices to `[[pool]]` in \
-                 ~/.config/qex.toml.",
+                 ~/.config/fairq.toml.",
                 claim.count, pool.total, pool.total
             ));
         }
@@ -171,7 +172,7 @@ pub fn pool_check(cfg: &Config, spec: &JobSpec) -> Result<(), String> {
             if size > pool.largest_device() {
                 return Err(format!(
                     "the job claims {} of {} for each device, and the largest device of the \
-                     pool `{name}` has {}. qex does not add the memory of the devices \
+                     pool `{name}` has {}. fairq does not add the memory of the devices \
                      together, so this job can never start. Claim {} or less.",
                     format_size(size),
                     pool.size_name.clone().unwrap_or_else(|| "size".to_string()),
@@ -191,7 +192,7 @@ pub fn pool_check(cfg: &Config, spec: &JobSpec) -> Result<(), String> {
 ///
 /// # Which claim the queue uses
 ///
-/// The caller gives the claim of the RECORD, which is the claim in force. qex
+/// The caller gives the claim of the RECORD, which is the claim in force. fairq
 /// changes no claim, so it is the claim of the specification as well.
 pub fn size_check(cfg: &Config, cpu: u64, mem: u64) -> Size {
     let cpu_budget = cfg.budget_cpu().unwrap_or(1);
@@ -223,37 +224,37 @@ pub fn size_check(cfg: &Config, cpu: u64, mem: u64) -> Size {
 /// The class decides one thing: does the queue keep the capacity for the job,
 /// or does it start the jobs behind it?
 ///
-/// qex controls the release of the capacity that its own jobs hold, and it
+/// fairq controls the release of the capacity that its own jobs hold, and it
 /// controls nothing else. A queue that keeps capacity for a job which waits for
-/// another user therefore holds the machine empty for a time that qex cannot
+/// another user therefore holds the machine empty for a time that fairq cannot
 /// measure. That was the measured fault: one job that a peer blocked kept two
 /// small jobs in the queue for ever.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Blocker {
-    /// The jobs of this queue hold the capacity. qex schedules the release.
+    /// The jobs of this queue hold the capacity. fairq schedules the release.
     Sibling,
-    /// The coordinator of another user holds the capacity. qex does not
+    /// The coordinator of another user holds the capacity. fairq does not
     /// schedule that release, and it can be hours.
     Peer { count: usize },
-    /// A program outside qex holds the memory, or the machine has pressure.
+    /// A program outside fairq holds the memory, or the machine has pressure.
     Machine,
     /// The job is larger than the budget, and it waits for a quiet machine.
     OversizedWaitsForIdle,
     /// The job is larger than the budget, and the config keeps it in the queue.
-    /// Such a job never starts, so capacity that qex keeps for it buys nothing.
+    /// Such a job never starts, so capacity that fairq keeps for it buys nothing.
     OversizedParked,
 }
 
 impl Blocker {
     /// Tells if the queue may keep capacity for a job with this class.
     ///
-    /// A `Peer` or a `Machine` holds capacity that qex does not schedule. An
+    /// A `Peer` or a `Machine` holds capacity that fairq does not schedule. An
     /// empty machine gives such a job nothing, and it stops every other job.
     fn may_reserve(&self) -> bool {
         matches!(self, Blocker::Sibling | Blocker::OversizedWaitsForIdle)
     }
 
-    /// The word that `qex info` gives for a program to read.
+    /// The word that `fairq info` gives for a program to read.
     pub fn word(&self) -> &'static str {
         match self {
             Blocker::Sibling => "waits-for-capacity",
@@ -284,7 +285,7 @@ enum Admit {
 /// The resources that the jobs which operate now hold.
 ///
 /// The cores and the memory are two numbers. A pool needs two more: the units
-/// of the pool, and — for a pool whose devices qex names — the quantity in use
+/// of the pool, and — for a pool whose devices fairq names — the quantity in use
 /// on EACH device. The capacity of the devices is never added together, so the
 /// second map cannot be derived from the first.
 #[derive(Debug, Clone, Default)]
@@ -396,11 +397,11 @@ fn sibling_wait(fact: String, resource: &str) -> Admit {
     Admit::No {
         blocker: Blocker::Sibling,
         reason: format!(
-            "{fact} Those jobs release the {resource} when they stop. qex can start a smaller job \
+            "{fact} Those jobs release the {resource} when they stop. fairq can start a smaller job \
              before this one."
         ),
         held_reason: Some(format!(
-            "{fact} qex starts no other job before this one. Read `qex list` to see the jobs that \
+            "{fact} fairq starts no other job before this one. Read `fairq list` to see the jobs that \
              hold the {resource}."
         )),
     }
@@ -502,7 +503,7 @@ fn free_devices(
         .filter_map(|(i, capacity)| {
             let index = i as u32;
             // A device that another user holds is not available. A peer
-            // publishes the index only, so qex keeps the WHOLE device: qex
+            // publishes the index only, so fairq keeps the WHOLE device: fairq
             // cannot see how much of that card the other user's job takes, and
             // a guess that leaves room would put two jobs on one card.
             if theirs.map(|t| t.contains(&index)).unwrap_or(false) {
@@ -528,9 +529,9 @@ fn free_devices(
 /// The class decides whether the queue may keep capacity for the job. See
 /// [`Blocker`]. A shortage that the jobs of THIS queue cause has a known end,
 /// so the head may reserve. A shortage that another user causes has no known
-/// end that qex can measure, so the head must never reserve: qex cannot make
+/// end that fairq can measure, so the head must never reserve: fairq cannot make
 /// the other user give the device back, and a reservation would hold the whole
-/// machine empty for a time that qex cannot name.
+/// machine empty for a time that fairq cannot name.
 struct PoolWait {
     blocker: Blocker,
     reason: String,
@@ -609,9 +610,9 @@ fn pool_wait(
                 blocker: Blocker::Peer { count: peers.count },
                 reason: format!(
                     "this job cannot fit while another user holds the pool `{name}`: \
-                     {arithmetic} {} part of it. qex does not control that user, so this wait has \
-                     no known end. qex starts the jobs behind this one while the pool is not \
-                     free. Read `qex info` for the pools of this machine.",
+                     {arithmetic} {} part of it. fairq does not control that user, so this wait has \
+                     no known end. fairq starts the jobs behind this one while the pool is not \
+                     free. Read `fairq info` for the pools of this machine.",
                     other_users(peers.count)
                 ),
                 // A `Peer` never keeps capacity, so no reader sees this text.
@@ -622,11 +623,11 @@ fn pool_wait(
                 blocker: Blocker::Sibling,
                 reason: format!(
                     "waits for the pool `{name}`: {arithmetic} Those jobs release the pool when \
-                     they stop. qex can start a job that does not need this pool before this one."
+                     they stop. fairq can start a job that does not need this pool before this one."
                 ),
                 held_reason: Some(format!(
-                    "waits for the pool `{name}`: {arithmetic} qex starts no other job before \
-                     this one. Read `qex list` to see the jobs that hold the pool."
+                    "waits for the pool `{name}`: {arithmetic} fairq starts no other job before \
+                     this one. Read `fairq list` to see the jobs that hold the pool."
                 )),
             }
         });
@@ -681,7 +682,7 @@ fn assign(
         //
         // A number here would be wrong. The devices of a pool can have
         // different capacities, and any single number would leave a part of
-        // the largest device free — which would let qex put a second job on a
+        // the largest device free — which would let fairq put a second job on a
         // card that the first job already owns in full.
         out.insert(
             name.clone(),
@@ -753,9 +754,9 @@ fn admit(
                 blocker: Blocker::Peer { count: peers.count },
                 reason: format!(
                     "this job cannot fit while another user holds capacity: the job needs {}, this \
-                     queue holds {} of the {} in the budget, and {} {}. qex does not control that \
-                     user, so this wait has no known end. qex starts the jobs behind this one \
-                     while the capacity is not free. Read `qex info` for the load of the machine.",
+                     queue holds {} of the {} in the budget, and {} {}. fairq does not control that \
+                     user, so this wait has no known end. fairq starts the jobs behind this one \
+                     while the capacity is not free. Read `fairq info` for the load of the machine.",
                     cores(cpu),
                     cpu_used,
                     cores(cpu_budget),
@@ -770,9 +771,9 @@ fn admit(
                 blocker: Blocker::Peer { count: peers.count },
                 reason: format!(
                     "this job cannot fit while another user holds capacity: the job needs {}, this \
-                     queue holds {} of the {} budget, and {} {}. qex does not control that user, \
-                     so this wait has no known end. qex starts the jobs behind this one while the \
-                     capacity is not free. Read `qex info` for the load of the machine.",
+                     queue holds {} of the {} budget, and {} {}. fairq does not control that user, \
+                     so this wait has no known end. fairq starts the jobs behind this one while the \
+                     capacity is not free. Read `fairq info` for the load of the machine.",
                     format_size(mem),
                     format_size(mem_used),
                     format_size(mem_budget),
@@ -798,8 +799,8 @@ fn admit(
         };
     }
 
-    // Test 4: the machine. This test finds every load, and not the load of qex
-    // only. It is the test that a program outside qex cannot avoid.
+    // Test 4: the machine. This test finds every load, and not the load of fairq
+    // only. It is the test that a program outside fairq cannot avoid.
     let reserve = cfg.reserve_mem().unwrap_or(0);
     let available = machine.available;
     if available < reserve + mem {
@@ -830,16 +831,16 @@ fn admit(
                  and the machine is healthy"
             )),
             _ => reason.push_str(
-                ". Use `qex info` to see the load of the machine, and `qex list` to see what \
+                ". Use `fairq info` to see the load of the machine, and `fairq list` to see what \
                  holds the memory",
             ),
         }
         // Say that this wait has no known end, and that the queue continues.
-        // The memory belongs to a program that qex never saw, so an empty
+        // The memory belongs to a program that fairq never saw, so an empty
         // queue does not give it back.
         reason.push_str(
-            ". qex does not control the programs outside this queue, so this wait has no known \
-             end. qex starts the jobs behind this one while the memory is not free.",
+            ". fairq does not control the programs outside this queue, so this wait has no known \
+             end. fairq starts the jobs behind this one while the memory is not free.",
         );
         return Admit::No {
             blocker: Blocker::Machine,
@@ -854,8 +855,8 @@ fn admit(
                 blocker: Blocker::Machine,
                 reason: format!(
                     "waits for the machine: the memory pressure is {:.1} and the limit is {:.1}. \
-                     qex does not control the programs outside this queue, so this wait has no \
-                     known end. qex starts the jobs behind this one while the pressure is high.",
+                     fairq does not control the programs outside this queue, so this wait has no \
+                     known end. fairq starts the jobs behind this one while the pressure is high.",
                     pressure, cfg.system.max_pressure
                 ),
                 held_reason: None,
@@ -907,7 +908,7 @@ fn verdict(
             blocker: Blocker::OversizedParked,
             reason: format!(
                 "{reason}\nThe configuration changed after the submission of this job. This job \
-                 never starts, so qex starts the jobs behind it."
+                 never starts, so fairq starts the jobs behind it."
             ),
             held_reason: None,
         };
@@ -945,13 +946,13 @@ fn verdict(
                 return Verdict::Wait {
                     blocker: Blocker::OversizedWaitsForIdle,
                     reason: format!(
-                        "{reason}; qex starts this job when no other qex job operates on the \
-                         machine and memory pressure is within the configured limit. qex starts \
+                        "{reason}; fairq starts this job when no other fairq job operates on the \
+                         machine and memory pressure is within the configured limit. fairq starts \
                          the jobs behind this one until then."
                     ),
                     held_reason: Some(format!(
-                        "{reason}; qex starts this job when no other qex job operates on the \
-                         machine and memory pressure is within the configured limit. qex starts \
+                        "{reason}; fairq starts this job when no other fairq job operates on the \
+                         machine and memory pressure is within the configured limit. fairq starts \
                          no other job before this one, so this queue becomes empty."
                     )),
                 };
@@ -959,11 +960,11 @@ fn verdict(
 
             let text = match cfg.queue.oversized {
                 // The config keeps this job in the queue, so it never starts.
-                // Capacity that qex keeps for it thus gives it nothing and
+                // Capacity that fairq keeps for it thus gives it nothing and
                 // stops every other job. Say that the queue continues.
                 OversizedPolicy::Queue => format!(
                     "{reason}; the config file keeps this job in the queue. This job never starts, \
-                     so qex starts the jobs behind it."
+                     so fairq starts the jobs behind it."
                 ),
                 _ => reason.clone(),
             };
@@ -988,7 +989,7 @@ pub fn run(coord: Arc<Coordinator>) {
         //
         // THE READ IS OUTSIDE THE LOCK. A read of a file can take any length of
         // time. A review put a FIFO at the path of the configuration file and
-        // measured `qex info` with no answer in 15 seconds: this thread waited
+        // measured `fairq info` with no answer in 15 seconds: this thread waited
         // in the open, and the three other threads waited for the mutex that
         // this thread held. `read_config_file` now refuses a file that is not a
         // regular file, and this line keeps the mutex free while it reads.
@@ -997,7 +998,7 @@ pub fn run(coord: Arc<Coordinator>) {
         // timeout of 500ms, but every request thread calls `notify`, so a turn
         // is as short as the work makes it. Measured with a mark on each turn:
         // the median gap was 500.7ms with nothing to do, and 17.0ms with a loop
-        // of `qex submit` running, with a minimum of 1.2ms. `reload_config`
+        // of `fairq submit` running, with a minimum of 1.2ms. `reload_config`
         // therefore measures TIME, and it must never count turns.
         // With the clocks of the moment the read computed the age, before
         // the wait for the mutex (issue #17).
@@ -1024,9 +1025,9 @@ pub fn run(coord: Arc<Coordinator>) {
         //
         // The third case is the one that is easy to lose. An expired job and a
         // skipped job have no supervisor and no request thread to announce
-        // them, so a turn that forgets them leaves `qex wait` asleep until the
+        // them, so a turn that forgets them leaves `fairq wait` asleep until the
         // 30 second fallback in `handle_wait`. Measured with the `finished`
-        // term removed: a 3s queue limit gave `qex wait` at 30.0s, 2 of 2.
+        // term removed: a 3s queue limit gave `fairq wait` at 30.0s, 2 of 2.
         //
         // THE TERMS AND THE CONDITION ARE NOT THE SAME KIND OF THING, AND A
         // READER MUST NOT CONFUSE THEM.
@@ -1044,7 +1045,7 @@ pub fn run(coord: Arc<Coordinator>) {
         // `/proc` can report. The latency was the same to the millisecond.
         //
         // A mutation of this condition that makes it MORE often true therefore
-        // survives every test, and must: no test may fail because qex told the
+        // survives every test, and must: no test may fail because fairq told the
         // truth too often. Only a mutation that makes it LESS often true has a
         // signature. Do not read a surviving mutant here as a hole in the tests,
         // and do not add a test that counts wakeups to close it: that test would
@@ -1138,7 +1139,7 @@ fn step(coord: &Arc<Coordinator>) -> anyhow::Result<(usize, usize)> {
                 // that the pause took.
                 if let Some(end) = expired.queue_end {
                     crate::pause::end_queue_pause(&mut state, end);
-                    log("a pause reached its end; qex starts the queue again");
+                    log("a pause reached its end; fairq starts the queue again");
                 }
                 state.save_pause();
             }
@@ -1197,7 +1198,7 @@ fn depends(state: &crate::daemon::State, id: uuid::Uuid) -> Depends {
             // operating, which a missing record does prove.
             return Depends::Broken {
                 reason: format!(
-                    "the record of the job {} that this job needed is gone, so qex cannot prove that it succeeded",
+                    "the record of the job {} that this job needed is gone, so fairq cannot prove that it succeeded",
                     &dep.to_string()[..8]
                 ),
                 root: *dep,
@@ -1241,7 +1242,10 @@ fn depends(state: &crate::daemon::State, id: uuid::Uuid) -> Depends {
             let advice = if never_ran {
                 String::new()
             } else {
-                format!(" Read `qex logs {}` for the cause.", &root.to_string()[..8])
+                format!(
+                    " Read `fairq logs {}` for the cause.",
+                    &root.to_string()[..8]
+                )
             };
 
             return Depends::Broken {
@@ -1335,7 +1339,7 @@ fn expire(
     // This is the race that the record must not show. The scheduler chooses a
     // job, releases the lock, and `start_job` takes the lock again and writes
     // `starting`. A test that trusted the queue list alone could then write
-    // `expired` over a job that already operates, and `qex wait` would report a
+    // `expired` over a job that already operates, and `fairq wait` would report a
     // failure for a job that succeeded.
     if job.status.state != JobState::Queued {
         return;
@@ -1365,7 +1369,7 @@ fn expire(
     //
     // A job that waited for a job that it needs did not wait for capacity, and
     // a smaller claim changes nothing for it. A job that waited for a lock did
-    // not wait for capacity either: qex gives the lock to one job at a time,
+    // not wait for capacity either: fairq gives the lock to one job at a time,
     // whatever the machine has free. A remedy that does not fit sends the
     // reader to make a change that cannot help.
     //
@@ -1381,7 +1385,7 @@ fn expire(
              that waits for an earlier stage."
         }
         Waited::ALock => {
-            "The job waited for a lock, and not for capacity. qex gives a lock to one job \
+            "The job waited for a lock, and not for capacity. fairq gives a lock to one job \
              at a time, whatever the machine has free. Give a --max-queue-time that covers \
              the longest job that takes the same lock, or give the two jobs different lock \
              names if they can operate together."
@@ -1429,7 +1433,7 @@ fn expire(
 fn overdue(state: &crate::daemon::State, chosen: Option<uuid::Uuid>) -> Vec<(uuid::Uuid, u64)> {
     // A paused queue expires NOTHING.
     //
-    // qex started no job in this pass because a person holds the machine, so a
+    // fairq started no job in this pass because a person holds the machine, so a
     // job that waits does not wait for the queue. To expire it here would make
     // a pause of 30 minutes delete every job with a smaller limit, and the
     // person who paused is away by construction and sees none of it. The wait
@@ -1477,8 +1481,8 @@ struct Choice {
     /// request thread that signals the variable itself.
     ///
     /// This count must therefore hold BOTH. A pass that reported one of them
-    /// only would leave `qex wait` asleep until its 30 second fallback.
-    /// Measured with the skipped jobs left out: `qex wait` on a job whose
+    /// only would leave `fairq wait` asleep until its 30 second fallback.
+    /// Measured with the skipped jobs left out: `fairq wait` on a job whose
     /// dependency expired at 3s returned at 33.0s, and on a job whose
     /// dependency was cancelled at 1s returned at 31.0s.
     finished: usize,
@@ -1507,12 +1511,12 @@ struct Head {
 /// ([`Blocker`]) says who holds the capacity, and the class decides the rule:
 ///
 /// * The jobs of THIS QUEUE hold it (`Sibling`), or the job waits for a quiet
-///   machine (`OversizedWaitsForIdle`). qex schedules that release, so the wait
-///   has a known end and it is correct to keep the capacity. qex lets
+///   machine (`OversizedWaitsForIdle`). fairq schedules that release, so the wait
+///   has a known end and it is correct to keep the capacity. fairq lets
 ///   `[queue] max_bypass` jobs pass the head, and then it keeps the capacity:
 ///   no job starts at all until the head starts.
-/// * ANOTHER USER (`Peer`), a program outside qex (`Machine`), or the config
-///   file (`OversizedParked`) holds it. qex does not schedule that release, so
+/// * ANOTHER USER (`Peer`), a program outside fairq (`Machine`), or the config
+///   file (`OversizedParked`) holds it. fairq does not schedule that release, so
 ///   the head never keeps capacity and the queue continues behind it. An empty
 ///   machine gives such a job nothing, and a reservation would only stop every
 ///   other job as well.
@@ -1551,7 +1555,7 @@ struct Head {
 fn choose(state: &mut crate::daemon::State) -> Choice {
     let held = state.claimed();
     let cfg = state.cfg.clone();
-    // A config file that qex cannot read gives no pool. Every claim then falls
+    // A config file that fairq cannot read gives no pool. Every claim then falls
     // back to a pool of one unit, which is a lock, and no job gets a device it
     // must not have.
     let pools = cfg.pools().unwrap_or_default();
@@ -1590,7 +1594,7 @@ fn choose(state: &mut crate::daemon::State) -> Choice {
     // keep capacity for that job. If the dependency test were in that loop, a
     // job behind a job that waits for capacity would never be tested. A job
     // whose dependency already failed would then stay in the queue for ever,
-    // and `qex wait` on it would never give an answer.
+    // and `fairq wait` on it would never give an answer.
     //
     // THE LOCK TEST BELONGS HERE FOR THE SAME REASON. A review measured the
     // fault: with a job that held the lock, a job of two cores in front of a
@@ -1601,7 +1605,7 @@ fn choose(state: &mut crate::daemon::State) -> Choice {
     // A busy machine is exactly the machine that this option exists for, so the
     // fault hit the common case and not a corner.
     //
-    // Neither decision uses capacity, so qex can make both for every job at
+    // Neither decision uses capacity, so fairq can make both for every job at
     // once. `lock_conflict` gives `None` at once for a job with no lock, which
     // is nearly every job, so this pass stays cheap.
     let mut ready: Vec<uuid::Uuid> = Vec::new();
@@ -1643,7 +1647,7 @@ fn choose(state: &mut crate::daemon::State) -> Choice {
     //
     //   * Pass 1 must still run. A job whose dependency failed must become
     //     `skipped` while the queue is paused. Skipping starts no process, and
-    //     a job that stays in the queue makes `qex wait` block for ever.
+    //     a job that stays in the queue makes `fairq wait` block for ever.
     //   * The test comes before the oversized branch below. A paused queue is
     //     idle by construction, so a pause would otherwise start every job that
     //     is larger than the budget — the opposite of a quiet machine.
@@ -1675,7 +1679,7 @@ fn choose(state: &mut crate::daemon::State) -> Choice {
         // specification.
         let (claim_cpu, claim_mem) = (job.status.cpu, job.status.mem);
         // The SAFE name. This sentence goes to a reader, through
-        // `blocked_reason` and through `qex info`. See `job::safe_name`.
+        // `blocked_reason` and through `fairq info`. See `job::safe_name`.
         let name = job.status.display_name();
         let passed_by = job.status.passed_by;
 
@@ -1746,7 +1750,7 @@ fn choose(state: &mut crate::daemon::State) -> Choice {
                     later,
                     Some(format!(
                         "waits for the job {} ({}), which is at the front of the queue and needs \
-                         {}. qex keeps the capacity for that job, because {} already started \
+                         {}. fairq keeps the capacity for that job, because {} already started \
                          before it.",
                         &h.id.to_string()[..8],
                         h.name,
@@ -1763,7 +1767,7 @@ fn choose(state: &mut crate::daemon::State) -> Choice {
     //
     // COUNT THESE JOBS. A skipped job is a final state that this pass wrote on
     // its own, so nothing else tells the waiters. Measured before this count
-    // existed: `qex wait` on a job whose dependency expired returned at 33.0s
+    // existed: `fairq wait` on a job whose dependency expired returned at 33.0s
     // with a 3s limit, and on a job whose dependency was cancelled at 31.0s.
     let mut finished = to_skip.len();
     for (id, reason, root) in to_skip {
@@ -1823,7 +1827,7 @@ fn choose(state: &mut crate::daemon::State) -> Choice {
         }
     }
 
-    // Record what this pass found, so `qex info` and `qex top` can say in one
+    // Record what this pass found, so `fairq info` and `fairq top` can say in one
     // line whether the queue is healthy.
     state.head = head.map(|h| crate::daemon::HeadInfo {
         id: h.id,
@@ -1866,13 +1870,13 @@ fn start_job(coord: &Arc<Coordinator>, id: uuid::Uuid) -> anyhow::Result<()> {
     // Take the job and test it again, with one lock only.
     //
     // The scheduler chose this job and then released the lock. In that moment,
-    // `qex cancel` can change the job, `qex clean` can delete it, and
-    // `qex pause` can stop the queue. This code must thus test the job again.
-    // Without the test, qex starts a job that the user cancelled, and the user
+    // `fairq cancel` can change the job, `fairq clean` can delete it, and
+    // `fairq pause` can stop the queue. This code must thus test the job again.
+    // Without the test, fairq starts a job that the user cancelled, and the user
     // receives an answer that says the opposite.
     //
-    // The pause is in this list for the same reason: `qex pause queue` answers
-    // "paused" and the job starts, and `qex pause lock gpu0` tells the person
+    // The pause is in this list for the same reason: `fairq pause queue` answers
+    // "paused" and the job starts, and `fairq pause lock gpu0` tells the person
     // that the lock is theirs while a job takes it in the same instant. That
     // order is the whole claim of the lock half of this feature.
     //
@@ -1882,11 +1886,11 @@ fn start_job(coord: &Arc<Coordinator>, id: uuid::Uuid) -> anyhow::Result<()> {
         let mut state = coord.state.lock().unwrap();
 
         let Some(job) = state.jobs.get(&id) else {
-            // `qex clean` deleted the job. There is nothing to start.
+            // `fairq clean` deleted the job. There is nothing to start.
             return Ok(());
         };
         if job.status.state != JobState::Queued {
-            // `qex cancel` or a different thread changed the job.
+            // `fairq cancel` or a different thread changed the job.
             return Ok(());
         }
 
@@ -1921,7 +1925,7 @@ fn start_job(coord: &Arc<Coordinator>, id: uuid::Uuid) -> anyhow::Result<()> {
 
         let forced = match size_check(&state.cfg, job.status.cpu, job.status.mem) {
             Size::TooBig(reason) => Some(format!(
-                "{reason}. qex started this job alone because no other job operated."
+                "{reason}. fairq started this job alone because no other job operated."
             )),
             Size::Fits => None,
         };
@@ -1975,7 +1979,7 @@ fn start_job(coord: &Arc<Coordinator>, id: uuid::Uuid) -> anyhow::Result<()> {
         // The SAFE name: this value goes into the log of the coordinator.
         let name = crate::job::safe_name(&job.spec.name);
         state.queue.retain(|q| *q != id);
-        // `qex info` reads this time to say if the queue moves. A queue that
+        // `fairq info` reads this time to say if the queue moves. A queue that
         // started nothing for a long time is the fault that a reader looks for.
         state.last_start_at = Some(sys::now_secs());
         state.publish_changes();
@@ -1986,13 +1990,13 @@ fn start_job(coord: &Arc<Coordinator>, id: uuid::Uuid) -> anyhow::Result<()> {
     //
     // A fault here must not leave the job in the state `starting` for ever.
     // Such a job holds its claim in the budget, stops the idle exit, and makes
-    // `qex wait` block with no end.
+    // `fairq wait` block with no end.
     if let Err(e) = write_started(&id, &status) {
         let mut state = coord.state.lock().unwrap();
         if let Some(job) = state.jobs.get_mut(&id) {
             job.status.state = JobState::Failed;
             job.status.finished_at = Some(sys::now_secs());
-            job.status.error = Some(format!("qex could not write the job record: {e:#}"));
+            job.status.error = Some(format!("fairq could not write the job record: {e:#}"));
         }
         state.publish_changes();
         drop(state);
@@ -2027,7 +2031,7 @@ fn start_job(coord: &Arc<Coordinator>, id: uuid::Uuid) -> anyhow::Result<()> {
             // that race, and this code then returned the record to `starting`
             // with no pid — and the supervisor does not write again until the
             // job stops. A job of five minutes thus said `starting` for five
-            // minutes, `qex top` could measure nothing, and `qex kill` refused
+            // minutes, `fairq top` could measure nothing, and `fairq kill` refused
             // the job with "the job starts now. Try the command again."
             //
             // One writer at a time: the coordinator until the supervisor
@@ -2055,7 +2059,7 @@ fn start_job(coord: &Arc<Coordinator>, id: uuid::Uuid) -> anyhow::Result<()> {
             if let Some(job) = state.jobs.get_mut(&id) {
                 job.status.state = JobState::Failed;
                 job.status.finished_at = Some(sys::now_secs());
-                job.status.error = Some(format!("qex could not start the job: {e:#}"));
+                job.status.error = Some(format!("fairq could not start the job: {e:#}"));
                 let status = job.status.clone();
                 state.publish_changes();
                 drop(state);
@@ -2290,7 +2294,7 @@ mod tests {
         assert_eq!(size_check(&cfg, 4, 256 << 20), Size::Fits);
     }
 
-    /// The reserve keeps memory for the programs that qex does not control.
+    /// The reserve keeps memory for the programs that fairq does not control.
     #[test]
     fn the_reserve_stops_a_job_when_the_machine_is_full() {
         let mut cfg = cfg_with("4", "8GB");
@@ -2407,7 +2411,7 @@ mod tests {
     ///
     /// `idle_since` says how long no job has operated. A paused queue is idle
     /// by construction, so at the end of the pause that timer is ALREADY
-    /// satisfied, and the first job that qex starts would be an OVERSIZED job,
+    /// satisfied, and the first job that fairq starts would be an OVERSIZED job,
     /// alone, in front of everything that waited for hours. The deletion of
     /// this one line left the whole suite green before this test existed.
     #[test]
@@ -2432,7 +2436,7 @@ mod tests {
     }
 
     /// A pause that reaches its `--for` must give the time back, in the same
-    /// way as `qex resume queue`.
+    /// way as `fairq resume queue`.
     ///
     /// # The fault that this test prevents
     ///
@@ -2642,7 +2646,7 @@ mod tests {
         }
 
         // Pass 3: the front job has reached `max_bypass`. It now keeps the
-        // capacity, and qex starts NOTHING — even though one core is free and
+        // capacity, and fairq starts NOTHING — even though one core is free and
         // the third small job needs one core.
         let choice = choose(&mut state);
         assert_eq!(
@@ -2668,7 +2672,7 @@ mod tests {
 
         let front_reason = state.jobs[&front].status.blocked_reason.clone().unwrap();
         assert!(
-            front_reason.contains("qex starts no other job before this one"),
+            front_reason.contains("fairq starts no other job before this one"),
             "the front job must read the text for a job that keeps capacity: {front_reason}"
         );
         let last = state.jobs[&behind[2]]
@@ -2677,7 +2681,7 @@ mod tests {
             .clone()
             .unwrap();
         assert!(
-            last.contains("qex keeps the capacity for that job"),
+            last.contains("fairq keeps the capacity for that job"),
             "the job behind must read WHY it waits: {last}"
         );
     }
@@ -2687,7 +2691,7 @@ mod tests {
     /// The pass keeps testing after a head that does not keep capacity, so that
     /// every job gets a reason of its own. A pass that forgot which job was
     /// already the head would replace it with each later job that waits, and
-    /// `qex info` would then name the wrong job at the front. The count of the
+    /// `fairq info` would then name the wrong job at the front. The count of the
     /// bypasses would also move to that wrong job, and the real front job would
     /// collect no count and never become unpassable.
     ///
@@ -2916,8 +2920,8 @@ mod tests {
     ///
     /// `skip` writes a final state that no supervisor and no request thread
     /// announces, exactly as `expire` does. A pass that counted the expired
-    /// jobs only left `qex wait` asleep until its 30 second fallback. Measured
-    /// with the count of the skipped jobs left out: `qex wait` on a job whose
+    /// jobs only left `fairq wait` asleep until its 30 second fallback. Measured
+    /// with the count of the skipped jobs left out: `fairq wait` on a job whose
     /// dependency expired at 3s returned at 33.0s, and on a job whose
     /// dependency was cancelled at 1s returned at 31.0s. With the count, both
     /// return inside a second of the event.
@@ -2969,7 +2973,7 @@ mod tests {
         assert_eq!(job.status.state, JobState::Expired);
         assert!(job.status.finished_at.is_some());
         assert!(state.queue.is_empty(), "an expired job leaves the queue");
-        // A job that stopped waits for nothing. `qex top` and `qex list` print
+        // A job that stopped waits for nothing. `fairq top` and `fairq list` print
         // this field first, so a reason that stayed would tell a reader that a
         // job which gave up is still waiting for cores.
         assert_eq!(
@@ -3058,7 +3062,7 @@ mod tests {
             "a smaller claim changes nothing for a job that waits for a job: {text}"
         );
 
-        // A wait for a LOCK. qex gives a lock to one job at a time, so neither
+        // A wait for a LOCK. fairq gives a lock to one job at a time, so neither
         // a smaller claim nor a quiet machine changes anything.
         let mut state = state_with(JobState::Queued, Some(60), 61);
         let id = state.queue[0];
@@ -3143,7 +3147,7 @@ mod tests {
     ///
     /// The scheduler chooses a job, releases the lock, and `start_job` writes
     /// `starting`. A pass that expired a job in that moment would give a record
-    /// that says `expired` for a job that ran, and `qex wait` would report a
+    /// that says `expired` for a job that ran, and `fairq wait` would report a
     /// failure for a job that succeeded. Two guards stop it: the chosen job is
     /// never in the list, and `expire` refuses a job that is not queued.
     #[test]
@@ -3185,7 +3189,7 @@ mod tests {
     /// The record is the one authority for a claim: the scheduler adds the
     /// claim of each job that operates from the record, and it must test a new
     /// job against that same number. A test against a different number would
-    /// admit a job of 1GB into the space that qex keeps for 600MB, and the sum
+    /// admit a job of 1GB into the space that fairq keeps for 600MB, and the sum
     /// of the claims would go above the budget. Stopping that is the work of
     /// this module.
     #[test]
@@ -3252,7 +3256,7 @@ mod tests {
     ) -> (Config, std::path::PathBuf, std::process::Child) {
         use std::os::unix::fs::PermissionsExt;
         let dir = crate::testutil::temp_dir().join(format!(
-            "qex-sched-peer-{}-{}",
+            "fairq-sched-peer-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4()
         ));
@@ -3319,7 +3323,7 @@ mod tests {
         );
         assert!(
             reason.contains("no known end"),
-            "the reason must say that qex cannot schedule the release: {reason}"
+            "the reason must say that fairq cannot schedule the release: {reason}"
         );
         assert!(
             held_reason.is_none() && !blocker.may_reserve(),
@@ -3337,10 +3341,10 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// qex keeps capacity only for a holder whose release it schedules.
+    /// fairq keeps capacity only for a holder whose release it schedules.
     ///
     /// A queue that keeps capacity against another user, or against a program
-    /// outside qex, holds the machine empty for a time that qex cannot measure.
+    /// outside fairq, holds the machine empty for a time that fairq cannot measure.
     /// That is the measured fault.
     #[test]
     fn the_queue_keeps_capacity_only_for_a_holder_that_it_schedules() {
@@ -3352,7 +3356,7 @@ mod tests {
     }
 
     /// A job that the config keeps in the queue never starts, so capacity that
-    /// qex keeps for it gives it nothing and stops every other job.
+    /// fairq keeps for it gives it nothing and stops every other job.
     #[test]
     fn a_job_that_the_config_parks_does_not_stop_the_jobs_behind_it() {
         let mut cfg = cfg_with("2", "256MB");
@@ -3372,7 +3376,7 @@ mod tests {
         );
     }
 
-    /// A job that is larger than the budget waits for a quiet machine. qex
+    /// A job that is larger than the budget waits for a quiet machine. fairq
     /// schedules that release, because the queue becomes empty, so this class
     /// keeps the capacity after the permitted bypasses.
     #[test]
@@ -3444,12 +3448,12 @@ mod tests {
         };
         assert_eq!(blocker, Blocker::Sibling);
         assert!(
-            reason.contains("qex can start a smaller job before this one"),
+            reason.contains("fairq can start a smaller job before this one"),
             "got: {reason}"
         );
         let held = held_reason.expect("a sibling wait has a text for a job that keeps capacity");
         assert!(
-            held.contains("qex starts no other job before this one"),
+            held.contains("fairq starts no other job before this one"),
             "got: {held}"
         );
         // The count of the jobs that passed is NOT in the text. A number that
@@ -3557,7 +3561,7 @@ mod tests {
         ));
     }
 
-    /// qex must never add the memory of the devices together. Four devices of
+    /// fairq must never add the memory of the devices together. Four devices of
     /// 24GB are not 96GB for one job, and the largest device here is 24GB.
     #[test]
     fn vram_is_never_added_together_over_the_devices() {
@@ -3596,7 +3600,7 @@ mod tests {
     /// `OversizedParked`, and it must NEVER keep capacity.
     ///
     /// The precedent is `[queue] oversized = "queue"`. Such a job never starts,
-    /// so capacity that qex keeps for it buys the job nothing and stops every
+    /// so capacity that fairq keeps for it buys the job nothing and stops every
     /// other job. This is the case that parks a whole queue behind one job.
     #[test]
     fn a_claim_that_can_never_start_parks_and_never_reserves() {
@@ -3632,7 +3636,7 @@ mod tests {
     }
 
     /// A pool that the jobs of THIS queue hold is a `Sibling` wait, and the
-    /// head may keep capacity for it: qex schedules that release.
+    /// head may keep capacity for it: fairq schedules that release.
     #[test]
     fn a_pool_that_this_queue_holds_is_a_sibling_wait_and_may_reserve() {
         let cfg = cfg_with_pools();
@@ -3668,8 +3672,8 @@ mod tests {
     /// A pool that ANOTHER USER holds is a `Peer` wait, and the head must
     /// never keep capacity for it.
     ///
-    /// qex cannot make the other user give the device back, so a reservation
-    /// would hold this machine empty for a time that qex cannot measure. That
+    /// fairq cannot make the other user give the device back, so a reservation
+    /// would hold this machine empty for a time that fairq cannot measure. That
     /// is the fault that parks a queue for hours.
     #[test]
     fn a_pool_that_another_user_holds_never_reserves() {
@@ -3761,7 +3765,7 @@ mod tests {
         let cfg = cfg_with_pools();
         assert!(pool_check(&cfg, &spec_claiming(&[("build-dir", 1, None)])).is_ok());
 
-        // More than one unit of a pool that nobody declared is a fault. qex
+        // More than one unit of a pool that nobody declared is a fault. fairq
         // cannot invent a second unit.
         let reason = pool_check(&cfg, &spec_claiming(&[("build-dir", 2, None)]))
             .expect_err("2 of an undeclared pool must be impossible");
@@ -3769,7 +3773,7 @@ mod tests {
     }
 
     /// `--gpu` promises a device index and an environment variable. A machine
-    /// with no `gpu` pool can give neither, so qex says so and does not make a
+    /// with no `gpu` pool can give neither, so fairq says so and does not make a
     /// silent lock.
     #[test]
     fn a_gpu_claim_with_no_gpu_pool_names_the_configuration() {
@@ -3777,7 +3781,7 @@ mod tests {
         let reason = pool_check(&cfg, &spec_claiming(&[("gpu", 1, None)]))
             .expect_err("a GPU claim with no pool must be impossible");
         assert!(reason.contains("[[pool]]"), "got: {reason}");
-        assert!(reason.contains("qex.toml"), "got: {reason}");
+        assert!(reason.contains("fairq.toml"), "got: {reason}");
     }
 
     /// VRAM is a quantity on a device. A job that asks for it must also ask
@@ -4009,7 +4013,7 @@ mod tests {
         assert_eq!(
             given["gpu"].devices,
             vec![2, 3],
-            "qex must give the devices that no other user holds"
+            "fairq must give the devices that no other user holds"
         );
     }
 

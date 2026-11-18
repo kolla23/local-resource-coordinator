@@ -3,7 +3,8 @@
 // Modified by the local-resource-coordinator fork, 2026-11-01: run and note set 0600 on a hook.log that exists, with a unit test; a test comment no longer says run opened no file (issue #56).
 // Modified by the local-resource-coordinator fork, 2026-11-02: run and note open hook.log with O_NOFOLLOW (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-14: a failed test of the hook's state sends no signal to its group, and its verdict says so; a debug-only test switch reaps the hook before that test (issue #178).
-//! This module runs the command that qex starts when a job stops.
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+//! This module runs the command that fairq starts when a job stops.
 //!
 //! The hook is a property of the machine and of the person at it, and not a
 //! property of the work. It is thus in the config file only. A job file has no
@@ -26,36 +27,36 @@
 //! machine and after a restart, because the file is beside the record of the
 //! job and it lives as long as the record. The caller that loses does nothing.
 //!
-//! THE ORDER IS DELIBERATE, AND IT IS NOT SYMMETRICAL. qex makes the file and
+//! THE ORDER IS DELIBERATE, AND IT IS NOT SYMMETRICAL. fairq makes the file and
 //! then runs the hook, so a process that stops between those two steps loses
 //! that one message. The other order would run the hook and then record it, and
 //! a process that stopped between THOSE two steps would notify a second time
-//! later. qex chooses the message that is lost, because a notification that
+//! later. fairq chooses the message that is lost, because a notification that
 //! arrives two times teaches a person to ignore every notification.
 //!
 //! # A hook must not damage the queue
 //!
 //! The command comes from a user, so it can hang, fail, write a lot of output,
-//! or not exist. qex gives these guarantees:
+//! or not exist. fairq gives these guarantees:
 //!
 //! - The hook starts AFTER the terminal state is on the disk. The job is thus
-//!   in its final state before the hook runs. `qex wait` gives its answer, the
+//!   in its final state before the hook runs. `fairq wait` gives its answer, the
 //!   budget is free, and the next job starts, whatever the hook does.
-//! - The hook has a time limit. qex signals the process group of the hook at
+//! - The hook has a time limit. fairq signals the process group of the hook at
 //!   the limit, and it sends `KILL` a short time after that.
 //! - The hook has a size limit, and IT FAILS CLOSED. The hook writes into a
-//!   pipe and never into the file, so qex stops reading at `OUTPUT_LIMIT` and
+//!   pipe and never into the file, so fairq stops reading at `OUTPUT_LIMIT` and
 //!   shuts the pipe. The disk stops growing AT the cap. An earlier form gave
-//!   the file to the hook and cut it later; that bounded what qex KEPT, and the
+//!   the file to the hook and cut it later; that bounded what fairq KEPT, and the
 //!   peak on the disk was the speed of the hook multiplied by the interval
 //!   between two tests of the size — measured at 25.3MB for a cap of 1MB, and
-//!   at 334GB for a qex that stopped before it could cut. The casualty of that
+//!   at 334GB for a fairq that stopped before it could cut. The casualty of that
 //!   is never the hook: it is every other job on the machine.
 //! - A hook that fails changes no job. The result of the job is the result of
 //!   the job, and a notification that did not arrive does not change it.
-//! - The verdict of qex goes into `hook.log`, which `qex logs --hook` reads. A
+//! - The verdict of fairq goes into `hook.log`, which `fairq logs --hook` reads. A
 //!   user whose notification did not arrive can thus learn the reason with a
-//!   qex command, and does not read the log of a supervisor.
+//!   fairq command, and does not read the log of a supervisor.
 
 use crate::config::Config;
 use crate::daemon::log;
@@ -66,12 +67,12 @@ use std::time::{Duration, Instant};
 /// The name of the file that says that the hook of this job ran.
 const CLAIM_FILE: &str = "hook.ran";
 
-/// The words that start the verdict of qex in the file of the hook. The verdict
+/// The words that start the verdict of fairq in the file of the hook. The verdict
 /// is the LAST thing that a hook writes into the directory of its job, so
 /// these words say that the hook ended. See [`still_runs`].
-const VERDICT: &str = "qex: the stop hook";
+const VERDICT: &str = "fairq: the stop hook";
 
-/// The time after the limit of a hook in which qex stops it and writes the
+/// The time after the limit of a hook in which fairq stops it and writes the
 /// verdict. A hook that is older than its limit and this time writes no more.
 const END_OF_A_HOOK: Duration = Duration::from_secs(10);
 
@@ -79,9 +80,9 @@ const END_OF_A_HOOK: Duration = Duration::from_secs(10);
 const LOG_FILE: &str = "hook.log";
 
 /// Reaps the hook before the test of its state, then pauses, in milliseconds. **This variable
-/// exists for the tests of qex**, and a release build does not read it.
+/// exists for the tests of fairq**, and a release build does not read it.
 #[cfg(debug_assertions)]
-const REAP_HOOK_BEFORE_ITS_TEST: &str = "QEX_TEST_REAP_HOOK_BEFORE_ITS_TEST_MS";
+const REAP_HOOK_BEFORE_ITS_TEST: &str = "FAIRQ_TEST_REAP_HOOK_BEFORE_ITS_TEST_MS";
 
 /// The time that a hook gets after `TERM` and before `KILL`.
 const GRACE: Duration = Duration::from_secs(2);
@@ -90,14 +91,14 @@ const GRACE: Duration = Duration::from_secs(2);
 ///
 /// The time limit is not a limit on the output. A hook of three seconds that
 /// writes with no stop made a file of 3.7GB in the state directory, for one
-/// job. qex NEVER CUTS THE FILE: the hook writes into a pipe, and qex stops
+/// job. fairq NEVER CUTS THE FILE: the hook writes into a pipe, and fairq stops
 /// reading at this size and shuts the pipe, so the file never grows past it.
 /// An earlier form of this code did cut the file afterwards, which bounded what
-/// qex kept and not what reached the disk.
+/// fairq kept and not what reached the disk.
 ///
 /// THIS BOUNDS THE STANDARD OUTPUT AND THE STANDARD ERROR OF THE HOOK, AND
 /// NOTHING ELSE. A hook that opens a file of its own and writes to it is a
-/// program that the user chose to run, and qex limits what it writes there as
+/// program that the user chose to run, and fairq limits what it writes there as
 /// little as it limits what a job writes.
 ///
 /// A hook that writes a megabyte is not a hook that notifies a person.
@@ -149,8 +150,8 @@ impl Origin {
 /// configuration of the caller. The coordinator reads its configuration one
 /// time, at its start, and it operates for hours. A user who deleted a hook
 /// from the file thus met the hook again on each job, and a user who added one
-/// received nothing — while `qex config show` gave the new value. A stale
-/// configuration in this module does not make qex do nothing; it makes qex RUN
+/// received nothing — while `fairq config show` gave the new value. A stale
+/// configuration in this module does not make fairq do nothing; it makes fairq RUN
 /// A COMMAND THAT THE USER DELETED. The file is small, one job stops one time,
 /// and the read is thus not expensive.
 pub fn fire(origin: Origin, dir: &Path, status: &JobStatus) {
@@ -167,10 +168,10 @@ pub fn fire(origin: Origin, dir: &Path, status: &JobStatus) {
     // `supervisor::main` takes the short form for the same reason.
     match Config::load_short() {
         Ok(cfg) => fire_with(origin, &cfg, dir, status),
-        // A configuration that qex cannot read must not run a hook. qex cannot
+        // A configuration that fairq cannot read must not run a hook. fairq cannot
         // know if the command in memory is still the command in the file.
         Err(e) => log(&format!(
-            "qex did not run the stop hook of the job {}: it could not read the \
+            "fairq did not run the stop hook of the job {}: it could not read the \
              configuration ({e}). Correct the config file.",
             status.id
         )),
@@ -195,7 +196,7 @@ fn fire_with(origin: Origin, cfg: &Config, dir: &Path, status: &JobStatus) {
     let limit = cfg.hook_timeout().unwrap_or(Duration::from_secs(30));
     let verdict = match run(cfg, dir, status, limit) {
         Ok(text) => text,
-        // A hook that qex could not start is a fault of the config file. Name
+        // A hook that fairq could not start is a fault of the config file. Name
         // the program that failed, and say which file holds it. The job keeps
         // its result.
         Err(e) => format!(
@@ -205,11 +206,11 @@ fn fire_with(origin: Origin, cfg: &Config, dir: &Path, status: &JobStatus) {
         ),
     };
 
-    // Write the verdict of qex where a qex command can read it.
+    // Write the verdict of fairq where a fairq command can read it.
     //
     // Before this, the verdict went to the log of the supervisor or of the
     // coordinator, AND NO COMMAND READS THOSE FILES. A user whose notification
-    // did not arrive had no way to learn the reason. `qex logs <id> --hook`
+    // did not arrive had no way to learn the reason. `fairq logs <id> --hook`
     // gives this file.
     note(dir, &format!("{VERDICT} {verdict}"));
     log(&format!("the stop hook of the job {} {verdict}", status.id));
@@ -238,9 +239,9 @@ fn note(dir: &Path, text: &str) {
         crate::paths::make_private(&f);
         // A newline before the text.
         //
-        // qex cuts a log that is too large at the size limit, which is
+        // fairq cuts a log that is too large at the size limit, which is
         // frequently the middle of a line. Without this newline, the verdict
-        // joins that line, and `qex logs --hook --tail 1` gives a megabyte.
+        // joins that line, and `fairq logs --hook --tail 1` gives a megabyte.
         write!(f, "\n{text}\n").ok();
     }
 }
@@ -268,7 +269,7 @@ fn note(dir: &Path, text: &str) {
 /// # Why a deletion asks this
 ///
 /// The hook runs apart from the job: a thread of the coordinator or the
-/// supervisor starts it AFTER the job has its final state, and qex writes the
+/// supervisor starts it AFTER the job has its final state, and fairq writes the
 /// verdict into `hook.log` when the hook ends. A reader sees `cancelled` and
 /// deletes the record in that time. The deletion lists the directory, deletes
 /// what it found, and then finds a `hook.log` that was not in the list:
@@ -279,7 +280,7 @@ fn note(dir: &Path, text: &str) {
 ///
 /// `hook.ran` holds the moment of the start. The verdict in `hook.log` is the
 /// end. A hook with a start, with no verdict, and younger than its limit plus
-/// the time that qex takes to stop it, still runs. An OLDER hook with no
+/// the time that fairq takes to stop it, still runs. An OLDER hook with no
 /// verdict belongs to a process that stopped before it wrote one, so nothing
 /// writes any more, and the answer is `false`: a deletion must never wait for
 /// a writer that does not exist.
@@ -301,7 +302,7 @@ pub fn still_runs(dir: &Path, limit: Duration, now: u64) -> bool {
     match std::fs::read_to_string(dir.join(LOG_FILE)) {
         Ok(text) => !text.lines().any(|line| line.starts_with(VERDICT)),
         // The file does not exist yet, or it holds bytes that are not text.
-        // The hook has a start and no end that qex can read.
+        // The hook has a start and no end that fairq can read.
         Err(_) => true,
     }
 }
@@ -334,7 +335,7 @@ fn claim(origin: Origin, dir: &Path, status: &JobStatus) -> bool {
     {
         Ok(mut f) => {
             // The contents are for a person who reads the job directory, and
-            // for a test. The EXISTENCE of the file is what qex acts on; the
+            // for a test. The EXISTENCE of the file is what fairq acts on; the
             // last word names the process that took it, so a test can assert
             // WHICH of the redundant paths notified. See [`Origin`].
             //
@@ -352,10 +353,10 @@ fn claim(origin: Origin, dir: &Path, status: &JobStatus) -> bool {
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => false,
         Err(e) => {
-            // qex cannot prove that the hook runs one time only, so it does not
-            // run it. A directory that qex deleted is the usual cause.
+            // fairq cannot prove that the hook runs one time only, so it does not
+            // run it. A directory that fairq deleted is the usual cause.
             log(&format!(
-                "qex did not run the stop hook of the job {}: it could not write {} ({e})",
+                "fairq did not run the stop hook of the job {}: it could not write {} ({e})",
                 status.id,
                 dir.join(CLAIM_FILE).display()
             ));
@@ -371,7 +372,7 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
     use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::process::CommandExt;
 
-    // The output goes beside the record of the job. `qex clean` and `qex gc`
+    // The output goes beside the record of the job. `fairq clean` and `fairq gc`
     // then delete it with the job, and the mode is the mode of the other files
     // of the job, because a hook can write a token to its output.
     let out = std::fs::OpenOptions::new()
@@ -384,14 +385,14 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
         .open(dir.join(LOG_FILE))?;
     crate::paths::make_private(&out);
 
-    // THE HOOK NEVER RECEIVES THE FILE. It writes into a pipe, and qex copies
+    // THE HOOK NEVER RECEIVES THE FILE. It writes into a pipe, and fairq copies
     // from that pipe to the file and STOPS AT THE CAP.
     //
     // The earlier form gave the file to the hook and cut it afterwards. The cap
-    // then bounded what qex KEPT and not what reached the disk: a hook writes
+    // then bounded what fairq KEPT and not what reached the disk: a hook writes
     // for the whole interval between two tests of the size, so the peak was the
     // speed of the hook multiplied by 20ms. Measured: 25.3MB on the disk for a
-    // cap of 1MB. A qex that stopped before it cut the file left the peak
+    // cap of 1MB. A fairq that stopped before it cut the file left the peak
     // there for ever, and one such file reached 334GB and filled the machine.
     //
     // THE CASUALTY OF THAT IS NEVER THE HOOK. It is every other job on the
@@ -401,7 +402,7 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
     // file system is not recorded anywhere and destroys what other people
     // finished.
     //
-    // With the pipe, qex stops reading at the cap and closes its end. The next
+    // With the pipe, fairq stops reading at the cap and closes its end. The next
     // write of the hook meets EPIPE, or SIGPIPE stops the hook. The disk stops
     // growing AT the cap, and not at the cap multiplied by an interval.
     let (reader, writer) = pipe()?;
@@ -414,7 +415,7 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
         //
         // A job can delete its own directory. `spawn` gives an error for a
         // directory that is not there, and the hook would then never run, so
-        // qex uses the root directory in that case.
+        // fairq uses the root directory in that case.
         .current_dir(match std::path::Path::new(&status.cwd) {
             p if !status.cwd.is_empty() && p.is_dir() => p.to_path_buf(),
             _ => std::path::PathBuf::from("/"),
@@ -425,7 +426,7 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
 
     // The data of the job goes in the environment, and NEVER in the command
     // line. A job name comes from the user of the queue, and a name such as
-    // `; rm -rf ~` must be a name and never a command. qex thus builds no text
+    // `; rm -rf ~` must be a name and never a command. fairq thus builds no text
     // that a shell reads: it starts the program of `on_stop` directly, and a
     // shell that the user names in `on_stop` reads these values as variables.
     for (key, value) in variables(dir, status) {
@@ -496,7 +497,7 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
                 // failed wait leaves the pid unproven, as in `wait_without_reaping` (#178).
                 child.wait().ok();
                 return Ok(format!(
-                    "gave an error at a test of its state: {e}. qex sent no signal to its process \
+                    "gave an error at a test of its state: {e}. fairq sent no signal to its process \
                      group, because the system can give that pid to another process."
                 ));
             }
@@ -508,7 +509,7 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
         }
         // The copier holds the cap, and it holds it at the moment of the write
         // and not one interval later. This test only asks whether it fired, so
-        // that qex ALSO STOPS the hook. Failing closed on the disk is not a
+        // that fairq ALSO STOPS the hook. Failing closed on the disk is not a
         // reason to let a broken hook hold a supervisor for its whole time
         // limit: the pipe is shut, so everything it writes now goes nowhere.
         if cut_flag.load(std::sync::atomic::Ordering::SeqCst) {
@@ -531,7 +532,7 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
 
     if cut && !too_slow {
         return Ok(format!(
-            "wrote more than {}, so qex stopped reading it and closed the pipe. \
+            "wrote more than {}, so fairq stopped reading it and closed the pipe. \
              {} holds the first {}. Write less in the hook.",
             crate::units::format_size(OUTPUT_LIMIT),
             log_path.display(),
@@ -541,13 +542,13 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
 
     if too_slow {
         let mut text = format!(
-            "used more than its time limit of {} and qex stopped it. \
+            "used more than its time limit of {} and fairq stopped it. \
              Make the hook faster, or increase `[hooks] timeout`.",
             crate::units::format_duration(limit)
         );
         if cut {
             text.push_str(&format!(
-                " It also wrote more than {}, so qex stopped reading its output.",
+                " It also wrote more than {}, so fairq stopped reading its output.",
                 crate::units::format_size(OUTPUT_LIMIT)
             ));
         }
@@ -560,14 +561,14 @@ fn run(cfg: &Config, dir: &Path, status: &JobStatus, limit: Duration) -> std::io
             crate::units::format_duration(start.elapsed())
         )),
         Some(exit) => Ok(format!(
-            "stopped with {exit}. Read `qex logs {} --hook` for its output.",
+            "stopped with {exit}. Read `fairq logs {} --hook` for its output.",
             status.id
         )),
-        None => Ok("stopped, and qex could not read its result".to_string()),
+        None => Ok("stopped, and fairq could not read its result".to_string()),
     }
 }
 
-/// Gives a pipe: the end that qex reads, and the end that the hook writes.
+/// Gives a pipe: the end that fairq reads, and the end that the hook writes.
 fn pipe() -> std::io::Result<(std::fs::File, std::fs::File)> {
     use std::os::fd::FromRawFd;
     let mut fds = [0 as libc::c_int; 2];
@@ -588,12 +589,12 @@ fn pipe() -> std::io::Result<(std::fs::File, std::fs::File)> {
 /// and it sets `cut` when the hook offered more than the limit.
 ///
 /// IT FAILS CLOSED. At the limit it stops reading and gives back control, which
-/// drops the end of the pipe that qex holds. The hook then meets EPIPE at its
+/// drops the end of the pipe that fairq holds. The hook then meets EPIPE at its
 /// next write, or SIGPIPE stops it. Nothing after this point can make the file
 /// larger, so the disk stops growing at the cap.
 ///
 /// The other order — let the hook write and cut the file later — bounds only
-/// what qex KEEPS. It leaves the peak on the disk, and a qex that stops before
+/// what fairq KEEPS. It leaves the peak on the disk, and a fairq that stops before
 /// it cuts leaves the peak there for ever.
 fn capture(
     mut reader: std::fs::File,
@@ -653,7 +654,7 @@ fn stop(pid: i32, child: &mut std::process::Child) {
     // `wait_without_reaping` there.
     //
     // The cost is the full grace time on this path, which is the path of a hook
-    // that qex must stop.
+    // that fairq must stop.
     std::thread::sleep(GRACE);
 
     unsafe {
@@ -667,44 +668,44 @@ fn stop(pid: i32, child: &mut std::process::Child) {
 /// The set answers the questions that a person asks when the notification
 /// arrives: which job is this, what happened to it, how long did it take, and
 /// where do I look now. A hook that needs more reads `spec.json` and
-/// `status.json` in `QEX_JOB_DIR`, so this list stays short.
+/// `status.json` in `FAIRQ_JOB_DIR`, so this list stays short.
 ///
 /// A variable that has no value is an empty text and not an absent variable. A
-/// shell line such as `echo "$QEX_EXIT_CODE"` thus works for each job, and the
+/// shell line such as `echo "$FAIRQ_EXIT_CODE"` thus works for each job, and the
 /// author of the hook writes no test for a variable that does not exist.
 fn variables(dir: &Path, status: &JobStatus) -> Vec<(String, String)> {
     let text = |v: Option<i32>| v.map(|n| n.to_string()).unwrap_or_default();
     let mut set = vec![
-        ("QEX_JOB_ID".into(), status.id.to_string()),
-        // THE SAFE NAME, which is the one form of a name that qex shows.
+        ("FAIRQ_JOB_ID".into(), status.id.to_string()),
+        // THE SAFE NAME, which is the one form of a name that fairq shows.
         //
         // A hook exists to put a name in front of a person: `notify-send
-        // "$QEX_JOB_NAME"`, a line in a file, a message in a chat. That is the
-        // same act as `qex list`, and it takes the same rule. A name is text
+        // "$FAIRQ_JOB_NAME"`, a line in a file, a message in a chat. That is the
+        // same act as `fairq list`, and it takes the same rule. A name is text
         // that another agent chose, and a raw name with an ESC byte, written to
         // a terminal by a hook of two words, moves the cursor and writes over
         // the text around it.
         //
-        // The name that arrives here therefore goes back into a qex command as
+        // The name that arrives here therefore goes back into a fairq command as
         // it stands, because `resolve_id` finds a job by its safe name as well.
         // A hook that needs the name that the submitter typed reads
-        // `status.json` in `QEX_JOB_DIR`.
-        ("QEX_JOB_NAME".into(), crate::job::safe_name(&status.name)),
-        ("QEX_STATE".into(), status.state.to_string()),
-        ("QEX_EXIT_CODE".into(), text(status.exit_code)),
-        ("QEX_SIGNAL".into(), text(status.signal)),
+        // `status.json` in `FAIRQ_JOB_DIR`.
+        ("FAIRQ_JOB_NAME".into(), crate::job::safe_name(&status.name)),
+        ("FAIRQ_STATE".into(), status.state.to_string()),
+        ("FAIRQ_EXIT_CODE".into(), text(status.exit_code)),
+        ("FAIRQ_SIGNAL".into(), text(status.signal)),
         (
-            "QEX_ELAPSED_SECS".into(),
+            "FAIRQ_ELAPSED_SECS".into(),
             status
                 .elapsed()
                 .map(|d| d.as_secs().to_string())
                 .unwrap_or_default(),
         ),
-        ("QEX_CWD".into(), status.cwd.clone()),
-        ("QEX_JOB_DIR".into(), dir.display().to_string()),
-        ("QEX_ATTEMPTS".into(), status.attempts.to_string()),
-        ("QEX_MAX_RSS".into(), status.usage.max_rss.to_string()),
-        ("QEX_TAGS".into(), status.tags.join(" ")),
+        ("FAIRQ_CWD".into(), status.cwd.clone()),
+        ("FAIRQ_JOB_DIR".into(), dir.display().to_string()),
+        ("FAIRQ_ATTEMPTS".into(), status.attempts.to_string()),
+        ("FAIRQ_MAX_RSS".into(), status.usage.max_rss.to_string()),
+        ("FAIRQ_TAGS".into(), status.tags.join(" ")),
     ];
     for (_, value) in set.iter_mut() {
         *value = crate::job::printable(value);
@@ -779,10 +780,10 @@ mod tests {
     /// Gives an empty directory for one test.
     ///
     /// The name holds letters, numbers and hyphens only. A test that puts this
-    /// path in a shell line with a bracket in it tests the shell and not qex.
+    /// path in a shell line with a bracket in it tests the shell and not fairq.
     fn temp(name: &str) -> Temp {
         let dir =
-            crate::testutil::temp_dir().join(format!("qex-hook-{}-{name}", std::process::id()));
+            crate::testutil::temp_dir().join(format!("fairq-hook-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         Temp(dir)
     }
@@ -812,7 +813,7 @@ mod tests {
         assert!(still_runs(dir, limit, 1001), "output, and no verdict yet");
         assert!(
             still_runs(dir, limit, 1000 + 30 + END_OF_A_HOOK.as_secs()),
-            "qex still can write the verdict at the end of the limit"
+            "fairq still can write the verdict at the end of the limit"
         );
         assert!(
             !still_runs(dir, limit, 1000 + 30 + END_OF_A_HOOK.as_secs() + 1),
@@ -822,7 +823,7 @@ mod tests {
         note(dir, &format!("{VERDICT} ended with the exit code 0"));
         assert!(!still_runs(dir, limit, 1001), "the verdict is the end");
 
-        // A line of the HOOK that holds the words is not the verdict of qex:
+        // A line of the HOOK that holds the words is not the verdict of fairq:
         // the verdict starts its own line.
         std::fs::write(dir.join(LOG_FILE), format!("the hook says: {VERDICT}\n")).unwrap();
         assert!(still_runs(dir, limit, 1001));
@@ -830,7 +831,7 @@ mod tests {
         std::fs::write(dir.join(CLAIM_FILE), "not the form of a claim\n").unwrap();
         assert!(
             !still_runs(dir, limit, 1001),
-            "a claim that qex cannot read holds nothing"
+            "a claim that fairq cannot read holds nothing"
         );
     }
 
@@ -893,7 +894,7 @@ mod tests {
         let dir = temp("env");
         let out = dir.join("env.txt");
         let cfg = cfg_with(&format!(
-            "[hooks]\non_stop = [\"sh\", \"-c\", \"env | grep ^QEX_ > {}\"]\n",
+            "[hooks]\non_stop = [\"sh\", \"-c\", \"env | grep ^FAIRQ_ > {}\"]\n",
             out.display()
         ));
         let status = status(JobState::Failed);
@@ -901,29 +902,29 @@ mod tests {
 
         let text = std::fs::read_to_string(&out).unwrap();
         assert!(
-            text.contains(&format!("QEX_JOB_ID={}", status.id)),
+            text.contains(&format!("FAIRQ_JOB_ID={}", status.id)),
             "{text}"
         );
-        assert!(text.contains("QEX_JOB_NAME=build"), "{text}");
-        assert!(text.contains("QEX_STATE=failed"), "{text}");
-        assert!(text.contains("QEX_EXIT_CODE=3"), "{text}");
-        assert!(text.contains("QEX_ELAPSED_SECS=12"), "{text}");
-        assert!(text.contains("QEX_JOB_DIR="), "{text}");
-        assert!(text.contains("QEX_TAGS=ci"), "{text}");
+        assert!(text.contains("FAIRQ_JOB_NAME=build"), "{text}");
+        assert!(text.contains("FAIRQ_STATE=failed"), "{text}");
+        assert!(text.contains("FAIRQ_EXIT_CODE=3"), "{text}");
+        assert!(text.contains("FAIRQ_ELAPSED_SECS=12"), "{text}");
+        assert!(text.contains("FAIRQ_JOB_DIR="), "{text}");
+        assert!(text.contains("FAIRQ_TAGS=ci"), "{text}");
         // A value that the job has not got is an empty text, and not an absent
         // variable. A shell line then needs no test.
-        assert!(text.lines().any(|l| l == "QEX_SIGNAL="), "{text}");
+        assert!(text.lines().any(|l| l == "FAIRQ_SIGNAL="), "{text}");
     }
 
     /// A name from a job must be a name, and never a command. The name goes in
-    /// the environment, so qex builds no text that a shell reads.
+    /// the environment, so fairq builds no text that a shell reads.
     #[test]
     fn a_job_name_with_shell_characters_does_not_become_a_command() {
         let dir = temp("inject");
         let mark = dir.join("owned");
         let out = dir.join("name.txt");
         let cfg = cfg_with(&format!(
-            "[hooks]\non_stop = [\"sh\", \"-c\", \"printf %s \\\"$QEX_JOB_NAME\\\" > {}\"]\n",
+            "[hooks]\non_stop = [\"sh\", \"-c\", \"printf %s \\\"$FAIRQ_JOB_NAME\\\" > {}\"]\n",
             out.display()
         ));
         let mut status = status(JobState::Completed);
@@ -934,7 +935,7 @@ mod tests {
             !mark.exists(),
             "a job name became a command; the name must stay in the environment"
         );
-        // The SAFE name arrives, which is the name that `qex list` shows. Two
+        // The SAFE name arrives, which is the name that `fairq list` shows. Two
         // rules hold this test up, and each one alone is sufficient: the value
         // travels in the environment and never in a command line, and the name
         // itself holds no shell character when it gets there.
@@ -991,7 +992,7 @@ mod tests {
         // the name of the program that failed, which can name a directory of
         // the owner.
         let dir = temp("mode2");
-        let cfg = cfg_with("[hooks]\non_stop = [\"qex-no-such-program\"]\n");
+        let cfg = cfg_with("[hooks]\non_stop = [\"fairq-no-such-program\"]\n");
         fire_with(Origin::Supervisor, &cfg, &dir, &status(JobState::Completed));
         let mode = mode_of(dir.join(LOG_FILE));
         assert_eq!(
@@ -1034,7 +1035,7 @@ mod tests {
     /// would take the standard input of that process. A hook that reads its
     /// input then waits for the whole of its time limit and gives no
     /// notification, and a hook that a person starts from a terminal takes the
-    /// keys of that person. `qex run` is such a terminal.
+    /// keys of that person. `fairq run` is such a terminal.
     ///
     /// THE TEST ASKS THE SYSTEM WHAT THE INPUT IS, and it does not measure the
     /// time. A test that gave `cat` to the hook and waited passed with no
@@ -1045,7 +1046,7 @@ mod tests {
     /// itself runs with `/dev/null` on its input — measured here — a hook that
     /// INHERITED that input gives the same answer, so a deletion of
     /// `Stdio::null()` passes. The test holds the documented property, and the
-    /// property matters most where qex runs from a terminal, which is where no
+    /// property matters most where fairq runs from a terminal, which is where no
     /// automated suite runs. Do not delete the line because this test is green
     /// without it.
     #[cfg(target_os = "linux")]
@@ -1166,10 +1167,10 @@ mod tests {
     #[test]
     fn a_hook_that_does_not_exist_is_reported_and_changes_nothing() {
         let dir = temp("missing");
-        let cfg = cfg_with("[hooks]\non_stop = [\"qex-no-such-program\"]\n");
+        let cfg = cfg_with("[hooks]\non_stop = [\"fairq-no-such-program\"]\n");
         let status = status(JobState::Completed);
         fire_with(Origin::Supervisor, &cfg, &dir, &status);
-        // The claim stays: qex tried, and a second try would notify two times.
+        // The claim stays: fairq tried, and a second try would notify two times.
         assert!(dir.join(CLAIM_FILE).exists());
     }
 
@@ -1198,7 +1199,7 @@ mod tests {
 
     /// A control byte in the data of a job must not stop the notification.
     ///
-    /// A job file can give the name `a\0b` and the tag `x\0y`. qex accepts
+    /// A job file can give the name `a\0b` and the tag `x\0y`. fairq accepts
     /// both, and `Command::env` then refuses the value: `spawn` gives "nul byte
     /// found in provided data". The hook never started, the claim was already
     /// taken, and the message of that job was lost for ever — while the log
@@ -1216,7 +1217,7 @@ mod tests {
         let out = dir.join("name.txt");
         let cfg = cfg_with(&format!(
             "[hooks]\non_stop = [\"sh\", \"-c\", \
-             \"printf '%s|%s' \\\"$QEX_JOB_NAME\\\" \\\"$QEX_TAGS\\\" > {}\"]\n",
+             \"printf '%s|%s' \\\"$FAIRQ_JOB_NAME\\\" \\\"$FAIRQ_TAGS\\\" > {}\"]\n",
             out.display()
         ));
         let mut status = status(JobState::Completed);
@@ -1236,25 +1237,25 @@ mod tests {
             "no value may carry an escape byte to a screen: {text:?}"
         );
 
-        // The verdict of qex must not say that the hook did not start.
+        // The verdict of fairq must not say that the hook did not start.
         let log = std::fs::read_to_string(dir.join(LOG_FILE)).unwrap();
         assert!(!log.contains("did not start"), "got: {log}");
     }
 
-    /// The verdict of qex must reach a file that a qex command reads.
+    /// The verdict of fairq must reach a file that a fairq command reads.
     ///
     /// Before this, the verdict went to the log of the supervisor or of the
     /// coordinator, and no command reads those files. A user whose notification
     /// did not arrive had no way to learn the reason.
     #[test]
-    fn the_verdict_of_qex_goes_into_the_log_of_the_hook() {
+    fn the_verdict_of_fairq_goes_into_the_log_of_the_hook() {
         let dir = temp("verdict");
-        let cfg = cfg_with("[hooks]\non_stop = [\"qex-no-such-program\"]\n");
+        let cfg = cfg_with("[hooks]\non_stop = [\"fairq-no-such-program\"]\n");
         fire_with(Origin::Supervisor, &cfg, &dir, &status(JobState::Completed));
 
         let log = std::fs::read_to_string(dir.join(LOG_FILE)).unwrap();
-        assert!(log.contains("qex: the stop hook"), "got: {log}");
-        assert!(log.contains("qex-no-such-program"), "got: {log}");
+        assert!(log.contains("fairq: the stop hook"), "got: {log}");
+        assert!(log.contains("fairq-no-such-program"), "got: {log}");
         assert!(
             log.contains("on_stop"),
             "the remedy must name the field: {log}"
@@ -1275,7 +1276,7 @@ mod tests {
         //
         // This test used `yes`, which writes until something stops it. That is
         // the true shape of the fault, but it makes the test itself dangerous:
-        // qex puts the hook in a process group of its own, so a hook that
+        // fairq puts the hook in a process group of its own, so a hook that
         // outlives the test process keeps its open file and keeps writing. One
         // such hook reached 334GB and filled the file system of the machine.
         // The cause was a hand deletion of `stop()`, which took away the one
@@ -1283,7 +1284,7 @@ mod tests {
         // detect, and exactly when the test can least afford to flood a disk.
         //
         // 8MB is eight times the cap, which is enough to prove that the cap
-        // holds, and the `sleep` keeps the hook alive so that qex must stop it.
+        // holds, and the `sleep` keeps the hook alive so that fairq must stop it.
         // The bytes are now bounded whatever happens to this process.
         let cfg = cfg_with(
             "[hooks]\non_stop = [\"sh\", \"-c\", \
@@ -1326,15 +1327,15 @@ mod tests {
         let log = std::fs::read_to_string(dir.join(LOG_FILE)).unwrap_or_default();
         assert!(
             log.contains("wrote more than"),
-            "the verdict must say that qex stopped reading the hook"
+            "the verdict must say that fairq stopped reading the hook"
         );
 
-        // The verdict must be a line of its own. qex stops reading in the
+        // The verdict must be a line of its own. fairq stops reading in the
         // middle of a line, so a verdict with no newline before it joins that
-        // line, and `qex logs --hook --tail 1` then gives a megabyte.
+        // line, and `fairq logs --hook --tail 1` then gives a megabyte.
         let last = log.lines().next_back().unwrap_or("");
         assert!(
-            last.starts_with("qex: "),
+            last.starts_with("fairq: "),
             "the last line is {} bytes",
             last.len()
         );

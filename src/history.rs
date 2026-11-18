@@ -1,10 +1,11 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-01: append sets 0600 on a history file that exists (issue #56).
 // Modified by the local-resource-coordinator fork, 2026-11-02: append opens the history with O_NOFOLLOW (issue #88).
-//! This module keeps a short record of every job that qex accepted.
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+//! This module keeps a short record of every job that fairq accepted.
 //!
 //! The record of a job is the interface for an agent. When that record is gone,
-//! `qex status` said only "there is no job with that id". An agent could then
+//! `fairq status` said only "there is no job with that id". An agent could then
 //! not tell these two conditions apart:
 //!
 //! - the id is wrong, or the job never existed, so the agent must submit again;
@@ -12,7 +13,7 @@
 //!   happened already and a second submission would repeat it.
 //!
 //! An agent that cannot tell them apart looks at the process list and at the
-//! times of the output files. That is the archaeology that qex exists to
+//! times of the output files. That is the archaeology that fairq exists to
 //! remove.
 //!
 //! This file holds one line for each job: the id, the name, the time, and the
@@ -35,10 +36,10 @@ pub struct Entry {
     pub id: uuid::Uuid,
     pub name: String,
     pub submitted_at: u64,
-    /// The time when qex deleted the record of this job.
+    /// The time when fairq deleted the record of this job.
     #[serde(default)]
     pub removed_at: Option<u64>,
-    /// The final state of the job, when qex knew it at the removal.
+    /// The final state of the job, when fairq knew it at the removal.
     #[serde(default)]
     pub final_state: Option<String>,
 }
@@ -80,7 +81,7 @@ fn append(entry: &Entry) {
     }
 }
 
-/// Records a job that qex accepted.
+/// Records a job that fairq accepted.
 ///
 /// The tests use this form. The coordinator uses `record_submit_for`, because
 /// it holds the parts and not the specification.
@@ -89,7 +90,7 @@ pub fn record_submit(spec: &JobSpec) {
     record_submit_for(&spec.id, &spec.name, spec.submitted_at);
 }
 
-/// Records a job that qex accepted, from its parts.
+/// Records a job that fairq accepted, from its parts.
 pub fn record_submit_for(id: &uuid::Uuid, name: &str, submitted_at: u64) {
     append(&Entry {
         id: *id,
@@ -124,9 +125,9 @@ pub fn load() -> Vec<Entry> {
         .collect()
 }
 
-/// Gives what qex knows about one job that has no record now.
+/// Gives what fairq knows about one job that has no record now.
 ///
-/// The result joins the lines for that job, so a job that qex accepted and then
+/// The result joins the lines for that job, so a job that fairq accepted and then
 /// deleted gives one entry that holds both times.
 pub fn lookup(id: uuid::Uuid) -> Option<Entry> {
     let mut found: Option<Entry> = None;
@@ -156,7 +157,7 @@ pub fn lookup(id: uuid::Uuid) -> Option<Entry> {
 pub fn describe_missing(id: uuid::Uuid) -> String {
     match lookup(id) {
         None => format!(
-            "there is no job with the id {id}, and qex has no record of one. \
+            "there is no job with the id {id}, and fairq has no record of one. \
              Test the id, or submit the job."
         ),
         // The SAFE name in each sentence below. This text goes to a reader,
@@ -164,7 +165,7 @@ pub fn describe_missing(id: uuid::Uuid) -> String {
         Some(entry) => match (entry.removed_at, entry.final_state) {
             (Some(when), Some(state)) => format!(
                 "the job {id} ({}) existed and its state was `{state}`. Something deleted \
-                 its record {} ago, with `qex clean` or by a deletion of the state \
+                 its record {} ago, with `fairq clean` or by a deletion of the state \
                  directory. {}",
                 crate::job::safe_name(&entry.name),
                 crate::units::format_duration(std::time::Duration::from_secs(
@@ -181,7 +182,7 @@ pub fn describe_missing(id: uuid::Uuid) -> String {
                 }
             ),
             (Some(when), None) => format!(
-                "the job {id} ({}) existed. Something deleted its record {} ago. qex does \
+                "the job {id} ({}) existed. Something deleted its record {} ago. fairq does \
                  not know how that job ended.",
                 crate::job::safe_name(&entry.name),
                 crate::units::format_duration(std::time::Duration::from_secs(
@@ -189,8 +190,8 @@ pub fn describe_missing(id: uuid::Uuid) -> String {
                 ))
             ),
             (None, _) => format!(
-                "the job {id} ({}) existed, and qex accepted it {} ago, but its record is \
-                 gone and qex did not delete it. Something removed the state directory. \
+                "the job {id} ({}) existed, and fairq accepted it {} ago, but its record is \
+                 gone and fairq did not delete it. Something removed the state directory. \
                  The job may have run.",
                 crate::job::safe_name(&entry.name),
                 crate::units::format_duration(std::time::Duration::from_secs(
@@ -254,7 +255,7 @@ mod tests {
 
     fn temp_state(tag: &str) -> (std::path::PathBuf, EnvVar) {
         let dir =
-            crate::testutil::temp_dir().join(format!("qex-hist-{tag}-{}", std::process::id()));
+            crate::testutil::temp_dir().join(format!("fairq-hist-{tag}-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let guard = EnvVar::set("XDG_STATE_HOME", dir.to_str().unwrap());
@@ -293,9 +294,9 @@ mod tests {
         }
     }
 
-    /// An id that qex never saw must say so, so an agent submits the job.
+    /// An id that fairq never saw must say so, so an agent submits the job.
     #[test]
-    fn an_unknown_id_says_that_qex_never_saw_it() {
+    fn an_unknown_id_says_that_fairq_never_saw_it() {
         let _guard = env_lock();
         let (dir, _env) = temp_state("unknown");
 
@@ -309,7 +310,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// A job whose record qex deleted must say so, and it must say that the
+    /// A job whose record fairq deleted must say so, and it must say that the
     /// work happened. An agent must not repeat work that already succeeded.
     #[test]
     fn a_deleted_record_says_that_the_work_happened() {
@@ -338,7 +339,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// qex must delete an old line. An id of last month answers no question,
+    /// fairq must delete an old line. An id of last month answers no question,
     /// and a file that grows for ever is a fault of its own.
     #[test]
     fn an_old_line_goes_away() {
@@ -363,10 +364,10 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// A record that disappeared without `qex clean` must be reported as that.
+    /// A record that disappeared without `fairq clean` must be reported as that.
     /// Something removed the state directory, and the job may have run.
     #[test]
-    fn a_record_that_vanished_is_different_from_one_that_qex_deleted() {
+    fn a_record_that_vanished_is_different_from_one_that_fairq_deleted() {
         let _guard = env_lock();
         let (dir, _env) = temp_state("vanished");
 
@@ -374,7 +375,7 @@ mod tests {
         record_submit(&spec(id, "train"));
 
         let text = describe_missing(id);
-        assert!(text.contains("qex did not delete it"), "got: {text}");
+        assert!(text.contains("fairq did not delete it"), "got: {text}");
         assert!(text.contains("may have run"), "got: {text}");
 
         std::fs::remove_dir_all(&dir).ok();
@@ -389,7 +390,7 @@ mod tests {
         s.command = vec!["deploy".into(), "--token=SECRET123".into()];
         record_submit(&s);
 
-        let text = std::fs::read_to_string(dir.join("qex/history.jsonl")).unwrap();
+        let text = std::fs::read_to_string(dir.join("fairq/history.jsonl")).unwrap();
         assert!(
             !text.contains("SECRET123"),
             "the file holds the command: {text}"

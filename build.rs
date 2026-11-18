@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! Gives the build the version that it reports.
 //!
 //! # Why this file exists
@@ -9,9 +10,9 @@
 //! `CARGO_PKG_VERSION` is therefore `0.0.0-dev` in every build that a person
 //! makes, and a version that never changes makes two faults:
 //!
-//!   * qex compares the version of the CLI against the version of the
+//!   * fairq compares the version of the CLI against the version of the
 //!     coordinator, and it warns when the two differ. That warning exists to
-//!     catch a person who builds qex and installs it WHILE THEY WORK. With one
+//!     catch a person who builds fairq and installs it WHILE THEY WORK. With one
 //!     number for every build it can never fire again.
 //!   * A fault report from a build that no release holds would name no commit.
 //!
@@ -33,7 +34,7 @@
 //! ignores. It never reaches Cargo.toml, so cargo has no opinion about it.
 //! `capabilities::parse` reads the whole string as `(0, 0, 0)`, which is below
 //! the capability floor, and `version::is_development` names it a development
-//! build so that qex warns about it and does not refuse it.
+//! build so that fairq warns about it and does not refuse it.
 //!
 //! # Two rules, and the file says which one it is
 //!
@@ -49,7 +50,7 @@
 //!          0.0.0-dev+unknown           anything else
 //!
 //! NOTHING COMES IN THROUGH THE ENVIRONMENT. An earlier version of this file
-//! read `QEX_VERSION`, which the release workflow set from the tag. That was
+//! read `FAIRQ_VERSION`, which the release workflow set from the tag. That was
 //! one more way for a build to report a number that its own files do not hold.
 //! The number is a fact about the tree, and rule 1 reads it from the tree.
 //!
@@ -68,8 +69,8 @@
 //!     CHECKOUT THAT CARGO MAKES IS ITSELF A GIT REPOSITORY, so without a test
 //!     every such install reports the hash of cargo's own clone.
 //!   * `cargo publish`, which builds the package again in
-//!     `target/package/qex-X.Y.Z/`, inside the checkout that it came from.
-//!   * `cargo install qex` for a user whose `$HOME` is a repository of dotfiles.
+//!     `target/package/fairq-X.Y.Z/`, inside the checkout that it came from.
+//!   * `cargo install fairq` for a user whose `$HOME` is a repository of dotfiles.
 //!     The registry unpacks under `~/.cargo/registry/src/`, so git finds `$HOME`.
 //!
 //! TWO RULES CLOSE THIS, and each of them alone leaves a hole:
@@ -83,7 +84,7 @@
 //!      it and rule B does.
 //!
 //! Rule A costs a development build nothing, because `main` holds `0.0.0-dev`.
-//! Rule B costs it nothing either, because the root of a checkout of qex IS the
+//! Rule B costs it nothing either, because the root of a checkout of fairq IS the
 //! root of the package. A git WORKTREE also passes: `--show-toplevel` gives the
 //! root of the worktree, and our worktrees hold the package at their root.
 //!
@@ -106,7 +107,7 @@
 //!
 //! `refuse_below_the_floor` is the one deliberate exception, and it is not one
 //! of those paths. It reads the number that a person put in `Cargo.toml`, and
-//! it stops a build that would give a binary that qex itself refuses. Read it
+//! it stops a build that would give a binary that fairq itself refuses. Read it
 //! for the reason. **Do not take that panic away on the strength of this
 //! heading**: the rule here is about the commit that this file looks for, and
 //! not about a number that somebody wrote by hand.
@@ -119,7 +120,7 @@ const DEVELOPMENT: &str = "0.0.0-dev";
 
 /// The first version that answers the capability handshake.
 ///
-/// A build below this number cannot say what it is unable to obey, so qex can
+/// A build below this number cannot say what it is unable to obey, so fairq can
 /// make no promise about it. That is the whole meaning of the number: it is not
 /// a statement about which versions somebody wants to support.
 ///
@@ -130,7 +131,7 @@ const DEVELOPMENT: &str = "0.0.0-dev";
 /// two together, so they cannot go apart in silence.
 const CAPABILITY_FLOOR: (u32, u32, u32) = (0, 6, 0);
 
-/// Stops a build that would give a binary that qex itself refuses.
+/// Stops a build that would give a binary that fairq itself refuses.
 ///
 /// `capabilities::check_floor` refuses a coordinator below `CAPABILITY_FLOOR`,
 /// because a build below it comes from before the capability handshake and
@@ -139,7 +140,7 @@ const CAPABILITY_FLOOR: (u32, u32, u32) = (0, 6, 0);
 /// meets that with no cause.
 ///
 /// `0.0.0-dev` is NOT this case. Its numbers are below the floor, and
-/// `version::is_development` names it, so qex warns about such a build and runs
+/// `version::is_development` names it, so fairq warns about such a build and runs
 /// it.
 ///
 /// The fault that this prevents is a number that somebody writes into
@@ -154,9 +155,9 @@ fn refuse_below_the_floor(version: &str) {
         panic!(
             "the version `{version}` in Cargo.toml is neither three numbers nor \
              `{DEVELOPMENT}`.\n\n\
-             qex compares this number against the first version that answers the \
+             fairq compares this number against the first version that answers the \
              capability handshake, and it cannot read this one, so the build would \
-             give a binary that qex refuses.\n\n\
+             give a binary that fairq refuses.\n\n\
              Put three numbers in Cargo.toml, such as `{major}.{minor}.{patch}`, or \
              leave `{DEVELOPMENT}` for a build that is not a release."
         );
@@ -166,7 +167,7 @@ fn refuse_below_the_floor(version: &str) {
         panic!(
             "the version `{version}` in Cargo.toml is below `{major}.{minor}.{patch}`, \
              which is the first version that answers the capability handshake.\n\n\
-             A coordinator below that number does not say what it can do, so qex refuses \
+             A coordinator below that number does not say what it can do, so fairq refuses \
              it. This build would therefore give a binary that its own CLI refuses, and \
              the person who installed it would meet that with no cause.\n\n\
              Put `{major}.{minor}.{patch}` or a later number in Cargo.toml, or leave \
@@ -182,9 +183,9 @@ fn main() {
         println!("cargo:rerun-if-changed={path}");
     }
 
-    println!("cargo:rustc-env=QEX_BUILD_VERSION={version}");
+    println!("cargo:rustc-env=FAIRQ_BUILD_VERSION={version}");
     let (major, minor, patch) = CAPABILITY_FLOOR;
-    println!("cargo:rustc-env=QEX_BUILD_FLOOR={major}.{minor}.{patch}");
+    println!("cargo:rustc-env=FAIRQ_BUILD_FLOOR={major}.{minor}.{patch}");
 }
 
 /// The files that change the answer.

@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test record sets the new pid_ns fields (issue #115).
-//! This module holds the `qex top` command.
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+//! This module holds the `fairq top` command.
 //!
 //! The command shows the queue and refreshes it. For each job it shows the
 //! claim and the true use at this moment, so a person can see immediately that
@@ -28,7 +29,7 @@ use std::time::{Duration, Instant};
 const CLEAR: &str = "\x1b[2J\x1b[H";
 
 /// The first signal that `x` sends, and the wait before KILL. The same values
-/// as `qex kill` with no options.
+/// as `fairq kill` with no options.
 const STOP_SIGNAL: i32 = 15;
 const STOP_GRACE_SECS: u64 = 10;
 
@@ -117,7 +118,7 @@ pub fn run(args: crate::cli::TopArgs) -> Result<i32> {
         // job that operates can still be measured by its process group.
         // NO COORDINATOR IS AN ANSWER. A coordinator that does not answer is
         // not. The first is the true state of a machine with an empty queue,
-        // and the records on the disk describe it. The second means that qex
+        // and the records on the disk describe it. The second means that fairq
         // could not read the state at all, and the page then shows the disk
         // alone while a coordinator holds jobs that the page does not name.
         let mut reached = true;
@@ -161,8 +162,8 @@ pub fn run(args: crate::cli::TopArgs) -> Result<i32> {
             // It fits the screen and it holds a selection. `--once` is a
             // QUERY, and an agent scripts it. It writes every job that this
             // page names, so a script does not lose a job that did not fit.
-            // The code 0 from a query says that qex answered the question, so
-            // a page that qex could not fill must not carry it: an agent then
+            // The code 0 from a query says that fairq answered the question, so
+            // a page that fairq could not fill must not carry it: an agent then
             // reads an empty page as the state of the machine and acts on it,
             // and a false success is worse than a wait, because nobody sees it.
             return Ok(if reached {
@@ -338,7 +339,7 @@ fn paint(
     out.push_str(&pane_bar(
         '┌',
         '┐',
-        "qex",
+        "fairq",
         &sys::clock_text(sys::now_secs()),
         width,
     ));
@@ -447,10 +448,10 @@ fn paint_once(
     // The singular and the plural are separate texts. ASD-STE100 does not
     // accept `job(s)`.
     if hidden == 1 {
-        out.push_str("\n1 more job that stopped is not shown. Use `qex list --all`.\n");
+        out.push_str("\n1 more job that stopped is not shown. Use `fairq list --all`.\n");
     } else if hidden > 1 {
         out.push_str(&format!(
-            "\n{hidden} more jobs that stopped are not shown. Use `qex list --all`.\n"
+            "\n{hidden} more jobs that stopped are not shown. Use `fairq list --all`.\n"
         ));
     }
     out.push_str(&crate::style::faint(
@@ -501,10 +502,10 @@ fn header_lines(ordered: &[JobStatus], info: Option<&Response>, unreachable: boo
         }
         if *program_replaced {
             lines.push(
-                "the qex program changed; this coordinator stops when no job operates".into(),
+                "the fairq program changed; this coordinator stops when no job operates".into(),
             );
         }
-        // The same lines as `qex pause` and `qex info` give: one summary
+        // The same lines as `fairq pause` and `fairq info` give: one summary
         // line, and one line for each standing request.
         let picture = crate::commands::PausePicture::from_info(
             queue_state.as_deref(),
@@ -519,7 +520,7 @@ fn header_lines(ordered: &[JobStatus], info: Option<&Response>, unreachable: boo
                 continue;
             }
             let line = match line.strip_prefix("queue: ") {
-                Some(rest) if index == 0 => format!("QUEUE PAUSED: qex starts no job. {rest}"),
+                Some(rest) if index == 0 => format!("QUEUE PAUSED: fairq starts no job. {rest}"),
                 _ => line,
             };
             lines.push(crate::style::warning(&line));
@@ -553,7 +554,7 @@ fn header_lines(ordered: &[JobStatus], info: Option<&Response>, unreachable: boo
         ));
         if unreachable {
             lines.push(
-                "qex has no answer from a coordinator. These records come from the state \
+                "fairq has no answer from a coordinator. These records come from the state \
                  directory, and a coordinator can hold jobs that this page does not name."
                     .into(),
             );
@@ -561,7 +562,7 @@ fn header_lines(ordered: &[JobStatus], info: Option<&Response>, unreachable: boo
             lines.push(
                 "no coordinator operates. These records come from the state directory.".into(),
             );
-            lines.push("qex starts a coordinator when you submit a job.".into());
+            lines.push("fairq starts a coordinator when you submit a job.".into());
         }
     }
 
@@ -595,7 +596,7 @@ fn config_file_label() -> String {
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "qex.toml".to_string())
+        .unwrap_or_else(|| "fairq.toml".to_string())
 }
 
 /// `config_error` is a wait as well as a fault. A wait must not read as
@@ -1274,7 +1275,7 @@ fn ask_clean(view: &mut View, jobs: &[JobStatus]) {
 fn act_stop(id: uuid::Uuid) -> String {
     let short = &id.to_string()[..8];
     match Client::connect_existing_result() {
-        Ok(None) => "no coordinator operates. qex cannot stop the job from this page.".into(),
+        Ok(None) => "no coordinator operates. fairq cannot stop the job from this page.".into(),
         Err(e) => format!("{e:#}"),
         Ok(Some(mut client)) => {
             match client.call(&Request::Kill {
@@ -1294,7 +1295,7 @@ fn act_stop(id: uuid::Uuid) -> String {
 fn act_clean(id: uuid::Uuid) -> String {
     let short = &id.to_string()[..8];
     match Client::connect_existing_result() {
-        Ok(None) => "no coordinator operates. qex cannot clean the job from this page.".into(),
+        Ok(None) => "no coordinator operates. fairq cannot clean the job from this page.".into(),
         Err(e) => format!("{e:#}"),
         Ok(Some(mut client)) => match client.call(&Request::Clean { id }) {
             Ok(Response::Ok) => format!("{short} deleted"),
@@ -1308,7 +1309,7 @@ fn act_clean(id: uuid::Uuid) -> String {
 fn act_cancel(id: uuid::Uuid) -> String {
     let short = &id.to_string()[..8];
     match Client::connect_existing_result() {
-        Ok(None) => "no coordinator operates. qex cannot cancel the job from this page.".into(),
+        Ok(None) => "no coordinator operates. fairq cannot cancel the job from this page.".into(),
         Err(e) => format!("{e:#}"),
         Ok(Some(mut client)) => match client.call(&Request::Cancel { id }) {
             Ok(Response::Ok) => format!("{short} left the queue"),
@@ -1396,17 +1397,17 @@ fn note_for(job: &JobStatus) -> String {
             None => "failed".to_string(),
         },
         JobState::Skipped => "a job that it needed did not succeed".to_string(),
-        // Say what qex saw, and no more. An earlier note said "the memory
-        // claim was too small", and qex cannot say that: the kill count
+        // Say what fairq saw, and no more. An earlier note said "the memory
+        // claim was too small", and fairq cannot say that: the kill count
         // covers every program of the user, so the machine can be full while
-        // the claim is correct, and `docs/reference.md` promises that qex
+        // the claim is correct, and `docs/reference.md` promises that fairq
         // never makes that call.
         JobState::Oom => "the kernel stopped it for memory".to_string(),
         JobState::Timeout => "reached its time limit".to_string(),
         JobState::Killed => "stopped by a command".to_string(),
         JobState::Cancelled => "left the queue".to_string(),
         JobState::Expired => "it never started; it waited too long".to_string(),
-        // Every state that a job STOPS in must give a note. A reader of `qex
+        // Every state that a job STOPS in must give a note. A reader of `fairq
         // top` sees the state and the note together, and a note that is empty
         // makes the reader open a second command to learn the cause.
         _ => String::new(),
@@ -1455,7 +1456,7 @@ fn read_the_queue(
 fn say_once(said: &mut bool, error: &anyhow::Error) {
     if !*said {
         *said = true;
-        eprintln!("qex: {error:#}");
+        eprintln!("fairq: {error:#}");
     }
 }
 
@@ -1649,7 +1650,7 @@ mod tests {
 
     /// EVERY STATE THAT A JOB STOPS IN MUST GIVE A NOTE.
     ///
-    /// A reader of `qex top` sees the state and the note together. A note that
+    /// A reader of `fairq top` sees the state and the note together. A note that
     /// is empty makes that reader open a second command to learn the cause,
     /// and `expired` is the state with the least in the record: no exit code,
     /// no output and no log file.
@@ -1735,7 +1736,7 @@ mod tests {
         text: Option<&str>,
     ) -> (std::path::PathBuf, crate::testutil::EnvVar) {
         let dir = crate::testutil::temp_dir().join(format!(
-            "qex-top-cfg-{tag}-{}-{}",
+            "fairq-top-cfg-{tag}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1745,7 +1746,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         if let Some(text) = text {
-            std::fs::write(dir.join("qex.toml"), text).unwrap();
+            std::fs::write(dir.join("fairq.toml"), text).unwrap();
         }
         let guard = crate::testutil::EnvVar::set("XDG_CONFIG_HOME", dir.to_str().unwrap());
         (dir, guard)
@@ -1817,10 +1818,10 @@ mod tests {
         }
     }
 
-    /// A file that qex cannot read must not become the default values in
+    /// A file that fairq cannot read must not become the default values in
     /// silence. The page must keep working, and it must name the file.
     #[test]
-    fn a_config_file_that_qex_cannot_read_is_named_on_the_page() {
+    fn a_config_file_that_fairq_cannot_read_is_named_on_the_page() {
         let _lock = crate::testutil::env_lock();
         let (_dir, _cfg) =
             isolated_config("bad", Some("[budget]\ncpu = \"1\"\n\n[unknown]\nfoo = 1\n"));
@@ -1833,7 +1834,7 @@ mod tests {
             "the page must say that the numbers are not the user's: {page}"
         );
         assert!(
-            page.contains("qex.toml"),
+            page.contains("fairq.toml"),
             "the page must name the file: {page}"
         );
         assert!(
@@ -1850,7 +1851,7 @@ mod tests {
     /// The live page clips from the right. The file name must still be on
     /// an 80-column screen, which is the form a person watches.
     #[test]
-    fn a_live_page_still_names_a_config_file_that_qex_cannot_read() {
+    fn a_live_page_still_names_a_config_file_that_fairq_cannot_read() {
         let _lock = crate::testutil::env_lock();
         let (_dir, _cfg) = isolated_config(
             "badlive",
@@ -1859,7 +1860,7 @@ mod tests {
 
         let page = paint_live(None, 80);
         assert!(
-            page.contains("qex.toml"),
+            page.contains("fairq.toml"),
             "an 80-column page must still name the file: {page}"
         );
         assert!(
@@ -1875,8 +1876,8 @@ mod tests {
         }
     }
 
-    /// A file that is gone is not a fault. qex uses the default values and
-    /// says nothing: that is the usual start, not a file that qex refused.
+    /// A file that is gone is not a fault. fairq uses the default values and
+    /// says nothing: that is the usual start, not a file that fairq refused.
     #[test]
     fn a_missing_config_file_is_not_a_fault_on_the_page() {
         let _lock = crate::testutil::env_lock();
@@ -1887,7 +1888,7 @@ mod tests {
 
         assert!(
             !page.contains("default values"),
-            "a missing file must not look like a file that qex refused: {page}"
+            "a missing file must not look like a file that fairq refused: {page}"
         );
         assert!(
             !page.contains("WARNING"),
@@ -1900,7 +1901,7 @@ mod tests {
     /// always used the defaults would pass the warning tests and still hide
     /// the file.
     #[test]
-    fn the_header_uses_the_budget_from_a_file_that_qex_can_read() {
+    fn the_header_uses_the_budget_from_a_file_that_fairq_can_read() {
         let _lock = crate::testutil::env_lock();
         let (_dir, _cfg) = isolated_config("ok", Some("[budget]\ncpu = \"7\"\n"));
 
@@ -1913,17 +1914,17 @@ mod tests {
         );
         assert!(
             !page.contains("default values"),
-            "a file that qex can read is not a fault: {page}"
+            "a file that fairq can read is not a fault: {page}"
         );
     }
 
     /// A coordinator that cannot read the file already holds the last good
-    /// values. The page must say so, or a person who watches `qex top` while
+    /// values. The page must say so, or a person who watches `fairq top` while
     /// they edit the file never learns that the numbers are old.
     #[test]
     fn a_coordinator_config_fault_is_named_on_the_page() {
         let broken = info_with_config_error(Some(
-            "parsing config file /x/qex.toml: unknown field `foo`".into(),
+            "parsing config file /x/fairq.toml: unknown field `foo`".into(),
         ));
         let page = paint_live(Some(&broken), 80);
         assert!(
@@ -1931,7 +1932,7 @@ mod tests {
             "the page must name the fault: {page}"
         );
         assert!(
-            page.contains("qex.toml"),
+            page.contains("fairq.toml"),
             "the page must name the file: {page}"
         );
         assert!(
@@ -1952,7 +1953,7 @@ mod tests {
         );
     }
 
-    /// A young file is a wait, not a fault. The page must not say that qex
+    /// A young file is a wait, not a fault. The page must not say that fairq
     /// cannot use a file it is only ageing.
     #[test]
     fn a_coordinator_wait_for_a_writer_is_not_an_unreadable_file() {
@@ -1960,10 +1961,10 @@ mod tests {
         let page = paint_live(Some(&waiting), 80);
         assert!(
             page.contains("waiting for a writer"),
-            "the page must say that qex is waiting: {page}"
+            "the page must say that fairq is waiting: {page}"
         );
         assert!(
-            page.contains("qex.toml"),
+            page.contains("fairq.toml"),
             "the page must name the file: {page}"
         );
         assert!(
@@ -2547,7 +2548,8 @@ mod tests {
 
     #[test]
     fn last_file_lines_reads_a_window_and_survives_bad_utf8() {
-        let dir = crate::testutil::temp_dir().join(format!("qex-top-tail-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("fairq-top-tail-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("out.log");
         let mut data = vec![0xffu8; 80 * 1024];

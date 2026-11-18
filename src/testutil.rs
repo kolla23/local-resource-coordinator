@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: add peers_env and temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! Test-only helpers.
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -67,10 +68,10 @@ impl Drop for EnvVar {
     }
 }
 
-/// Holds the environment lock and unsets `QEX_PEERS_DIR` for one test.
+/// Holds the environment lock and unsets `FAIRQ_PEERS_DIR` for one test.
 ///
 /// A test that reads the peer directory must not run while a different test
-/// sets `QEX_PEERS_DIR` or `TMPDIR`: the reader then reads the directory of
+/// sets `FAIRQ_PEERS_DIR` or `TMPDIR`: the reader then reads the directory of
 /// the other test and counts no peer. The tests that set those variables hold
 /// `env_lock`, so a reader must hold it too.
 pub struct PeersEnv {

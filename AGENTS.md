@@ -1,9 +1,9 @@
-# local-resource-coordinator (placeholder name)
+# fairq (repository: local-resource-coordinator)
 
 An independently maintained fork of qex (Apache-2.0). It is a local coordinator that decides RUN/WAIT for commands that humans and AI agents submit in parallel, so that shared work doesn't exhaust CPU or RAM. The users are developers running several agents or builds on one machine.
 
 ## Stack
-- Rust (edition 2021, MSRV 1.85), a single crate `qex`. Dependencies: clap, serde/serde_json, toml, serde_yaml_ng, uuid, libc, anyhow.
+- Rust (edition 2021, MSRV 1.85), a single crate `fairq`. Dependencies: clap, serde/serde_json, toml, serde_yaml_ng, uuid, libc, anyhow.
 - No database. State lives in atomic job files. IPC runs over Unix sockets.
 - Upstream builds only on Unix (Linux, macOS). On Windows, build and test inside WSL2.
 - Upstream: https://github.com/stephenc/qex. We fork from v0.33.0 (`78b4e86`, tag `base/qex-v0.33.0`).
@@ -21,7 +21,6 @@ An independently maintained fork of qex (Apache-2.0). It is a local coordinator 
 - The upstream baseline, with logs: `docs/baseline/run-baseline-linux.sh <clone> <log-dir>` (it checks out upstream v0.33.0, which has no `test-fixtures` feature, so it keeps the upstream commands)
 - Control characters: stage your changes (by name), then `python3 .github/scripts/check-control-chars.py` (`python` in Git Bash on Windows). It checks staged content only and names any unstaged or untracked files it skipped. Tests: `check-control-chars-test.py`
 - Move checker (the R-PRs of `docs/fork/PORT_PLAN.md`): `python3 .github/scripts/check-moves.py <base> [<head>]` (`python` in Git Bash on Windows). It pairs each function with a byte-identical copy and lists every other line, in every changed file: a changed line is left out only when it belongs to a paired function, and every line of a new function that pairs with nothing (a forwarder, an edited copy left behind) is listed. It exits 1 when a changed function has no byte-identical copy, 2 on a usage error and 3 when it fails itself; at any exit code, the PR explains every listed line. The authoritative run is CI's Move check job on `refactor/` PRs. Tests: `check-moves-test.py`
-- Rename to fairq (issue #28, once): `python .github/scripts/rename-fairq.py [--list]` at the top of the work tree (Git Bash; `python3` on Linux), then `python .github/scripts/check-rename.py <base> <head>`, which lists every changed line that is not its base line with the old name mapped to fairq; it exits 1 when it lists any, 2 on a usage error and 3 when it cannot do its work. The rename PR explains every listed line. Tests: `check-rename-test.py`
 
 ## Structure
 - `src/`: upstream qex (coordinator `daemon.rs`, scheduler `sched.rs`, per-job `supervisor.rs`, platform metrics `sys.rs`).
@@ -49,7 +48,7 @@ An independently maintained fork of qex (Apache-2.0). It is a local coordinator 
   - Every PR runs the review loop in `~/.claude/standards/REVIEW_LOOP.md` (the one copy). Here, the CI check "Reviewed at the head commit" (`.github/scripts/check-reviewed.sh`) runs only on ready PRs and confirms the body's `Reviewed at` line names the head commit.
 - Don't add fork documents directly in `docs/`; use `docs/fork/` or another subfolder.
 - Decisions that change upstream interfaces (persistence, IPC framing, CLI compatibility, launch protocol) need an ADR first.
-- Scripts may write code only for pure moves that check-moves.py verifies, and for the one rename to fairq that check-rename.py verifies; every other change uses the normal edit tools.
+- Scripts may write code only for pure moves that check-moves.py verifies; every other change uses the normal edit tools.
 
 ## Gotchas
 Add one line each time the same mistake happens twice.

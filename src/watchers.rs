@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-11-11: ancestors_of and process_age read /proc stat as bytes, so a command name that is not UTF-8 is read (issue #131).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module finds the monitor scripts that wait for a proxy.
 //!
 //! A monitor waits for evidence of the work: a pattern in the process list, a
@@ -78,7 +79,7 @@ pub fn classify(command: &str) -> Option<(&'static str, &'static str)> {
             "This monitor waits until NOTHING matches, and it has no pattern fault. On a \
              machine that two agents share, the work of the other agent keeps the count above \
              zero for ever, and your own work is already complete. Wait for YOUR job instead: \
-             `qex wait <id>` reads one process, and that process belongs to you.",
+             `fairq wait <id>` reads one process, and that process belongs to you.",
         ));
     }
 
@@ -86,7 +87,7 @@ pub fn classify(command: &str) -> Option<(&'static str, &'static str)> {
         return Some((
             "a pattern in the process list of another machine",
             "That pattern also matches the work of the other users of that machine, and each \
-             test opens a connection. Start the task with `qex submit` on that machine, and \
+             test opens a connection. Start the task with `fairq submit` on that machine, and \
              wait for its id.",
         ));
     }
@@ -94,8 +95,8 @@ pub fn classify(command: &str) -> Option<(&'static str, &'static str)> {
     if reads_processes {
         return Some((
             "a pattern in the process list",
-            "This monitor can match its own command line. Use `qex submit` and \
-             `qex status <id> --wait`.",
+            "This monitor can match its own command line. Use `fairq submit` and \
+             `fairq status <id> --wait`.",
         ));
     }
 
@@ -103,7 +104,7 @@ pub fn classify(command: &str) -> Option<(&'static str, &'static str)> {
         return Some((
             "a line in a log file",
             "The line never arrives when something stops the task that writes it. \
-             Use `qex submit` and `qex status <id> --wait`.",
+             Use `fairq submit` and `fairq status <id> --wait`.",
         ));
     }
 
@@ -111,14 +112,14 @@ pub fn classify(command: &str) -> Option<(&'static str, &'static str)> {
         return Some((
             "a file that appears",
             "The file never appears when something stops the task that writes it. \
-             Use `qex submit` and `qex status <id> --wait`.",
+             Use `fairq submit` and `fairq status <id> --wait`.",
         ));
     }
 
     Some((
         "an unknown condition",
-        "This loop sleeps and tests a condition. Use `qex submit` and \
-         `qex status <id> --wait`, which waits for the process itself.",
+        "This loop sleeps and tests a condition. Use `fairq submit` and \
+         `fairq status <id> --wait`, which waits for the process itself.",
     ))
 }
 
@@ -150,7 +151,7 @@ pub fn find() -> Vec<Watcher> {
         // Remove this process and the processes that started it. This step is
         // the reason that this command can look for a fault that a shell
         // command cannot look for without finding itself: the shell that runs
-        // `qex watchers` holds those letters in its own command line.
+        // `fairq watchers` holds those letters in its own command line.
         //
         // Remove these processes only. A monitor that a user started from the
         // same shell is a true result, and it is the usual case.
@@ -170,8 +171,8 @@ pub fn find() -> Vec<Watcher> {
             .trim()
             .to_string();
 
-        // A command that runs qex itself is not a monitor.
-        if command.contains("qex watchers") {
+        // A command that runs fairq itself is not a monitor.
+        if command.contains("fairq watchers") {
             continue;
         }
 
@@ -438,7 +439,7 @@ mod tests {
         let (proxy, advice) =
             classify("bash -c while ! curl -sf localhost:8080; do sleep 5; done").unwrap();
         assert_eq!(proxy, "an unknown condition");
-        assert!(advice.contains("qex"));
+        assert!(advice.contains("fairq"));
     }
 
     /// This command must never report itself.

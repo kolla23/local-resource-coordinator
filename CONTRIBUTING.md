@@ -1,5 +1,6 @@
-# How to make a change to qex
+# How to make a change to fairq
 <!-- Modified by the local-resource-coordinator fork, 2026-10-02: clippy and the e2e tests need --features test-fixtures. -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 ## Work on a branch, and merge with a pull request
 
@@ -15,7 +16,7 @@ gh pr create
 
 ## The title of your pull request gives the version number
 
-qex has no manual release step. A merge to `main` reads the commit messages
+fairq has no manual release step. A merge to `main` reads the commit messages
 since the last release, calculates the next version number, makes the tag, and
 then builds the binaries and publishes the release.
 
@@ -44,7 +45,7 @@ the pull request becomes its body.
 Examples:
 
 ```
-feat: add a command that shows the space that qex holds
+feat: add a command that shows the space that fairq holds
 fix(top): show the queue when no coordinator operates
 feat!: rename --lock to --exclusive
 docs: correct the example in the agent page
@@ -168,7 +169,7 @@ git fetch origin
 git checkout --detach origin/main
 .github/scripts/set-version.sh 1.0.0
 git commit -am "chore(release): v1.0.0"
-git tag -a v1.0.0 -m "qex 1.0.0"
+git tag -a v1.0.0 -m "fairq 1.0.0"
 git push origin v1.0.0
 ```
 
@@ -178,7 +179,7 @@ from 1.0.0.
 ## The version number that your build reports
 
 **A build that you install on a machine must not report the same number as a
-different build.** qex compares the version of the CLI against the version of
+different build.** fairq compares the version of the CLI against the version of
 the coordinator that operates, and it gives a warning when the two differ. Two
 different binaries that report one number make that warning useless, and a user
 then meets a fault with no cause.
@@ -245,7 +246,7 @@ that somebody met, so that a later change does not bring the fault back.
 
 ## The tests that must not go away
 
-Some tests hold the reason that qex exists. Do not delete them:
+Some tests hold the reason that fairq exists. Do not delete them:
 
 - `watchers::tests::the_search_never_finds_itself` — the fault that started the
   project.

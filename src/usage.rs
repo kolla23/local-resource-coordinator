@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: usage.lock is made and kept 0600.
 // Modified by the local-resource-coordinator fork, 2026-11-02: usage.lock is opened with O_NOFOLLOW (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module remembers what a job really used, and gives the claim for the
 //! next job of the same kind.
 //!
@@ -9,7 +10,7 @@
 //! also frequently far too large: a test suite that uses 165MB can hold 10GB of
 //! the budget and stop other work for the length of the run.
 //!
-//! qex already measures each job. This module keeps those measurements and uses
+//! fairq already measures each job. This module keeps those measurements and uses
 //! them, so the claim becomes accurate without any effort from the agent.
 //!
 //! # What this module records
@@ -23,7 +24,7 @@
 //!   one command and very different needs, so the directory must be in the key
 //!   as well.
 //!
-//! A job can name a different command to be measured against. `qex submit
+//! A job can name a different command to be measured against. `fairq submit
 //! --each-line` does that: the command of each job holds one line of the input
 //! and is used one time only, so the jobs of one fan-out measure against their
 //! template. See `JobSpec::learn_key`.
@@ -33,7 +34,7 @@
 //! names the work of a user. This file must not become a second place that
 //! holds either.
 //!
-//! # Which jobs qex records
+//! # Which jobs fairq records
 //!
 //! A job that COMPLETED, and nothing else. The job did all its work, so its
 //! peak is the memory that the job needs.
@@ -45,16 +46,16 @@
 //! job that somebody stopped, a job that reached its time limit, and a job that
 //! the kernel stopped for memory.
 //!
-//! # A file of an earlier qex
+//! # A file of an earlier fairq
 //!
-//! An earlier qex wrote a second kind of sample, a `lower-bound`, after a kill
+//! An earlier fairq wrote a second kind of sample, a `lower-bound`, after a kill
 //! for memory. This version writes none and uses none, and it still READS one,
 //! because the store loads as ONE value: a word that this version could not
 //! read would give an empty store and take every peak of every command with it.
 //! `suggest` passes over such a sample, and a command whose only history is one
 //! gives no claim at all.
 //!
-//! # A file that qex cannot read
+//! # A file that fairq cannot read
 //!
 //! The store loads as one value, so a file that this version cannot read in
 //! full would give an empty store — and the next write would then DELETE every
@@ -70,12 +71,12 @@ use crate::spec::JobSpec;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// The number of measurements that qex keeps for one command.
+/// The number of measurements that fairq keeps for one command.
 const SAMPLES: usize = 5;
 
 /// The smallest memory claim that this module gives.
 ///
-/// A measurement holds the peak that qex saw. A job can use more on a different
+/// A measurement holds the peak that fairq saw. A job can use more on a different
 /// day, with a larger input, so a very small claim is not useful.
 const MIN_MEMORY: u64 = 64 << 20;
 
@@ -84,14 +85,14 @@ const MIN_MEMORY: u64 = 64 << 20;
 pub enum Measurement {
     /// The job completed, and this value is the memory that it used.
     ///
-    /// This is the value of every sample that qex wrote before it learned from
+    /// This is the value of every sample that fairq wrote before it learned from
     /// an out-of-memory kill, so it is the value for a file with no `kind`
     /// field. An old file thus keeps its meaning.
     #[default]
     Peak,
-    /// A job that the kernel stopped for memory, in a file of an earlier qex.
+    /// A job that the kernel stopped for memory, in a file of an earlier fairq.
     ///
-    /// qex WRITES no sample of this kind and it USES none. The kind stays
+    /// fairq WRITES no sample of this kind and it USES none. The kind stays
     /// readable because the store loads as one value: a kind that this version
     /// could not read would give an empty store, and the reader would lose
     /// every peak of every command with no message.
@@ -102,21 +103,21 @@ pub enum Measurement {
     /// A kind that this version does not know, with the word that the file
     /// held.
     ///
-    /// A LATER qex can write a kind that this one has never seen, and the store
+    /// A LATER fairq can write a kind that this one has never seen, and the store
     /// loads as ONE value: without this arm, that one word would give an empty
     /// store and the reader would lose every peak of every command with no
-    /// message. `suggest` passes over these samples, because qex cannot say
+    /// message. `suggest` passes over these samples, because fairq cannot say
     /// what they measure.
     ///
     /// The arm HOLDS THE WORD, and the writer gives it back unchanged. An arm
     /// with no word would write `unknown` over a kind such as `ceiling`, and
     /// the first completed job after an upgrade-and-return would destroy the
-    /// label of every sample of the later qex, permanently and with no message.
+    /// label of every sample of the later fairq, permanently and with no message.
     Unknown(String),
 }
 
 // The kind reads and writes as one word, by hand and not by derive, so that a
-// word of a later qex comes back out of the file exactly as it went in.
+// word of a later fairq comes back out of the file exactly as it went in.
 impl Serialize for Measurement {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(match self {
@@ -142,7 +143,7 @@ impl<'de> Deserialize<'de> for Measurement {
 ///
 /// EVERY FIELD TAKES A DEFAULT, and the reason is the same as the reason for
 /// `Measurement::Unknown`: the store loads as one value, so a sample that is
-/// missing a field, or that a later qex wrote with a field that this one does
+/// missing a field, or that a later fairq wrote with a field that this one does
 /// not know, would give an EMPTY store. The reader would then lose every peak
 /// of every command, with no message, and would learn of the loss when a later
 /// claim came back too small.
@@ -170,11 +171,11 @@ pub struct Sample {
 /// EVERY FIELD TAKES A DEFAULT, for the reason that `Sample` gives: the store
 /// loads as ONE value, so an entry that is missing a field empties the store of
 /// EVERY command. The guard on `Sample` alone is not enough, because a later
-/// qex can change this level and not that one.
+/// fairq can change this level and not that one.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Entry {
-    /// The name of the job, for a person to read. qex does not use it as a key.
+    /// The name of the job, for a person to read. fairq does not use it as a key.
     pub name: String,
     pub samples: Vec<Sample>,
 }
@@ -232,18 +233,18 @@ fn store_path() -> anyhow::Result<std::path::PathBuf> {
 ///
 /// `Missing` and `Unreadable` are two different answers, and `add` acts on the
 /// difference: a store that is MISSING starts empty, and the first write makes
-/// the file; a store that qex could not READ must take no write at all, because
-/// a write over a file that qex has not seen destroys measurements that qex
+/// the file; a store that fairq could not READ must take no write at all, because
+/// a write over a file that fairq has not seen destroys measurements that fairq
 /// cannot count.
 enum OnDisk {
     /// No file exists. The store starts empty, and that is correct.
     Missing,
-    /// A file exists and qex could not read its bytes.
+    /// A file exists and fairq could not read its bytes.
     Unreadable,
     /// The file loaded in full.
     Whole(Store),
     /// The file held text that this version could not read as a store. The
-    /// value holds every entry and every sample that qex COULD read.
+    /// value holds every entry and every sample that fairq COULD read.
     Damaged(Store),
 }
 
@@ -263,7 +264,7 @@ fn read_store(path: &std::path::Path) -> OnDisk {
 ///
 /// The store loads as ONE value, so one entry that this version cannot read
 /// would take every peak of every command with it. The defaults on `Sample` and
-/// `Entry` hold the shapes that a later qex is EXPECTED to write; they do not
+/// `Entry` hold the shapes that a later fairq is EXPECTED to write; they do not
 /// hold a truncated file, a field of the wrong type, or one damaged entry among
 /// many. This function reads the file one entry and one sample at a time, and
 /// keeps each one that this version can read.
@@ -304,8 +305,8 @@ fn salvage(text: &str) -> Store {
 
 /// Reads the store, for a reader that gives claims.
 ///
-/// A file that qex cannot read IN FULL gives the entries that qex could read,
-/// and a file that qex cannot read AT ALL gives an empty store: a claim is an
+/// A file that fairq cannot read IN FULL gives the entries that fairq could read,
+/// and a file that fairq cannot read AT ALL gives an empty store: a claim is an
 /// estimate, so a reader loses accuracy only. The writer, `add`, does not use
 /// this function, because a writer that starts from a part of the file would
 /// then write that part OVER the file.
@@ -364,7 +365,7 @@ fn add(spec: &JobSpec, status: &JobStatus, kind: Measurement, bytes: u64) {
     use std::os::unix::io::AsRawFd;
     if let Err(e) = lock_exclusive(lock.as_raw_fd()) {
         crate::daemon::log(&format!(
-            "qex could not lock {} and did not record this measurement: {}",
+            "fairq could not lock {} and did not record this measurement: {}",
             lock_path.display(),
             e
         ));
@@ -377,7 +378,7 @@ fn add(spec: &JobSpec, status: &JobStatus, kind: Measurement, bytes: u64) {
     let against = spec.learn_key.as_deref().unwrap_or(&spec.command);
 
     // Read the file under the lock, and read it with its damage visible. An
-    // earlier qex read with `unwrap_or_default()` here, so ONE byte that it
+    // earlier fairq read with `unwrap_or_default()` here, so ONE byte that it
     // could not read gave an empty store, and this write then DELETED every
     // learned peak of every command from the disk, in silence. The first job
     // that completed after the damage was the one that destroyed the file.
@@ -386,10 +387,10 @@ fn add(spec: &JobSpec, status: &JobStatus, kind: Measurement, bytes: u64) {
         OnDisk::Whole(store) => store,
         OnDisk::Unreadable => {
             // The file exists and its bytes did not come. A write here would
-            // replace measurements that qex has not seen. One lost sample
+            // replace measurements that fairq has not seen. One lost sample
             // costs less than the whole store, so the write is skipped.
             crate::daemon::log(&format!(
-                "qex could not read {} and did not record the measurement of \
+                "fairq could not read {} and did not record the measurement of \
                  this job. The file stays as it is.",
                 path.display()
             ));
@@ -399,7 +400,7 @@ fn add(spec: &JobSpec, status: &JobStatus, kind: Measurement, bytes: u64) {
         OnDisk::Damaged(salvaged) => {
             // Move the damaged file aside BEFORE any write, so that the write
             // cannot destroy it and a person can read what it held. The store
-            // continues from the entries that qex could read.
+            // continues from the entries that fairq could read.
             let aside =
                 path.with_file_name(format!("usage.json.corrupt-{}", crate::sys::now_secs()));
             if std::fs::rename(&path, &aside).is_err() {
@@ -408,9 +409,9 @@ fn add(spec: &JobSpec, status: &JobStatus, kind: Measurement, bytes: u64) {
                 return;
             }
             crate::daemon::log(&format!(
-                "qex could not read every part of {}. The file moved to {}, so \
+                "fairq could not read every part of {}. The file moved to {}, so \
                  that no write destroys it, and the store keeps the entries that \
-                 qex could read ({} of them). The claims of the other commands \
+                 fairq could read ({} of them). The claims of the other commands \
                  come back as their jobs complete.",
                 path.display(),
                 aside.display(),
@@ -471,7 +472,7 @@ fn release(lock: &std::fs::File) {
 
 /// Gives the claim for a command, from the measurements of the earlier jobs.
 ///
-/// The result is `None` when qex has no measurement for this command.
+/// The result is `None` when fairq has no measurement for this command.
 pub fn suggest(
     store: &Store,
     cwd: &std::path::Path,
@@ -492,13 +493,13 @@ pub fn suggest(
     // claim, and an entry that holds no such sample gives NO answer. Two
     // shapes get past the reader and reach this point:
     //
-    // - a `lower-bound`, which a file of an earlier qex holds for a command
+    // - a `lower-bound`, which a file of an earlier fairq holds for a command
     //   whose jobs never completed. It says that a job stopped, and it names no
     //   memory that the job used;
     // - a peak of ZERO bytes, which is what a sample with no number reads as.
     //   No job uses no memory, so the value measures nothing.
     //
-    // Each one gives the smallest claim that qex permits, with `learned` in the
+    // Each one gives the smallest claim that fairq permits, with `learned` in the
     // record: the reader is told that 64MB came from the earlier jobs of a
     // command that possibly needs 8GB. NO answer is the correct answer, because
     // the reader then gets the default, which no measurement contradicts.
@@ -661,7 +662,7 @@ mod tests {
         assert_eq!(suggest(&store, &dir(), &cmd, 1.0).unwrap().cpu, 2);
 
         // A test suite that waits: 1.9 seconds of CPU time in 19 seconds. This
-        // is the measurement of the qex test suite itself.
+        // is the measurement of the fairq test suite itself.
         let store = store_with(&["make"], vec![sample(165 << 20, 1.9, 19)]);
         let s = suggest(&store, &dir(), &cmd, 1.5).unwrap();
         assert_eq!(s.cpu, 1, "a job that waits needs one core");
@@ -797,15 +798,15 @@ mod tests {
         assert_eq!(s.samples, 2, "two peaks stand behind this claim");
     }
 
-    /// A kind of a later qex must come out of the file as it went in.
+    /// A kind of a later fairq must come out of the file as it went in.
     ///
     /// An arm without the word would write `unknown` over a kind such as
     /// `ceiling`, so the first completed job after a return to this version
-    /// would destroy the label of every sample of the later qex, permanently
+    /// would destroy the label of every sample of the later fairq, permanently
     /// and with no message. The peak would stay; the name of the measurement
     /// would not.
     #[test]
-    fn a_kind_of_a_later_qex_keeps_its_word() {
+    fn a_kind_of_a_later_fairq_keeps_its_word() {
         let text = r#"{"kind":"ceiling","max_rss":1,"cpu_secs":0.0,"elapsed_secs":0,"at":0}"#;
         let s: Sample = serde_json::from_str(text).unwrap();
         assert_eq!(s.kind, Measurement::Unknown("ceiling".into()));
@@ -819,9 +820,9 @@ mod tests {
     /// A file with ONE entry that this version cannot read at all must keep
     /// the other entries.
     ///
-    /// The defaults on `Sample` and `Entry` hold the shapes that a later qex
+    /// The defaults on `Sample` and `Entry` hold the shapes that a later fairq
     /// is EXPECTED to write. They do not hold a field of the wrong type: a
-    /// `kind` that is a number refuses the WHOLE file, and an earlier qex then
+    /// `kind` that is a number refuses the WHOLE file, and an earlier fairq then
     /// read the store as empty. The salvage reads one entry at a time, so the
     /// damage stops at the entry that holds it.
     #[test]
@@ -863,7 +864,7 @@ mod tests {
     }
 
     /// A file that is not JSON at all salvages as an empty store. The caller
-    /// quarantines the file, so nothing is lost; qex simply cannot read it.
+    /// quarantines the file, so nothing is lost; fairq simply cannot read it.
     #[test]
     fn a_file_that_is_not_json_salvages_nothing() {
         assert!(salvage("").commands.is_empty());
@@ -872,18 +873,18 @@ mod tests {
     }
 
     /// A write over a damaged file must move the file aside first, and it must
-    /// keep the entries that qex could read.
+    /// keep the entries that fairq could read.
     ///
     /// This is the fault of issue #101: `add` read a damaged file as an EMPTY
     /// store, and then wrote that empty store back. The first job that
     /// completed after the damage deleted every learned peak from the disk,
-    /// and qex gave no message.
+    /// and fairq gave no message.
     #[test]
     fn a_write_over_a_damaged_file_quarantines_it_and_keeps_what_it_can() {
         use crate::testutil::{env_lock, EnvVar};
         let _guard = env_lock();
         let dir =
-            crate::testutil::temp_dir().join(format!("qex-usage-corrupt-{}", std::process::id()));
+            crate::testutil::temp_dir().join(format!("fairq-usage-corrupt-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let _env = EnvVar::set("XDG_STATE_HOME", dir.to_str().unwrap());
@@ -922,7 +923,7 @@ mod tests {
         let kept = std::fs::read_to_string(aside[0].path()).unwrap();
         assert!(
             kept.contains(r#""kind":3"#),
-            "the quarantine must hold the bytes that qex could not read"
+            "the quarantine must hold the bytes that fairq could not read"
         );
 
         // The new store holds the salvaged peak AND the new measurement.
@@ -931,7 +932,7 @@ mod tests {
         assert_eq!(
             old.samples[0].max_rss,
             1 << 30,
-            "the entry that qex could read must survive the write"
+            "the entry that fairq could read must survive the write"
         );
         let new = &store.commands[&key(&spec.cwd, &spec.command)];
         assert_eq!(new.samples[0].max_rss, 2 << 30);
@@ -939,12 +940,12 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// A file whose bytes qex cannot read takes NO write.
+    /// A file whose bytes fairq cannot read takes NO write.
     ///
-    /// A write over a file that qex has not seen replaces measurements that
-    /// qex cannot count. One lost sample costs less than the whole store.
+    /// A write over a file that fairq has not seen replaces measurements that
+    /// fairq cannot count. One lost sample costs less than the whole store.
     #[test]
-    fn a_file_that_qex_cannot_read_takes_no_write() {
+    fn a_file_that_fairq_cannot_read_takes_no_write() {
         use crate::testutil::{env_lock, EnvVar};
         use std::os::unix::fs::PermissionsExt;
         if unsafe { libc::geteuid() } == 0 {
@@ -953,7 +954,7 @@ mod tests {
         }
         let _guard = env_lock();
         let dir =
-            crate::testutil::temp_dir().join(format!("qex-usage-noread-{}", std::process::id()));
+            crate::testutil::temp_dir().join(format!("fairq-usage-noread-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let _env = EnvVar::set("XDG_STATE_HOME", dir.to_str().unwrap());
@@ -972,16 +973,16 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert!(
             load().commands.is_empty(),
-            "no write may land on a file that qex could not read"
+            "no write may land on a file that fairq could not read"
         );
 
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// A file that qex wrote before this feature holds no `kind` field. Each of
+    /// A file that fairq wrote before this feature holds no `kind` field. Each of
     /// those samples is a peak, so an old file must give the claim that it gave
     /// before. Without this rule, every earlier measurement would become a
-    /// bound of an earlier qex, and every claim would go up.
+    /// bound of an earlier fairq, and every claim would go up.
     #[test]
     fn an_earlier_file_keeps_its_meaning() {
         let text = r#"{"commands":{"x":{"name":"t","samples":[
@@ -992,10 +993,10 @@ mod tests {
         assert_eq!(sample.max_rss, 1 << 30);
     }
 
-    /// A file that an earlier qex wrote must still give its peaks.
+    /// A file that an earlier fairq wrote must still give its peaks.
     ///
-    /// An earlier qex wrote a sample of the kind `lower-bound` after the kernel
-    /// stopped a job for memory. qex writes no such sample now, and it uses
+    /// An earlier fairq wrote a sample of the kind `lower-bound` after the kernel
+    /// stopped a job for memory. fairq writes no such sample now, and it uses
     /// none — but the store LOADS as one value, so a kind that this version
     /// cannot read gives an EMPTY store. The reader then loses every peak of
     /// every command, with no message, and learns of the loss when a later
@@ -1003,12 +1004,13 @@ mod tests {
     ///
     /// So the kind stays readable, and `suggest` passes over it.
     #[test]
-    fn a_file_with_a_bound_of_an_earlier_qex_still_gives_its_peaks() {
+    fn a_file_with_a_bound_of_an_earlier_fairq_still_gives_its_peaks() {
         let text = r#"{"commands":{"x":{"name":"t","samples":[
             {"kind":"peak","max_rss":1073741824,"cpu_secs":1.0,"elapsed_secs":10,"at":0},
             {"kind":"lower-bound","max_rss":8589934592,"cpu_secs":1.0,"elapsed_secs":10,"at":1}]}}}"#;
 
-        let store: Store = serde_json::from_str(text).expect("a file of an earlier qex must load");
+        let store: Store =
+            serde_json::from_str(text).expect("a file of an earlier fairq must load");
         assert_eq!(
             store.commands["x"].samples.len(),
             2,
@@ -1030,7 +1032,7 @@ mod tests {
     /// command, gone with no message, and the reader learns of it when a later
     /// claim comes back too small.
     ///
-    /// A later qex can write a kind and a field that this one has never seen,
+    /// A later fairq can write a kind and a field that this one has never seen,
     /// so this test drives shapes that do not exist yet.
     #[test]
     fn a_file_that_this_version_cannot_read_in_full_keeps_its_peaks() {
@@ -1038,7 +1040,7 @@ mod tests {
             r#"{"kind":"peak","max_rss":1073741824,"cpu_secs":1.0,"elapsed_secs":10,"at":0}"#;
         for (what, sample) in [
             (
-                "a kind of a later qex",
+                "a kind of a later fairq",
                 r#"{"kind":"ceiling","max_rss":8589934592,"cpu_secs":1.0,"elapsed_secs":10,"at":1}"#,
             ),
             (
@@ -1070,7 +1072,7 @@ mod tests {
 
     /// An ENTRY that this version cannot read in full must not empty the store.
     ///
-    /// The guard on `Sample` holds the level of one measurement. A later qex can
+    /// The guard on `Sample` holds the level of one measurement. A later fairq can
     /// change the level ABOVE it, and the store still loads as one value, so an
     /// entry that is missing a field would take the peaks of every OTHER command
     /// with it.
@@ -1085,7 +1087,7 @@ mod tests {
             ("an entry where the samples went", r#"{"name":"t"}"#),
             ("an entry with no field at all", r#"{}"#),
             (
-                "an entry with a field of a later qex",
+                "an entry with a field of a later fairq",
                 r#"{"name":"t","samples":[],"ceiling":42}"#,
             ),
         ] {
@@ -1108,26 +1110,26 @@ mod tests {
 
     /// A STORE that this version cannot read in full must not lose its commands.
     ///
-    /// This is the level above the entry. A later qex can add a field beside
+    /// This is the level above the entry. A later fairq can add a field beside
     /// `commands`, or write a file that has no `commands` field at all.
     #[test]
-    fn a_store_with_a_field_of_a_later_qex_keeps_its_commands() {
+    fn a_store_with_a_field_of_a_later_fairq_keeps_its_commands() {
         let good = r#"{"name":"t","samples":[{"kind":"peak","max_rss":1073741824,"cpu_secs":1.0,"elapsed_secs":10,"at":0}]}"#;
-        let text = format!(r#"{{"commands":{{"good":{good}}},"written_by":"a later qex"}}"#);
+        let text = format!(r#"{{"commands":{{"good":{good}}},"written_by":"a later fairq"}}"#);
         let store: Store = serde_json::from_str(&text)
-            .unwrap_or_else(|e| panic!("a field of a later qex must not empty the store: {e}"));
+            .unwrap_or_else(|e| panic!("a field of a later fairq must not empty the store: {e}"));
         assert_eq!(store.commands["good"].samples[0].max_rss, 1 << 30);
 
-        let empty: Store = serde_json::from_str(r#"{"written_by":"a later qex"}"#)
+        let empty: Store = serde_json::from_str(r#"{"written_by":"a later fairq"}"#)
             .expect("a file with no commands field must read as an empty store");
         assert!(empty.commands.is_empty());
     }
 
     /// A command whose only history is a BOUND gives NO claim.
     ///
-    /// An entry can hold samples and no peak: an earlier qex wrote a bound for
+    /// An entry can hold samples and no peak: an earlier fairq wrote a bound for
     /// a command whose jobs never completed. A claim from such an entry would
-    /// be the smallest that qex permits, and the record would say `learned`, so
+    /// be the smallest that fairq permits, and the record would say `learned`, so
     /// a reader would be told that 64MB came from the earlier jobs of a command
     /// that needed more than 8GB. The reader must get the default instead.
     #[test]
@@ -1146,7 +1148,7 @@ mod tests {
     /// is missing its number reads as a peak of zero, because every field of a
     /// sample takes a default: that is what keeps the peaks of a file that this
     /// version cannot read in full. A claim from such a sample would be the
-    /// smallest that qex permits, and the record would say `learned`, so the
+    /// smallest that fairq permits, and the record would say `learned`, so the
     /// reader would get a number that no job supports.
     #[test]
     fn a_peak_of_zero_bytes_gives_no_claim() {
@@ -1200,7 +1202,7 @@ mod tests {
     /// A bound is not a measurement. A version that read one as a peak would
     /// put every later claim of that command above a number that no job used.
     #[test]
-    fn a_bound_of_an_earlier_qex_gives_no_claim() {
+    fn a_bound_of_an_earlier_fairq_gives_no_claim() {
         let cmd: Vec<String> = vec!["train".into()];
         let store = store_with(
             &["train"],
@@ -1214,7 +1216,7 @@ mod tests {
         );
     }
 
-    /// qex learns from a job that COMPLETED, and from nothing else.
+    /// fairq learns from a job that COMPLETED, and from nothing else.
     ///
     /// A job that the kernel stopped for memory reached the memory that
     /// something stopped it at, and that number is not the memory that the job
@@ -1224,7 +1226,8 @@ mod tests {
     fn a_job_that_did_not_complete_teaches_the_learner_nothing() {
         use crate::testutil::{env_lock, EnvVar};
         let _guard = env_lock();
-        let dir = crate::testutil::temp_dir().join(format!("qex-usage-oom-{}", std::process::id()));
+        let dir =
+            crate::testutil::temp_dir().join(format!("fairq-usage-oom-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         let _env = EnvVar::set("XDG_STATE_HOME", dir.to_str().unwrap());

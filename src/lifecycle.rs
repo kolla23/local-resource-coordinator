@@ -1,10 +1,11 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests pass the clocks Coordinator::new now takes (issue #17); tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-13: qex kill checks the job's identity before its first signal, with reap's check for a leader that ended, and a second refusal for group members qex could not verify (issue #163).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module stops jobs and deletes job records.
 //!
-//! qex signals the process group of a job, and not the first process only. A
+//! fairq signals the process group of a job, and not the first process only. A
 //! job that forks children thus stops completely, and no process stays and
-//! holds memory that qex counted.
+//! holds memory that fairq counted.
 
 use crate::daemon::{log, Coordinator, State};
 use crate::job::{self, JobState, JobStatus};
@@ -43,7 +44,7 @@ pub fn parse_signal(s: &str) -> Result<i32, String> {
 
 /// Stops one job.
 ///
-/// qex sends the first signal, waits for the grace time, then sends `KILL`.
+/// fairq sends the first signal, waits for the grace time, then sends `KILL`.
 /// A job that handles `SIGTERM` can thus write its files before it stops.
 pub fn kill(coord: &Arc<Coordinator>, id: uuid::Uuid, signal: i32, grace_secs: u64) -> Response {
     let (pid, pid_start, pid_ns) = {
@@ -73,7 +74,7 @@ pub fn kill(coord: &Arc<Coordinator>, id: uuid::Uuid, signal: i32, grace_secs: u
             JobState::Queued => {
                 return Response::error(
                     ErrorKind::WrongState,
-                    format!("the job {id} waits in the queue. Use `qex cancel {id}`."),
+                    format!("the job {id} waits in the queue. Use `fairq cancel {id}`."),
                 )
             }
             s if s.is_terminal() => {
@@ -105,7 +106,7 @@ pub fn kill(coord: &Arc<Coordinator>, id: uuid::Uuid, signal: i32, grace_secs: u
     // The kernel uses SIGKILL for an out-of-memory kill, and this command uses
     // the same signal. The state `oom` names the memory of the machine as the
     // cause, so a job that a person stopped must never take it: the reader who
-    // sent this command knows the cause, and qex must not give a different one.
+    // sent this command knows the cause, and fairq must not give a different one.
     //
     // The mark goes to the disk first, because the supervisor can read the
     // record in the moment after the signal.
@@ -132,7 +133,7 @@ pub fn kill(coord: &Arc<Coordinator>, id: uuid::Uuid, signal: i32, grace_secs: u
         }
         return Response::error(
             ErrorKind::Internal,
-            format!("qex could not signal the job {id}: {e}"),
+            format!("fairq could not signal the job {id}: {e}"),
         );
     }
 
@@ -165,7 +166,7 @@ pub fn kill(coord: &Arc<Coordinator>, id: uuid::Uuid, signal: i32, grace_secs: u
                     libc::killpg(pid, libc::SIGKILL);
                 }
                 log(&format!(
-                    "job {id} did not stop in {grace_secs} seconds; qex sent KILL"
+                    "job {id} did not stop in {grace_secs} seconds; fairq sent KILL"
                 ));
             }
         });
@@ -193,7 +194,7 @@ fn refusal_before_the_first_signal(
     }
     if the_leader_left_its_group(pid, pid_start) {
         log(&format!(
-            "job {id}: qex leaves the process group {pid} alone: the job's leader {pid} runs \
+            "job {id}: fairq leaves the process group {pid} alone: the job's leader {pid} runs \
              with the recorded start but leads another group"
         ));
         return Some(unconfirmed(id));
@@ -225,17 +226,17 @@ fn no_process(id: uuid::Uuid) -> Response {
         ErrorKind::WrongState,
         format!(
             "the job {id} has no process. It stopped in the moment before this \
-             command. Read `qex status {id}` for the result."
+             command. Read `fairq status {id}` for the result."
         ),
     )
 }
 
-/// The refusal for a group whose members qex could not verify as the job's.
+/// The refusal for a group whose members fairq could not verify as the job's.
 fn unconfirmed(id: uuid::Uuid) -> Response {
     Response::error(
         ErrorKind::WrongState,
         format!(
-            "qex could not confirm that the processes left in the group of the job {id} are its \
+            "fairq could not confirm that the processes left in the group of the job {id} are its \
              own, so it sent no signal. The log of the coordinator says why."
         ),
     )
@@ -262,7 +263,7 @@ pub fn clean(coord: &Arc<Coordinator>, id: uuid::Uuid) -> Response {
             return Response::error(
                 ErrorKind::WrongState,
                 format!(
-                    "the job {id} is in the state `{}`. Stop it first with `qex kill {id}`.",
+                    "the job {id} is in the state `{}`. Stop it first with `fairq kill {id}`.",
                     job.state()
                 ),
             )
@@ -276,8 +277,8 @@ pub fn clean(coord: &Arc<Coordinator>, id: uuid::Uuid) -> Response {
     // waits for it cannot report why it did not run.
     //
     // This test is the LAST one, so every deletion meets it, whatever asked
-    // for the deletion. It uses the rule of `crate::deps`, which `qex clean`
-    // and `qex gc` use as well: one rule gives one answer, and a command
+    // for the deletion. It uses the rule of `crate::deps`, which `fairq clean`
+    // and `fairq gc` use as well: one rule gives one answer, and a command
     // cannot say that it kept a record while this code deletes it.
     if let Some(hold) = crate::deps::hold_reason(&dep_nodes(&state), id) {
         // Each rule is a DIFFERENT relation, so each gets its own words. A
@@ -402,20 +403,20 @@ fn remove_record(state: &mut State, id: uuid::Uuid) -> Option<Removal> {
     // Free the dedupe key of this job with its record.
     //
     // The key must go at the same moment as the record. A key that names a job
-    // with no record would give an id that `qex status` cannot answer, and the
+    // with no record would give an id that `fairq status` cannot answer, and the
     // caller could not learn anything about the work.
     crate::daemon::release_dedupe(state, id);
 
     // Make each job that names this job as its cause self-contained.
     //
-    // A skipped job holds `caused_by` and a text that says "Read `qex logs X`
+    // A skipped job holds `caused_by` and a text that says "Read `fairq logs X`
     // for the cause". After the deletion of X, that text sends the reader to a
     // job that does not exist. The one thing that `caused_by` exists to give
     // would then be lost.
     //
     // Write the name and the state of the deleted job into the text of each
     // dependent, so the record still answers the question. A dependent is a
-    // job that qex skipped, so it stopped, and it can be in either map.
+    // job that fairq skipped, so it stopped, and it can be in either map.
     let text = format!(
         "the job `{cause_name}` ({cause}) did not succeed, so this job did not run. \
          Its record is deleted, so there is no log to read."
@@ -493,7 +494,7 @@ fn finish_removal(removal: Removal) -> Result<(), String> {
     match std::fs::remove_dir_all(&dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("qex could not delete {}: {e}", dir.display())),
+        Err(e) => Err(format!("fairq could not delete {}: {e}", dir.display())),
     }
 }
 
@@ -501,13 +502,13 @@ fn finish_removal(removal: Removal) -> Result<(), String> {
 ///
 /// The lists name jobs, and the counts come from the lists. A number that a
 /// later change computed from the request would say what the reader asked
-/// for, and the answer must say what qex did.
+/// for, and the answer must say what fairq did.
 pub struct AbortPlan {
     /// The jobs that waited and that the plan cancelled, with the record that
     /// each one holds now. The caller writes each record to the disk and runs
-    /// the stop hook, as `qex cancel` does.
+    /// the stop hook, as `fairq cancel` does.
     pub cancelled: Vec<(uuid::Uuid, JobStatus)>,
-    /// The queued jobs whose record qex could not write. Each one stays in
+    /// The queued jobs whose record fairq could not write. Each one stays in
     /// the queue, and the answer names it.
     pub not_cancelled: Vec<AbortedJob>,
     /// The jobs of the scope that operate: each one is a job to signal.
@@ -521,7 +522,7 @@ pub struct AbortPlan {
 /// Tests one job against the scope of an abort.
 ///
 /// Every part of the scope narrows it, and a part that is `None` narrows
-/// nothing. The directory is the directory OF THE JOB, as `qex status` shows
+/// nothing. The directory is the directory OF THE JOB, as `fairq status` shows
 /// it, and not the directory of the process that submitted it: a reader can
 /// see the first one on every record.
 ///
@@ -559,9 +560,9 @@ fn in_scope(job: &crate::daemon::Job, scope: &crate::proto::AbortScope, boot: &s
 /// cancel loop in a script has.
 ///
 /// THE RECORD OF A CANCELLED JOB STAYS, in the state `cancelled`, exactly as
-/// after `qex cancel`. A reader that waits for the job, a reader that asks
-/// `qex status`, and the stop hook each need that record, and each must get
-/// the answer that a cancel gives. `qex clean cancelled` deletes the records.
+/// after `fairq cancel`. A reader that waits for the job, a reader that asks
+/// `fairq status`, and the stop hook each need that record, and each must get
+/// the answer that a cancel gives. `fairq clean cancelled` deletes the records.
 pub fn plan_abort(
     state: &mut State,
     scope: &crate::proto::AbortScope,
@@ -578,7 +579,7 @@ pub fn plan_abort(
     // changes no request that stood before: see `pause::PauseRecord`.
     let created = state.paused.add_queue(crate::daemon::new_request(
         by_pid,
-        Some(String::from("qex abort")),
+        Some(String::from("fairq abort")),
         None,
         issuer,
     ));
@@ -618,8 +619,8 @@ pub fn plan_abort(
                 // MEMORY FOLLOWS. A coordinator can die at any moment, and
                 // the next coordinator reads the disk. A record that this
                 // coordinator cancelled in memory and did not write would
-                // come back as a queued job, and one `qex resume queue` would
-                // start the work that the abort stopped. A record that qex
+                // come back as a queued job, and one `fairq resume queue` would
+                // start the work that the abort stopped. A record that fairq
                 // could not write therefore stays queued in memory as well,
                 // and the answer names it: the count of cancelled jobs is the
                 // count of records on the disk that say so.
@@ -642,7 +643,7 @@ pub fn plan_abort(
                     }
                     Err(why) => {
                         log(&format!(
-                            "qex abort could not write the record of the job {}: {why}",
+                            "fairq abort could not write the record of the job {}: {why}",
                             job.status.id
                         ));
                         not_cancelled.push(AbortedJob {
@@ -677,10 +678,10 @@ pub fn plan_abort(
 }
 
 /// Names the variable that makes the coordinator stop after the lock section
-/// of an abort. **This variable exists for the tests of qex**, and a release
+/// of an abort. **This variable exists for the tests of fairq**, and a release
 /// build does not read it.
 #[cfg(debug_assertions)]
-const CRASH_AFTER_PLAN: &str = "QEX_TEST_CRASH_AFTER_ABORT_PLAN";
+const CRASH_AFTER_PLAN: &str = "FAIRQ_TEST_CRASH_AFTER_ABORT_PLAN";
 
 /// How long an abort waits for a job that is between the queue and its first
 /// process.
@@ -705,7 +706,7 @@ fn starts_now(coord: &Arc<Coordinator>, id: uuid::Uuid) -> bool {
 ///
 /// See `plan_abort` for the part that gives the guarantee. This function does
 /// the disk work outside the lock, and it then stops each job that operates
-/// with `kill`, which is the one way that qex stops a process tree.
+/// with `kill`, which is the one way that fairq stops a process tree.
 pub fn abort(
     coord: &Arc<Coordinator>,
     scope: crate::proto::AbortScope,
@@ -725,20 +726,20 @@ pub fn abort(
     // Wake the scheduler, so the jobs that wait get the pause as their reason.
     coord.notify();
 
-    // A test of qex stops the coordinator here, in the moment after the lock
+    // A test of fairq stops the coordinator here, in the moment after the lock
     // and before any answer. The next coordinator must then hold every
     // cancelled job as cancelled. A release build has no such switch: a
     // coordinator inherits the environment of the shell that started it, and
     // a variable that a person left set must not stop a real queue.
     #[cfg(debug_assertions)]
     if std::env::var_os(CRASH_AFTER_PLAN).is_some() {
-        log("qex stops here because QEX_TEST_CRASH_AFTER_ABORT_PLAN is set");
+        log("fairq stops here because FAIRQ_TEST_CRASH_AFTER_ABORT_PLAN is set");
         std::process::abort();
     }
 
     // The stop hook, for each cancelled job, outside the lock: a reader whose
     // filter names `cancelled` gets one line for each job, as after
-    // `qex cancel`. The record itself went to the disk under the lock.
+    // `fairq cancel`. The record itself went to the disk under the lock.
     for (id, status) in &plan.cancelled {
         if let Ok(dir) = paths::job_dir(id) {
             crate::hook::fire_detached(&dir, status);
@@ -773,7 +774,9 @@ pub fn abort(
                     other => not_stopped.push(AbortedJob {
                         id,
                         name,
-                        why: format!("qex gave an answer that this command cannot read: {other:?}"),
+                        why: format!(
+                            "fairq gave an answer that this command cannot read: {other:?}"
+                        ),
                     }),
                 }
             }
@@ -786,7 +789,7 @@ pub fn abort(
     }
 
     log(&format!(
-        "qex abort: {} cancelled, {} not cancelled, {} signalled, {} not stopped, \
+        "fairq abort: {} cancelled, {} not cancelled, {} signalled, {} not stopped, \
          {} continue, {} outside the scope; the queue is paused",
         plan.cancelled.len(),
         plan.not_cancelled.len(),
@@ -885,7 +888,7 @@ mod tests {
     ) {
         let lock = crate::testutil::env_lock();
         let dir = crate::testutil::temp_dir().join(format!(
-            "qex-lifecycle-test-{}-{}",
+            "fairq-lifecycle-test-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4()
         ));

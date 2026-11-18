@@ -1,13 +1,14 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module decides if two commands come from one context.
 //!
-//! `qex abort` with no scope option acts on the jobs of the caller, and not on
+//! `fairq abort` with no scope option acts on the jobs of the caller, and not on
 //! the jobs of a different agent that runs as the same user. A queue belongs
 //! to one user, and several agents run as that user on one machine, so the
 //! user is too wide. The working directory alone is too wide as well: two
 //! agents can work in one directory.
 //!
-//! The context of a command is the chain of processes above it. `qex submit`
-//! records that chain on the job, and `qex abort` sends its own chain. A job
+//! The context of a command is the chain of processes above it. `fairq submit`
+//! records that chain on the job, and `fairq abort` sends its own chain. A job
 //! is in the context of the caller when the two chains share one process that
 //! is still the SAME process, below the point where the session ends.
 //!
@@ -33,17 +34,17 @@
 //!    process with no parent.
 //! 2. A process with one of the names in [`BOUNDARY_NAMES`]: a multiplexer, a
 //!    login service, a terminal program, a service manager, or the supervisor
-//!    of a qex job.
+//!    of a fairq job.
 //! 3. A process with no controlling terminal, above a process that has one.
 //!    A terminal program holds the other end of the terminal, so it has no
 //!    controlling terminal itself. This rule finds a terminal program that the
 //!    list does not name.
-//! 4. The top of the chain. The walk stops at a process whose parent qex
+//! 4. The top of the chain. The walk stops at a process whose parent fairq
 //!    could not read. When that parent is the first process (macOS refuses
 //!    to describe it to a user), the boundary is that first process, above
 //!    the chain, and the whole chain is the context: a chain with no terminal
 //!    and no named boundary, such as a command under a service, still matches
-//!    its own earlier commands. When that parent is any other process, qex
+//!    its own earlier commands. When that parent is any other process, fairq
 //!    cannot say what it is, so the top process itself is the boundary: a
 //!    match through it could reach the work of everybody under it.
 //!
@@ -63,14 +64,14 @@
 //! under `cron` or under a runner of a build service, shares a context with
 //! everything under the same service.
 //!
-//! `qex status` shows the chain of a job with the boundary marked, so a reader
+//! `fairq status` shows the chain of a job with the boundary marked, so a reader
 //! can see why a job was, or was not, in scope.
 
 use crate::job::Ancestor;
 
 /// The names of the programs at which a session ends.
 ///
-/// THIS LIST IS A CLAIM ABOUT THE MACHINES THAT RUN QEX, and a later reader
+/// THIS LIST IS A CLAIM ABOUT THE MACHINES THAT RUN FAIRQ, and a later reader
 /// extends it. Each name is in the SAFE FORM of `job::safe_name`, because the
 /// chain stores the names in that form: `tmux: server` is stored as
 /// `tmux_server`. Linux gives the first 15 characters of a program name.
@@ -114,9 +115,9 @@ pub const BOUNDARY_NAMES: &[&str] = &[
     "cursor",
     "windsurf",
     "zed",
-    // The supervisor of a qex job. The jobs that one job submits form a
+    // The supervisor of a fairq job. The jobs that one job submits form a
     // context of their own.
-    "qex",
+    "fairq",
 ];
 
 /// Gives the part of a chain below the point where the session ends.
@@ -273,7 +274,7 @@ mod tests {
         assert_eq!(boundary_index(&chain), Some(3));
     }
 
-    /// A chain that ends at a process whose parent qex could not read ends
+    /// A chain that ends at a process whose parent fairq could not read ends
     /// there: that process is the boundary, because the unknown parent can
     /// be a terminal program or a service that everybody shares.
     #[test]
@@ -295,7 +296,7 @@ mod tests {
     /// of the first process, is one context as a whole: two commands under a
     /// runner of a build service share the shell that started the tests.
     ///
-    /// This is the chain of a macOS build machine, where qex cannot read the
+    /// This is the chain of a macOS build machine, where fairq cannot read the
     /// first process and so never records it.
     #[test]
     fn a_chain_under_a_service_with_no_terminal_matches_its_own_commands() {
@@ -344,8 +345,8 @@ mod tests {
     fn the_supervisor_of_a_job_is_a_boundary() {
         let chain = vec![
             process(300, 200, "sh", false),
-            process(200, 190, "qex", false),
-            process(190, 1, "qex", false),
+            process(200, 190, "fairq", false),
+            process(190, 1, "fairq", false),
             process(1, 0, "systemd", false),
         ];
         assert_eq!(boundary_index(&chain), Some(1));

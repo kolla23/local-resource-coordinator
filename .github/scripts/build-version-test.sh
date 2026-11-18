@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Modified by the local-resource-coordinator fork, 2026-10-31: cd ... || exit 1 (shellcheck SC2164)
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 #
 # Tests what `build.rs` makes a binary report.
 #
@@ -13,7 +14,7 @@
 # its number in its own Cargo.toml, and these tests hold that.
 #
 # Each test builds a copy of this package in a directory of its own and reads
-# `qex --version`, because that is the only way to see what a build script did.
+# `fairq --version`, because that is the only way to see what a build script did.
 #
 # It needs cargo, so it does not run in the fast job of CI.
 #
@@ -27,7 +28,7 @@ trap 'rm -rf "$work"' EXIT
 
 # One target directory for every build, so the dependencies compile once.
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$root/target}/build-version-test"
-binary="$CARGO_TARGET_DIR/debug/qex"
+binary="$CARGO_TARGET_DIR/debug/fairq"
 
 pass=0
 fail=0
@@ -75,7 +76,7 @@ check_holds() {
 
 # `refused <directory>` — the words that a build gives when it stops.
 #
-# `build.rs` stops a build whose number qex itself would refuse. A test of that
+# `build.rs` stops a build whose number fairq itself would refuse. A test of that
 # rule must read the message, because the message is the whole value of the
 # rule: a build that stops with no reason is worse than one that does not stop.
 refused() {
@@ -111,9 +112,9 @@ mkdir -p "$stranger"
 
 echo "== A package inside a repository that is not ours =="
 
-# The shape that a registry gives: `~/.cargo/registry/src/<index>/qex-0.8.0/`,
+# The shape that a registry gives: `~/.cargo/registry/src/<index>/fairq-0.8.0/`,
 # under a `$HOME` that somebody made a repository of dotfiles.
-registry="$stranger/.cargo/registry/src/index.crates.io-abc/qex-0.8.0"
+registry="$stranger/.cargo/registry/src/index.crates.io-abc/fairq-0.8.0"
 copy_package "$registry" "0.8.0"
 check "a package with a real number reports that number, and never a hash" \
     "0.8.0" "$(reports "$registry")"
@@ -121,12 +122,12 @@ check "a package with a real number reports that number, and never a hash" \
 # `cargo install --git` unpacks a source tree that still says `0.0.0-dev` into a
 # checkout that is ITSELF a git repository. The test of Cargo.toml does not
 # cover this one, and the test of the root of the repository does.
-foreign="$stranger/checkout/qex"
+foreign="$stranger/checkout/fairq"
 copy_package "$foreign" "0.0.0-dev"
 check "a development package in a repository that is not ours says unknown" \
     "0.0.0-dev+unknown" "$(reports "$foreign")"
 
-echo "== A checkout of qex =="
+echo "== A checkout of fairq =="
 
 own="$work/own"
 copy_package "$own" "0.0.0-dev"
@@ -140,7 +141,7 @@ copy_package "$own" "0.0.0-dev"
 ) >/dev/null
 commit="$(git -C "$own" rev-parse --short=7 HEAD)"
 
-check "a checkout of qex reports its own commit" \
+check "a checkout of fairq reports its own commit" \
     "0.0.0-dev+g$commit" "$(reports "$own")"
 
 # The change goes into a file that `build.rs` names in `rerun-if-changed`, and
@@ -205,7 +206,7 @@ copy_package "$bare" "0.0.0-dev"
 check "a development tree with no git says unknown" \
     "0.0.0-dev+unknown" "$(reports "$bare")"
 
-echo "== A number that qex itself would refuse =="
+echo "== A number that fairq itself would refuse =="
 
 # `build.rs` stops such a build. A binary that carries a number below the
 # capability floor is refused by its own CLI, so it can do nothing for the

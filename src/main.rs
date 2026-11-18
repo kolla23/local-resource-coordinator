@@ -1,23 +1,24 @@
 // Modified by the local-resource-coordinator fork, 2026-10-05: declares the os module (R1 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the Windows build message links this repository (issue #100).
 // Modified by the local-resource-coordinator fork, 2026-11-12: subcommand_word reads the arguments as OsString, so one that is not UTF-8 no longer panics (issue #156).
-//! qex — Queued EXecutor.
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+//! fairq — shared admission control for independent local agents.
 //!
-//! qex is a job queue for long tasks on a local machine. It controls the
+//! fairq is a job queue for long tasks on a local machine. It controls the
 //! quantity of memory and the number of cores that the jobs use together.
 //!
-//! qex gives three guarantees:
+//! fairq gives three guarantees:
 //!
-//! 1. Each job has a UUID. qex is the parent process of each job, and it uses
-//!    `waitpid` on that process. qex does not read `/proc` and it does not
+//! 1. Each job has a UUID. fairq is the parent process of each job, and it uses
+//!    `waitpid` on that process. fairq does not read `/proc` and it does not
 //!    search command lines. A monitor process thus cannot find itself and then
 //!    wait for ever.
 //! 2. The supervisor of each job writes the job result. The result stays
 //!    correct if the coordinator stops, fails or restarts.
-//! 3. qex uses the resource claims to select the jobs that operate together.
+//! 3. fairq uses the resource claims to select the jobs that operate together.
 //!    Two agents on one machine thus do not start the out-of-memory killer.
 
-/// qex needs the process control of Unix, so it does not build for Windows.
+/// fairq needs the process control of Unix, so it does not build for Windows.
 ///
 /// Without this message, a build for Windows gives 114 errors from the modules
 /// below, and not one of them says what a reader must do. A tool that reports a
@@ -25,9 +26,9 @@
 /// as much as for a job.
 #[cfg(not(unix))]
 compile_error!(
-    "qex builds for Linux and macOS only.\n\n     qex controls processes with the session and the process group of Unix, and it holds a job \
+    "fairq builds for Linux and macOS only.\n\n     fairq controls processes with the session and the process group of Unix, and it holds a job \
      with `waitpid` on one process id. Windows has no equivalent of those, so this is a port \
-     and not an option that somebody can turn on.\n\n     ON WINDOWS, USE WSL2. qex builds and operates there with no change, and the jobs that an \
+     and not an option that somebody can turn on.\n\n     ON WINDOWS, USE WSL2. fairq builds and operates there with no change, and the jobs that an \
      agent starts (make, cargo, uv) are usually in WSL2 as well.\n\n     See \
      https://github.com/kolla23/local-resource-coordinator for the reason in full."
 );
@@ -119,7 +120,7 @@ use clap::{CommandFactory, Parser};
 #[cfg(unix)]
 use cli::{Cli, Command};
 
-/// The exit code for a command line that qex cannot read.
+/// The exit code for a command line that fairq cannot read.
 #[cfg(unix)]
 const EXIT_USAGE: i32 = 2;
 
@@ -131,39 +132,39 @@ fn main() {
     // Let the system stop this process when a reader closes a pipe.
     //
     // Rust ignores SIGPIPE, so a write to a closed pipe gives an error, and the
-    // print macros panic on that error. A command such as `qex list | head`
+    // print macros panic on that error. A command such as `fairq list | head`
     // then writes a Rust panic and a note about a backtrace, which reads as a
-    // fault in qex. Every other tool in a pipe stops in silence.
+    // fault in fairq. Every other tool in a pipe stops in silence.
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
 
     let code = match run() {
         Ok(code) => {
-            say_that_a_newer_qex_exists();
+            say_that_a_newer_fairq_exists();
             code
         }
         Err(e) => {
             // Write the cause of each error. An agent then sees the full
             // sequence and does not need to run the command a second time.
-            eprintln!("qex: {e:#}");
+            eprintln!("fairq: {e:#}");
             // The limit for an answer of the coordinator gives 124 in EVERY
-            // command. That code says one thing: qex stopped waiting because it
+            // command. That code says one thing: fairq stopped waiting because it
             // reached a limit. It is a fact about the COMMAND and not about a
-            // job, so it holds for `qex list` and `qex top` as much as for
-            // `qex wait`. This takes no promise away: each of those commands
+            // job, so it holds for `fairq list` and `fairq top` as much as for
+            // `fairq wait`. This takes no promise away: each of those commands
             // waited for ever before, and gave no code at all.
             if client::is_a_coordinator_timeout(&e) {
                 commands::EXIT_TIMEOUT
             }
             // A command that gives the code of a JOB must not report a fault of
             // its own with a code from the job band. The code 1 is the most
-            // common code of a program that failed, so a `qex run` that could
+            // common code of a program that failed, so a `fairq run` that could
             // not start looked exactly like a job that failed. Every other
             // command keeps the code 1, which is conventional and unambiguous:
-            // `qex list` never claims to speak for a job.
+            // `fairq list` never claims to speak for a job.
             else if speaks_for_a_job(&subcommand_word()) {
-                commands::EXIT_QEX_FAILED
+                commands::EXIT_FAIRQ_FAILED
             } else {
                 1
             }
@@ -172,25 +173,25 @@ fn main() {
     std::process::exit(code);
 }
 
-/// Writes one line when a newer release of qex exists.
+/// Writes one line when a newer release of fairq exists.
 ///
 /// THIS FUNCTION OPENS NO CONNECTION. The coordinator asks the service on its
 /// own time and writes what it learned; this reads that file. A command of a
 /// user thus never waits for a web service and never fails because of one.
 ///
-/// It says nothing for the commands that qex gives to itself. `__complete`
+/// It says nothing for the commands that fairq gives to itself. `__complete`
 /// answers a press of the TAB key, and a line of advice there would arrive in
 /// the middle of a word that a person is typing.
 #[cfg(unix)]
-fn say_that_a_newer_qex_exists() {
+fn say_that_a_newer_fairq_exists() {
     let word = subcommand_word();
-    // `qex run` forwards the output of the JOB to these streams, so a line of
+    // `fairq run` forwards the output of the JOB to these streams, so a line of
     // advice here would arrive inside the output that a caller captured. That
     // caller reads it again on its next command.
     if matches!(word.as_str(), "daemon" | "supervise" | "__complete" | "run") {
         return;
     }
-    // A config file that qex cannot read is a fault of its own, and the
+    // A config file that fairq cannot read is a fault of its own, and the
     // command that met it already said so.
     let Ok(cfg) = config::Config::load() else {
         return;
@@ -202,26 +203,26 @@ fn say_that_a_newer_qex_exists() {
 
 /// True for a command that starts a job or gives the exit code of a JOB.
 ///
-/// These commands keep the rule of the band. A fault of qex itself takes a
+/// These commands keep the rule of the band. A fault of fairq itself takes a
 /// code from the band, so it cannot look like a job that failed. A fault in
 /// every other command keeps the code 1 and the usage code 2 of the convention.
 #[cfg(unix)]
 fn speaks_for_a_job(name: &str) -> bool {
-    // A word that qex does not know takes the band as well. `qex staus $ID
+    // A word that fairq does not know takes the band as well. `fairq staus $ID
     // --wait` is a command that an agent writes, and the code 2 there says
-    // "the job exited 2" when no job ran. The words of 121 — qex could not do
-    // what you asked, no job ran — describe a name that qex cannot read
+    // "the job exited 2" when no job ran. The words of 121 — fairq could not do
+    // what you asked, no job ran — describe a name that fairq cannot read
     // exactly.
     //
     // An EMPTY word says that the command line held no subcommand at all, such
-    // as `qex --bogus`. That is a fault of the command line and not of a job,
+    // as `fairq --bogus`. That is a fault of the command line and not of a job,
     // so it keeps the conventional code 2.
     !name.is_empty() && !SPEAKS_FOR_ITSELF.contains(&name)
 }
 
 /// The commands that never start a job and never give the exit code of a job.
 ///
-/// `qex list` and the others answer about qex, so a usage error there is the
+/// `fairq list` and the others answer about fairq, so a usage error there is the
 /// conventional 2 and nothing can read it as the code of a job.
 #[cfg(unix)]
 const SPEAKS_FOR_ITSELF: &[&str] = &[
@@ -283,7 +284,7 @@ fn run() -> Result<i32> {
                 return Ok(0);
             }
             return Ok(if speaks_for_a_job(&subcommand_word()) {
-                commands::EXIT_QEX_FAILED
+                commands::EXIT_FAIRQ_FAILED
             } else {
                 EXIT_USAGE
             });
@@ -291,9 +292,9 @@ fn run() -> Result<i32> {
     };
 
     let Some(command) = cli.command else {
-        // `qex` without a command writes the help text. This is not an error.
-        // An agent that runs `qex` to learn the tool must get the text, and the
-        // text points to `qex help agents`.
+        // `fairq` without a command writes the help text. This is not an error.
+        // An agent that runs `fairq` to learn the tool must get the text, and the
+        // text points to `fairq help agents`.
         print_root_help();
         return Ok(0);
     };
@@ -342,10 +343,10 @@ fn run() -> Result<i32> {
 /// Writes the completions for one shell.
 ///
 /// This command is for a person. An agent writes the full command and needs no
-/// completion, so this text does not appear in `qex help agents`.
+/// completion, so this text does not appear in `fairq help agents`.
 ///
 /// The words come from the command line definition itself, so they cannot
-/// disagree with the commands that qex has.
+/// disagree with the commands that fairq has.
 #[cfg(unix)]
 fn cmd_completions(shell: clap_complete::Shell) -> Result<i32> {
     use std::io::Write;
@@ -358,23 +359,23 @@ fn cmd_completions(shell: clap_complete::Shell) -> Result<i32> {
         .collect();
     let valued = options_that_take_a_value(&command);
     let mut out = Vec::new();
-    clap_complete::generate(shell, &mut command, "qex", &mut out);
+    clap_complete::generate(shell, &mut command, "fairq", &mut out);
 
     // The commands and the options come from the definition above. The IDS AND
-    // THE NAMES cannot: they change with each job, so the shell must ask qex at
-    // the moment of the TAB. `qex __complete` answers that question, and it
+    // THE NAMES cannot: they change with each job, so the shell must ask fairq at
+    // the moment of the TAB. `fairq __complete` answers that question, and it
     // reads the records on the disk and starts no coordinator.
     //
-    // Each part below offers the correct set for its command: `qex kill` offers
-    // the jobs that operate, `qex cancel` offers the jobs that wait, and the
+    // Each part below offers the correct set for its command: `fairq kill` offers
+    // the jobs that operate, `fairq cancel` offers the jobs that wait, and the
     // commands that read a record offer every job.
     //
-    // Remove the commands that qex hides. `daemon`, `supervise` and
-    // `__complete` are commands that qex gives to itself, and
+    // Remove the commands that fairq hides. `daemon`, `supervise` and
+    // `__complete` are commands that fairq gives to itself, and
     // `#[command(hide = true)]` keeps them out of the help text. It does NOT
     // keep them out of the completions, so a person who pressed TAB was offered
-    // `qex daemon` — a command that starts a coordinator in the foreground —
-    // beside `qex submit`.
+    // `fairq daemon` — a command that starts a coordinator in the foreground —
+    // beside `fairq submit`.
     let text = remove_hidden(&String::from_utf8_lossy(&out), &hidden, shell);
     let text = zsh_jobs(&text, shell);
 
@@ -388,7 +389,7 @@ fn cmd_completions(shell: clap_complete::Shell) -> Result<i32> {
 /// Takes the hidden commands out of the completions.
 ///
 /// Each shell holds them in a different form, so each needs its own removal.
-/// A shell that qex cannot treat keeps them, which is the behaviour that qex
+/// A shell that fairq cannot treat keeps them, which is the behaviour that fairq
 /// had; the words are untidy and they are not dangerous.
 #[cfg(unix)]
 fn remove_hidden(text: &str, hidden: &[String], shell: clap_complete::Shell) -> String {
@@ -448,7 +449,7 @@ fn remove_hidden(text: &str, hidden: &[String], shell: clap_complete::Shell) -> 
 
 /// The commands that take a job, and the set that each one offers.
 ///
-/// `qex kill` takes a job that operates, and `qex cancel` takes a job that
+/// `fairq kill` takes a job that operates, and `fairq cancel` takes a job that
 /// waits in the queue. A candidate that the command would refuse teaches the
 /// wrong command.
 #[cfg(unix)]
@@ -462,7 +463,7 @@ const QUEUED: &str = "cancel";
 ///
 /// bash gives the completion the word before the cursor and nothing else, so
 /// the completion must know which of those words takes the next word. Without
-/// this, `qex kill --signal <TAB>` offered a job, and `qex status --json
+/// this, `fairq kill --signal <TAB>` offered a job, and `fairq status --json
 /// <TAB>` offered none.
 ///
 /// The list comes from the command line definition, so an option that a later
@@ -508,10 +509,10 @@ fn options_that_take_a_value(command: &clap::Command) -> String {
 /// 1. The file gives the completion to the shell in its last lines, so a
 ///    function that follows those lines arrives too late.
 /// 2. clap gives each job argument the action `_default`, which offers every
-///    file and every command on the machine. A press of TAB after `qex kill `
+///    file and every command on the machine. A press of TAB after `fairq kill `
 ///    thus gave 2674 candidates, and the jobs were lost among them.
 ///
-/// This puts `_qex_jobs` at the top of the file, below the `#compdef` line that
+/// This puts `_fairq_jobs` at the top of the file, below the `#compdef` line that
 /// zsh needs first, and it then names that function as the action of each job
 /// argument.
 #[cfg(unix)]
@@ -521,11 +522,11 @@ fn zsh_jobs(text: &str, shell: clap_complete::Shell) -> String {
     }
 
     let helper = r#"
-# The ids and the names of the jobs. `qex __complete` reads the records on the
+# The ids and the names of the jobs. `fairq __complete` reads the records on the
 # disk, so a press of TAB starts no coordinator.
-_qex_jobs() {
+_fairq_jobs() {
     local -a candidates
-    candidates=(${(f)"$(qex __complete $1 2>/dev/null)"})
+    candidates=(${(f)"$(fairq __complete $1 2>/dev/null)"})
     (( ${#candidates} )) && compadd -a candidates
 }
 "#;
@@ -547,20 +548,20 @@ _qex_jobs() {
     let mut here: Option<&'static str> = None;
     let mut lines: Vec<String> = Vec::new();
     for line in text.lines() {
-        if !done && line.trim() == "#compdef qex" {
+        if !done && line.trim() == "#compdef fairq" {
             lines.push(line.to_string());
             lines.push(helper.to_string());
             done = true;
             continue;
         }
-        // `(kill)` opens the arguments of `qex kill`.
+        // `(kill)` opens the arguments of `fairq kill`.
         if line.starts_with('(') && line.ends_with(')') {
             here = set_of(line.trim_matches(['(', ')']));
         }
         // A job argument, such as `'*::ids -- The job ids to stop:_default' \`.
         //
         // The line must be a POSITIONAL one. An option line starts with the
-        // name of the option, and it takes a value that is not a job: `qex kill
+        // name of the option, and it takes a value that is not a job: `fairq kill
         // --signal <TAB>` must offer a signal and never a job.
         let positional =
             line.starts_with("':") || line.starts_with("'::") || line.starts_with("'*::");
@@ -569,9 +570,9 @@ _qex_jobs() {
                 let head = &line[..line.len() - ":_default' \\".len()];
                 // The SPACE after the colon is not decoration. zsh runs an
                 // action as a command only when the action starts with a
-                // space; without it zsh reads `_qex_jobs ids` as one name, and
+                // space; without it zsh reads `_fairq_jobs ids` as one name, and
                 // it then offers nothing at all.
-                lines.push(format!("{head}: _qex_jobs {what}' \\"));
+                lines.push(format!("{head}: _fairq_jobs {what}' \\"));
             }
             _ => lines.push(line.to_string()),
         }
@@ -580,7 +581,7 @@ _qex_jobs() {
     lines.join("\n")
 }
 
-/// The part of the completions that asks qex for the ids and the names.
+/// The part of the completions that asks fairq for the ids and the names.
 #[cfg(unix)]
 fn dynamic_part(shell: clap_complete::Shell, valued: &str) -> String {
     use clap_complete::Shell;
@@ -591,9 +592,9 @@ fn dynamic_part(shell: clap_complete::Shell, valued: &str) -> String {
     match shell {
         Shell::Bash => format!(
             r#"
-# The ids and the names of the jobs. `qex __complete` reads the records on the
+# The ids and the names of the jobs. `fairq __complete` reads the records on the
 # disk, so a press of TAB starts no coordinator.
-_qex_jobs() {{
+_fairq_jobs() {{
     local subcommand="" word
     for word in "${{COMP_WORDS[@]:1}}"; do
         case "$word" in
@@ -613,11 +614,11 @@ _qex_jobs() {{
     case "$cur" in -*) return 0 ;; esac
 
     # The word before takes a VALUE, so this word is that value and not a job:
-    # `qex kill --signal <TAB>` must offer a signal.
+    # `fairq kill --signal <TAB>` must offer a signal.
     #
     # The test names the options that take a value, and it does not ask whether
     # the word starts with a dash. A flag such as `--json` takes no value, so
-    # `qex status --json <TAB>` is still a job.
+    # `fairq status --json <TAB>` is still a job.
     local prev="${{COMP_WORDS[COMP_CWORD-1]}}"
     case " {VALUED} " in *" $prev "*) return 0 ;; esac
 
@@ -638,13 +639,13 @@ _qex_jobs() {{
         # `x; rm -rf ~` would put `; rm -rf ~` on the line beside the command,
         # and the next press of ENTER would then run it. `printf %q` puts a
         # backslash before each character that the shell reads, so the name
-        # stays one argument of qex.
+        # stays one argument of fairq.
         #
         # `compopt -o filenames` asks bash to do the same work, and this code
         # used it first. bash then treats each name as a FILE: a job with the
         # name of a directory got a `/` after it, `$HOME` became a directory as
         # well, and a name that starts with `~` was expanded to a home
-        # directory. Each of the three gave qex a name that no job has.
+        # directory. Each of the three gave fairq a name that no job has.
         # `printf %q` has none of that behaviour. It was measured on bash
         # 5.1.16 and on bash 3.2.57, and it gave the stored name in each.
         printf -v candidate '%q' "$candidate"
@@ -653,12 +654,12 @@ _qex_jobs() {{
         # name is not a path, so the word keeps the character that it holds.
         case "$candidate" in "~"*) candidate="\\$candidate" ;; esac
         COMPREPLY[${{#COMPREPLY[@]}}]="$candidate"
-    done < <(qex __complete "$what" 2>/dev/null)
+    done < <(fairq __complete "$what" 2>/dev/null)
 }}
 
-_qex_with_jobs() {{
-    _qex "$@"
-    _qex_jobs
+_fairq_with_jobs() {{
+    _fairq "$@"
+    _fairq_jobs
 }}
 
 # `-o nosort` came with bash 4.4, and `complete` refuses the WHOLE command when
@@ -670,9 +671,9 @@ _qex_with_jobs() {{
 # Do not answer that by dropping `-o nosort`: it is what keeps the newest job
 # first, and bash sorts the candidates again without it.
 if [[ "${{BASH_VERSINFO[0]}}" -eq 4 && "${{BASH_VERSINFO[1]}}" -ge 4 || "${{BASH_VERSINFO[0]}}" -gt 4 ]]; then
-    complete -F _qex_with_jobs -o nosort -o bashdefault -o default qex
+    complete -F _fairq_with_jobs -o nosort -o bashdefault -o default fairq
 else
-    complete -F _qex_with_jobs -o bashdefault -o default qex
+    complete -F _fairq_with_jobs -o bashdefault -o default fairq
 fi
 "#
         ),
@@ -683,16 +684,16 @@ fi
 
         Shell::Fish => format!(
             r#"
-# The ids and the names of the jobs. `qex __complete` reads the records on the
+# The ids and the names of the jobs. `fairq __complete` reads the records on the
 # disk, so a press of TAB starts no coordinator.
-complete -c qex -n "__fish_seen_subcommand_from {READS}" -f -a "(qex __complete ids)"
-complete -c qex -n "__fish_seen_subcommand_from {ACTIVE}" -f -a "(qex __complete active)"
-complete -c qex -n "__fish_seen_subcommand_from {QUEUED}" -f -a "(qex __complete queued)"
+complete -c fairq -n "__fish_seen_subcommand_from {READS}" -f -a "(fairq __complete ids)"
+complete -c fairq -n "__fish_seen_subcommand_from {ACTIVE}" -f -a "(fairq __complete active)"
+complete -c fairq -n "__fish_seen_subcommand_from {QUEUED}" -f -a "(fairq __complete queued)"
 "#
         ),
 
         // elvish and powershell get the commands and the options, and no ids.
-        // qex has no way to test them, and a completion that nobody tested is
+        // fairq has no way to test them, and a completion that nobody tested is
         // worse than none: it teaches a value that may not exist.
         _ => String::new(),
     }
@@ -701,7 +702,7 @@ complete -c qex -n "__fish_seen_subcommand_from {QUEUED}" -f -a "(qex __complete
 /// Writes the banner and the usage text.
 ///
 /// The banner comes first. An agent that reads a few lines only must still see
-/// the pointer to `qex help agents`.
+/// the pointer to `fairq help agents`.
 #[cfg(unix)]
 fn print_root_help() {
     print!("{}", help::banner());
@@ -709,7 +710,10 @@ fn print_root_help() {
     let mut cmd = Cli::command();
     cmd.print_help().ok();
     println!();
-    println!("Topics for `qex help <topic>`: {}", help::TOPICS.join(", "));
+    println!(
+        "Topics for `fairq help <topic>`: {}",
+        help::TOPICS.join(", ")
+    );
 }
 
 #[cfg(unix)]
@@ -726,7 +730,7 @@ fn cmd_help(topic: Option<&str>) -> Result<i32> {
         }
         None => {
             eprintln!(
-                "qex: there is no help topic `{name}`.\n\nThe topics are: {}\n\nAgents: run `qex help agents`.",
+                "fairq: there is no help topic `{name}`.\n\nThe topics are: {}\n\nAgents: run `fairq help agents`.",
                 help::TOPICS.join(", ")
             );
             Ok(EXIT_USAGE)
@@ -738,7 +742,7 @@ fn cmd_help(topic: Option<&str>) -> Result<i32> {
 fn cmd_schema(which: Option<&str>) -> Result<i32> {
     let Some(name) = which else {
         eprintln!(
-            "qex: name a schema. The schemas are: {}\n\nExample: qex schema job",
+            "fairq: name a schema. The schemas are: {}\n\nExample: fairq schema job",
             schema::NAMES.join(", ")
         );
         return Ok(EXIT_USAGE);
@@ -751,7 +755,7 @@ fn cmd_schema(which: Option<&str>) -> Result<i32> {
         }
         None => {
             eprintln!(
-                "qex: there is no schema `{name}`. The schemas are: {}",
+                "fairq: there is no schema `{name}`. The schemas are: {}",
                 schema::NAMES.join(", ")
             );
             Ok(EXIT_USAGE)
@@ -763,7 +767,7 @@ fn cmd_schema(which: Option<&str>) -> Result<i32> {
 fn cmd_config(args: cli::ConfigArgs) -> Result<i32> {
     use cli::ConfigAction;
 
-    // Accept `qex config --json` as well as `qex config show --json`. A user
+    // Accept `fairq config --json` as well as `fairq config show --json`. A user
     // who writes the shorter form must not get a usage error.
     let json_flag = args.json;
     match args
@@ -775,7 +779,7 @@ fn cmd_config(args: cli::ConfigArgs) -> Result<i32> {
             let exists = path.exists();
             println!("{}", path.display());
             if !exists {
-                eprintln!("qex: this file does not exist. qex uses the default values.");
+                eprintln!("fairq: this file does not exist. fairq uses the default values.");
             }
             Ok(0)
         }
@@ -794,7 +798,7 @@ fn cmd_config(args: cli::ConfigArgs) -> Result<i32> {
     }
 }
 
-/// Writes the values that qex uses now.
+/// Writes the values that fairq uses now.
 ///
 /// This text shows the calculated values, not the text of the config file. A
 /// reader can then see the true budget without a calculation.
@@ -807,7 +811,7 @@ fn print_config_summary(cfg: &config::Config) -> Result<()> {
         if path.exists() {
             "read"
         } else {
-            "absent; qex uses the default values"
+            "absent; fairq uses the default values"
         }
     );
     println!();
@@ -832,7 +836,7 @@ fn print_config_summary(cfg: &config::Config) -> Result<()> {
     );
     // Show the queue limit on its own line, and always.
     //
-    // This command says what qex uses NOW, so a value that it never prints is a
+    // This command says what fairq uses NOW, so a value that it never prints is a
     // value that a reader cannot confirm. "no limit" is the answer that most
     // users get, and it is the answer that they need: it says that a job waits
     // for capacity with no end.
@@ -854,7 +858,7 @@ fn print_config_summary(cfg: &config::Config) -> Result<()> {
         "job output:   {}",
         match cfg.log_max_bytes()? {
             Some(limit) => format!(
-                "{} for each stream of each job; qex keeps the first part and the last part",
+                "{} for each stream of each job; fairq keeps the first part and the last part",
                 units::format_size(limit)
             ),
             None => "NO LIMIT; a job can fill the disk that holds the records".to_string(),
@@ -870,23 +874,25 @@ fn print_config_summary(cfg: &config::Config) -> Result<()> {
         "politeness:   nice {}; io {}, oom_score_adj {} (Linux only)",
         cfg.politeness.nice, cfg.politeness.io, cfg.politeness.oom_score_adj
     );
-    // Say what the mode CHANGES, and never that qex enforces something. qex
+    // Say what the mode CHANGES, and never that fairq enforces something. fairq
     // does not limit a job in either mode.
     match cfg.enforce.mode {
         crate::config::EnforceMode::Cooperative => {
-            println!("mode:         cooperative; qex leaves room for work that it does not control")
+            println!(
+                "mode:         cooperative; fairq leaves room for work that it does not control"
+            )
         }
         crate::config::EnforceMode::SingleUser => println!(
-            "mode:         single-user; qex uses more of the machine and looks for no peer"
+            "mode:         single-user; fairq uses more of the machine and looks for no peer"
         ),
     }
     // Report the true state of the shared accounting. A message that says "on"
-    // for a directory that qex cannot use is the fault that this program must
+    // for a directory that fairq cannot use is the fault that this program must
     // not have.
     println!("peers:        {}", peers::describe(cfg));
     println!("oversized:    {:?}", cfg.queue.oversized);
     println!("environment:  capture {:?}", cfg.submit.env_capture);
-    // SHOW `[claims]` HERE TOO. This command prints the configuration that qex
+    // SHOW `[claims]` HERE TOO. This command prints the configuration that fairq
     // uses, and a reader who cannot see `export_env` cannot tell whether a job
     // receives GOMAXPROCS. The config file is not the answer, because a machine
     // with no file still has these values.
@@ -903,7 +909,8 @@ fn print_config_summary(cfg: &config::Config) -> Result<()> {
         if !cfg.claims.export_env {
             "no; [claims] export_env = false".to_string()
         } else if cfg.submit.env_capture == config::EnvCapture::None {
-            "no; [submit] env_capture = \"none\" gives a job no variable that qex chose".to_string()
+            "no; [submit] env_capture = \"none\" gives a job no variable that fairq chose"
+                .to_string()
         } else if cfg.claims.also.is_empty() {
             "yes, with --cpu and --mem together".to_string()
         } else {
@@ -914,7 +921,7 @@ fn print_config_summary(cfg: &config::Config) -> Result<()> {
             )
         }
     );
-    // Show the command itself. A hook that qex runs on each job, and that the
+    // Show the command itself. A hook that fairq runs on each job, and that the
     // reader forgot, is a program that starts and gives no sign of its cause.
     match cfg.hooks.on_stop.first() {
         Some(program) => println!(
@@ -926,7 +933,7 @@ fn print_config_summary(cfg: &config::Config) -> Result<()> {
         ),
         None => println!("stop hook:    none"),
     }
-    // Show the check for a newer qex, for the reason that the hook above is
+    // Show the check for a newer fairq, for the reason that the hook above is
     // here: it reaches a web service on its own, and a reader who forgot it
     // has no other sign of it.
     match update::interval(cfg) {

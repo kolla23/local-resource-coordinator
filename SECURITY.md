@@ -1,5 +1,6 @@
 # Security
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: reports go to this repository's advisories, and the security page is this repository's (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 ## To report a fault
 
@@ -9,26 +10,26 @@ of this repository. Do not open a public issue.
 
 ## The versions that get a correction
 
-qex is at 0.x. The correction goes into the next release, and there is no
+fairq is at 0.x. The correction goes into the next release, and there is no
 correction for an earlier version. Take the latest release.
 
-## What you must know before you use qex
+## What you must know before you use fairq
 
-**`qex submit` copies your environment to the disk.** The file `spec.json` holds
+**`fairq submit` copies your environment to the disk.** The file `spec.json` holds
 it, with the mode 0600 in a directory with the mode 0700. If your shell holds a
 token, that token goes to the file. Use `--env-capture minimal` or
 `--no-env-capture` in a shell that holds secrets.
 
-**The command line is not a secret.** `qex list` and `qex status` show the
+**The command line is not a secret.** `fairq list` and `fairq status` show the
 program, its arguments and its directory. Put a secret in the environment or in
 a file, and never in an argument.
 
 **The accounting between users is cooperative.** Each coordinator writes its
-claims to `/tmp/qex`, and it believes what the other users write there. The
+claims to `/tmp/fairq`, and it believes what the other users write there. The
 threat model is a colleague or an agent that does not know about your work, and
 it is not a person who wants to damage your work. Turn the method off with
 `[peers] enabled = false`.
 
 The [security page](docs/security.md) gives the full
-detail, including the tests that qex makes on `/tmp/qex` and the way that qex
+detail, including the tests that fairq makes on `/tmp/fairq` and the way that fairq
 refuses an option that the coordinator cannot obey.

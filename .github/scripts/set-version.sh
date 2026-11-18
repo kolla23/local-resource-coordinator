@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 #
 # Puts one version number into Cargo.toml and Cargo.lock.
 #
@@ -13,7 +14,7 @@
 #     git checkout --detach main
 #     .github/scripts/set-version.sh 1.0.0
 #     git commit -am "chore(release): v1.0.0"
-#     git tag -a v1.0.0 -m "qex 1.0.0"
+#     git tag -a v1.0.0 -m "fairq 1.0.0"
 #     git push origin v1.0.0
 #
 # Usage: set-version.sh 0.6.0
@@ -86,9 +87,9 @@ awk -v v="$version" '
 }
 mv Cargo.toml.new Cargo.toml
 
-# In Cargo.lock, the version of qex follows the name of qex.
+# In Cargo.lock, the version of fairq follows the name of fairq.
 awk -v v="$version" '
-    /^name = "qex"$/ { print; found = 1; next }
+    /^name = "fairq"$/ { print; found = 1; next }
     found && /^version = / { print "version = \"" v "\""; found = 0; next }
     { print }
 ' Cargo.lock >Cargo.lock.new

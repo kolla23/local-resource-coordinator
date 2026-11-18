@@ -1,10 +1,11 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-01: the tail file is set to 0600 when it exists (issue #56).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the tail file is opened with O_NOFOLLOW (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module holds the limit on the output of one stream of one job.
 //!
 //! A job wrote 386MB of standard output in a review, and nothing stopped it.
-//! qex is made to be started and left, and that is the moment when nobody sees
+//! fairq is made to be started and left, and that is the moment when nobody sees
 //! a disk fill. The same disk holds `status.json`, so output with no limit can
 //! destroy the record of every job on the machine.
 //!
@@ -19,17 +20,17 @@
 //!
 //! The head of the output holds the start: the version, the configuration and
 //! the arguments. The tail holds the failure. A reader who loses either end
-//! loses the reason that the reader opened the file, so qex keeps both ends and
+//! loses the reason that the reader opened the file, so fairq keeps both ends and
 //! writes a line between them that says how much went.
 //!
 //! # The tail stays on the disk, and not in the memory
 //!
 //! A supervisor runs for every job that operates, and the memory that a
 //! supervisor holds is memory that the QUEUE NEVER ADMITTED: a claim covers the
-//! work, and qex adds the supervisor beside it. A tail of 24MB in the memory of
+//! work, and fairq adds the supervisor beside it. A tail of 24MB in the memory of
 //! each supervisor would thus put tens of megabytes for each job on a machine
 //! whose budget accounted for none of it, and the machine would meet a load
-//! that the budget exists to prevent. qex keeps the tail in a circular file: the file has a fixed size,
+//! that the budget exists to prevent. fairq keeps the tail in a circular file: the file has a fixed size,
 //! the writer returns to the start of it when it reaches the end, and this
 //! module holds one buffer of 64KB in the memory.
 
@@ -40,22 +41,22 @@ use std::path::{Path, PathBuf};
 /// The number of bytes that this module moves in one operation.
 const CHUNK: usize = 64 * 1024;
 
-/// The space that qex keeps in the limit for the two notes that it writes.
+/// The space that fairq keeps in the limit for the two notes that it writes.
 const NOTE_ROOM: u64 = 2048;
 
-/// The smallest limit that qex accepts.
+/// The smallest limit that fairq accepts.
 ///
 /// The limit must hold a head, a tail and the two notes. A limit of a few
 /// hundred bytes holds nothing, and a user who writes one has an intention that
 /// the file cannot satisfy. The configuration refuses such a value and says so.
 pub const MIN_LIMIT: u64 = 16 * 1024;
 
-/// The mark at the start of each line that qex itself writes into a log file.
+/// The mark at the start of each line that fairq itself writes into a log file.
 ///
-/// A reader searches for this text, and `qex logs --grep` finds it.
-pub const MARK: &str = "[qex]";
+/// A reader searches for this text, and `fairq logs --grep` finds it.
+pub const MARK: &str = "[fairq]";
 
-/// What qex removed from one stream of one job.
+/// What fairq removed from one stream of one job.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Dropped {
     pub bytes: u64,
@@ -70,9 +71,9 @@ struct Parts {
     head: u64,
     /// The bytes that the circular file keeps from the end of the output.
     tail: u64,
-    /// The bytes that go into the file itself before qex removes anything.
+    /// The bytes that go into the file itself before fairq removes anything.
     fill: u64,
-    /// The limit itself, for the notes that qex writes.
+    /// The limit itself, for the notes that fairq writes.
     max: u64,
 }
 
@@ -88,7 +89,7 @@ struct Parts {
 ///
 /// # Why `fill` is not the same as `head`
 ///
-/// qex removes nothing until the output passes the limit. A job that writes
+/// fairq removes nothing until the output passes the limit. A job that writes
 /// less than `max_bytes` thus keeps every byte, in one piece, with no note.
 /// This rule also holds for a second attempt, which adds to the same file: a
 /// retry of a job that wrote 349KB against a limit of 1MB must not lose that
@@ -163,7 +164,7 @@ impl CapWriter {
 
         let mut rest = buf;
         // The bytes go into the file itself until the output passes the limit.
-        // qex removes nothing before that moment, so output that fits in the
+        // fairq removes nothing before that moment, so output that fits in the
         // limit stays complete and in one piece.
         //
         // After that moment the head is closed for ever. Without the test of
@@ -214,7 +215,7 @@ impl CapWriter {
     ///
     /// This function writes a note into the file at that moment. A reader who
     /// opens the file while the job operates must not believe that the job
-    /// wrote no more, and `qex logs --follow` gives this line as it arrives.
+    /// wrote no more, and `fairq logs --follow` gives this line as it arrives.
     fn start_overflow(&mut self) {
         let Some(parts) = self.parts else { return };
         // This operation happens one time for each stream, whatever follows.
@@ -225,7 +226,7 @@ impl CapWriter {
         // those bytes go now. The line count is exact, because this function
         // reads the part that it removes.
         //
-        // The cut falls at a byte, and the output has lines, so qex moves the
+        // The cut falls at a byte, and the output has lines, so fairq moves the
         // cut back to the last line end. THIS IS THE SAME RULE AS THE TRIM OF
         // THE LAST PART, at the other end of the same loss. A head that stops
         // at a byte ends with a fragment of a line: the measured example wrote
@@ -260,12 +261,12 @@ impl CapWriter {
         let mut note = String::new();
         if fragment {
             note.push_str(&format!(
-                "\n{MARK} The line above is not complete. qex removed the output after it.\n"
+                "\n{MARK} The line above is not complete. fairq removed the output after it.\n"
             ));
         }
         note.push_str(&format!(
             "{MARK} The output of this job reached the limit `[logs] max_bytes` = {}. \
-             qex keeps the last part of the output beside this file. It writes that part \
+             fairq keeps the last part of the output beside this file. It writes that part \
              here when the job stops.\n",
             crate::units::format_size(parts.max)
         ));
@@ -279,7 +280,7 @@ impl CapWriter {
         }
     }
 
-    /// Completes the file, and gives what qex removed.
+    /// Completes the file, and gives what fairq removed.
     ///
     /// This function writes the line that says how much went, and then the
     /// tail. A reader thus finds the start of the output, one line that names
@@ -294,7 +295,7 @@ impl CapWriter {
             self.dropped.lines += self.overflow_lines;
 
             // THE FILE MUST NOT KEEP A PROMISE THAT IT CANNOT KEEP. The note
-            // that `start_overflow` wrote says that qex holds the last part of
+            // that `start_overflow` wrote says that fairq holds the last part of
             // the output beside this file, and that it writes that part here
             // when the job stops. On this path there is no such file and no
             // last part, so the reader who stops at the end of this file must
@@ -304,7 +305,7 @@ impl CapWriter {
             if let Some(parts) = self.parts.filter(|_| self.overflowing) {
                 let note = format!(
                     "{MARK} ---- {} and {} of the output are not in this file ----\n\
-                     {MARK} qex could not make the file for the last part of the output, so \
+                     {MARK} fairq could not make the file for the last part of the output, so \
                      the last part is not here. The limit is `[logs] max_bytes` = {}. Read \
                      `supervisor.log` in this directory for the fault of the machine.\n",
                     crate::units::format_size(self.dropped.bytes),
@@ -320,9 +321,9 @@ impl CapWriter {
         };
         let mut ring = ring;
 
-        // The tail starts in the middle of a line when qex removed bytes
+        // The tail starts in the middle of a line when fairq removed bytes
         // between the head and the tail. A reader must not read that fragment
-        // as a whole line, so qex removes the bytes before the first line end.
+        // as a whole line, so fairq removes the bytes before the first line end.
         //
         // THAT RULE HAS A LIMIT. The first line end can be far into the tail,
         // or there can be no line end at all: one JSON document of 30MB, a
@@ -332,7 +333,7 @@ impl CapWriter {
         // with a 64KB limit kept 13 bytes of a tail of 46KB, and the words
         // before the failure went with it.
         //
-        // qex therefore removes the fragment only when it is a small part of
+        // fairq therefore removes the fragment only when it is a small part of
         // the tail. In each other case it keeps the fragment and writes a line
         // that says that the text starts in the middle of a line.
         let gap = ring.wrapped || self.dropped.bytes > 0;
@@ -341,7 +342,7 @@ impl CapWriter {
         let cut_line = gap && !trim;
 
         // The first pass measures. The line that says how much went must be
-        // before the tail, so qex needs the numbers before it writes anything.
+        // before the tail, so fairq needs the numbers before it writes anything.
         // Neither pass holds the tail in the memory.
         let (kept_bytes, kept_lines) = ring.walk(None, trim).unwrap_or((0, 0));
         self.dropped.bytes += self.overflow_bytes.saturating_sub(kept_bytes);
@@ -349,7 +350,7 @@ impl CapWriter {
 
         let mut note = format!(
             "{MARK} ---- {} and {} of the output are not in this file ----\n\
-             {MARK} The limit is `[logs] max_bytes` = {}. qex kept the first {} and the last {}. \
+             {MARK} The limit is `[logs] max_bytes` = {}. fairq kept the first {} and the last {}. \
              To keep more, make max_bytes larger in the configuration file.\n",
             crate::units::format_size(self.dropped.bytes),
             crate::units::count_of(self.dropped.lines as usize, "line"),
@@ -380,7 +381,7 @@ impl CapWriter {
             return;
         }
         self.fault = Some(message.to_string());
-        eprintln!("qex: {message}. The job continues, and its output is not complete.");
+        eprintln!("fairq: {message}. The job continues, and its output is not complete.");
     }
 }
 
@@ -543,7 +544,7 @@ impl Ring {
 
 /// Gives the name of the file that holds the tail of one stream.
 ///
-/// The name is beside the log file, so `qex clean` deletes it with the record
+/// The name is beside the log file, so `fairq clean` deletes it with the record
 /// of the job. The supervisor uses this function as well, to remove the file
 /// when a copy did not complete.
 pub fn tail_path(log: &Path) -> PathBuf {
@@ -576,7 +577,7 @@ fn count_lines(data: &[u8]) -> u64 {
 /// window into memory in one piece, and `finish` reads the last part in 64KB
 /// parts and holds no more than one of them. The supervisor is in the cgroup of
 /// the job, so memory that it holds counts against the claim of the job: a job
-/// that operates at its claim must not meet the out-of-memory killer because qex
+/// that operates at its claim must not meet the out-of-memory killer because fairq
 /// looked for a line end. A line longer than 64KB thus keeps its fragment, and
 /// the note says so.
 fn head_cut(file: &mut File, head: u64) -> std::io::Result<Option<u64>> {
@@ -617,7 +618,7 @@ fn count_lines_in(file: &mut File, start: u64, len: u64) -> std::io::Result<u64>
 pub enum Report {
     /// The job closed this stream. No more output can arrive.
     Eof,
-    /// The copy is complete. This is what qex removed.
+    /// The copy is complete. This is what fairq removed.
     Done(Dropped),
 }
 
@@ -656,7 +657,7 @@ mod tests {
     impl Dir {
         fn new(name: &str) -> Self {
             let path = crate::testutil::temp_dir().join(format!(
-                "qex-logcap-{}-{}-{name}",
+                "fairq-logcap-{}-{}-{name}",
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -732,7 +733,7 @@ mod tests {
 
     /// The disk must stay below the limit WHILE THE JOB WRITES.
     ///
-    /// A limit that qex applies after the job stops lets the disk fill first,
+    /// A limit that fairq applies after the job stops lets the disk fill first,
     /// and a full disk is the fault that this module removes. The test measures
     /// the log file and the file beside it together, at each step.
     #[test]
@@ -761,7 +762,7 @@ mod tests {
     }
 
     /// The file beside the log file must go. A file that stays holds disk space
-    /// that `qex du` cannot explain.
+    /// that `fairq du` cannot explain.
     #[test]
     fn the_file_that_holds_the_tail_goes_at_the_end() {
         let dir = Dir::new("cleanup");
@@ -788,7 +789,7 @@ mod tests {
 
         let text = std::fs::read_to_string(&path).unwrap();
         assert_eq!(dropped, Dropped::default());
-        assert!(!text.contains(MARK), "qex wrote a note with no reason");
+        assert!(!text.contains(MARK), "fairq wrote a note with no reason");
         assert_eq!(text.lines().count(), 20);
     }
 
@@ -881,7 +882,7 @@ mod tests {
 
     /// Output with no line end must keep its last part.
     ///
-    /// qex removes the incomplete first line of the tail, so that a reader
+    /// fairq removes the incomplete first line of the tail, so that a reader
     /// never meets one half of a line. An earlier version applied that rule
     /// when the tail held NO line end at all, and it then removed the whole
     /// tail: a 4GB stream of one line left the head only. One JSON document,
@@ -919,7 +920,7 @@ mod tests {
 
     /// A second attempt must not remove output that fits in the limit.
     ///
-    /// The limit belongs to the whole stream, but qex removes nothing before
+    /// The limit belongs to the whole stream, but fairq removes nothing before
     /// the stream passes the limit. An earlier version cut the file back to one
     /// quarter of the limit at the first byte of the second attempt: a retry of
     /// a job that wrote 349KB against a limit of 1MB lost 87KB, and the file
@@ -956,7 +957,7 @@ mod tests {
             "the second attempt removed data"
         );
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(!text.contains(MARK), "qex wrote a note with no reason");
+        assert!(!text.contains(MARK), "fairq wrote a note with no reason");
         assert!(
             text.contains("line-1\n"),
             "the first attempt lost its start"
@@ -974,7 +975,7 @@ mod tests {
 
     /// A line end that is far into the tail must not cost the whole tail.
     ///
-    /// qex removes the incomplete first line of the tail. With one line end
+    /// fairq removes the incomplete first line of the tail. With one line end
     /// far into the tail, that rule removed almost everything: a measure with
     /// a 64KB limit kept 13 bytes of a tail of 46KB, and the words before the
     /// failure went with them. A progress display that uses `\r` and then one
@@ -1012,7 +1013,7 @@ mod tests {
 
     /// A tail that starts in the middle of a line always says so.
     ///
-    /// qex removes the bytes between the head and the tail, so the first bytes
+    /// fairq removes the bytes between the head and the tail, so the first bytes
     /// of the tail are the middle of a line. THAT IS TRUE WHETHER THE CIRCULAR
     /// FILE RETURNED TO ITS START OR NOT. An earlier version tested
     /// `wrapped && dropped > 0` and thus wrote the warning in the first case
@@ -1023,14 +1024,14 @@ mod tests {
     /// file does not return to its start, and `wrapped` alone is false.
     /// A head with no line end near its cut keeps the fragment AND says so.
     ///
-    /// qex moves the cut of the head back to the last line end, so that the
+    /// fairq moves the cut of the head back to the last line end, so that the
     /// head holds whole lines only. That rule needs the same limit as the trim
     /// of the last part: with the last line end far back, a cut back removes
     /// almost all of the head. Measured with the window removed: a head of 4096
     /// bytes became 6 bytes, and the reader lost the start-up that the head
     /// exists to keep.
     ///
-    /// qex therefore keeps the fragment in that case, and the note says that
+    /// fairq therefore keeps the fragment in that case, and the note says that
     /// the line above it is not complete. In silence the reader takes the
     /// fragment for a line that the job wrote.
     #[test]
@@ -1041,7 +1042,7 @@ mod tests {
         let mut w = CapWriter::new(&path, open(&path), 0, Some(MIN_LIMIT));
 
         // One line end at the start, and then one line that never ends. The
-        // last line end is thus far outside the window that qex looks in.
+        // last line end is thus far outside the window that fairq looks in.
         w.write(b"the start of the job\n");
         for _ in 0..40 {
             w.write(&vec![b'x'; 8 * 1024]);
@@ -1049,7 +1050,7 @@ mod tests {
         w.finish();
 
         let text = std::fs::read_to_string(&path).unwrap();
-        let head = &text[..text.find(MARK).expect("the file must hold a note of qex")];
+        let head = &text[..text.find(MARK).expect("the file must hold a note of fairq")];
 
         // The head must keep its space. A cut back to the line end at byte 21
         // would leave the reader with that line only.
@@ -1150,11 +1151,11 @@ mod tests {
         // test asked for `dropped.bytes >= written - kept`, and the head cut
         // alone satisfied it, so a count that dropped the overflow, and a count
         // that multiplied it, both passed.
-        // The head is every byte before the first note of qex. The head ends at
-        // a line end here, because the lines are short, so qex writes no line
+        // The head is every byte before the first note of fairq. The head ends at
+        // a line end here, because the lines are short, so fairq writes no line
         // end of its own before that note.
         let text = std::fs::read_to_string(&path).unwrap();
-        let kept_text = &text[..text.find(MARK).expect("the file must hold a note of qex")];
+        let kept_text = &text[..text.find(MARK).expect("the file must hold a note of fairq")];
         assert!(
             kept_text.ends_with('\n'),
             "the head must end at a line end, and it ends `{}`",
@@ -1184,8 +1185,8 @@ mod tests {
             "the note must appear one time"
         );
 
-        // The note that qex wrote when the output passed the limit says that
-        // qex holds the last part beside this file, and that it writes that
+        // The note that fairq wrote when the output passed the limit says that
+        // fairq holds the last part beside this file, and that it writes that
         // part here at the end. There is no such file on this path, so the
         // file must say what it does hold.
         assert!(
@@ -1201,9 +1202,9 @@ mod tests {
 
     /// With short lines, the last part must start at a WHOLE line.
     ///
-    /// qex removes the bytes between the head and the last part, so the first
+    /// fairq removes the bytes between the head and the last part, so the first
     /// bytes of that part are the end of a line that the reader cannot see. For
-    /// the usual output — short lines — that fragment is a few bytes, so qex
+    /// the usual output — short lines — that fragment is a few bytes, so fairq
     /// removes it and the reader meets whole lines only. Without that
     /// operation, the first line of the last part reads as a true line, and a
     /// reader takes `-1234` for a value or `rror: no such file` for a message.
@@ -1219,7 +1220,7 @@ mod tests {
         w.finish();
 
         let text = std::fs::read_to_string(&path).unwrap();
-        // The last note of qex is the last line before the tail.
+        // The last note of fairq is the last line before the tail.
         let tail = text
             .rsplit_once(&format!("{MARK} The limit is"))
             .expect("the file must hold the note about the limit")
@@ -1232,7 +1233,7 @@ mod tests {
         );
         assert!(
             !text.contains("middle of a line"),
-            "qex removed the fragment, so the file must not say that one stayed"
+            "fairq removed the fragment, so the file must not say that one stayed"
         );
 
         // Every line of the last part is a line that the job wrote.

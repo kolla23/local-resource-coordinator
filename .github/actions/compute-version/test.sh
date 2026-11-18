@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Modified by the local-resource-coordinator fork, 2026-10-31: cd ... || exit 1 (shellcheck SC2164); 2026-11-01: stop when jq or git is missing (#74)
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 #
 # Tests the rules that give the version number, and the driver that feeds them.
 #
@@ -230,7 +231,7 @@ echo "== The driver, against a repository with fishbone tags =="
 # through before it asks for the parents of the commit.
 repo="$work/repo"
 mkdir -p "$repo"
-export QEX_TEST_REPO="$repo"
+export FAIRQ_TEST_REPO="$repo"
 (
     cd "$repo" || exit 1
     git init -q -b main .
@@ -249,7 +250,7 @@ export QEX_TEST_REPO="$repo"
         echo "$number" >version
         git add version
         git commit -q -m "chore(release): v$number"
-        git tag -a "v$number" -m "qex $number"
+        git tag -a "v$number" -m "fairq $number"
         git checkout -q main
     }
 
@@ -292,7 +293,7 @@ check "it makes no new tag" "" "$(value_of tag "$out")"
 # was the exit value of `tee`, which is always zero. A call that failed then
 # gave an empty answer, the step reported success, and the run went green having
 # released nothing.
-out="$(QEX_TEST_GH_FAIL=1 "$driver" owner/name "$main_sha" "" 2>/dev/null)"
+out="$(FAIRQ_TEST_GH_FAIL=1 "$driver" owner/name "$main_sha" "" 2>/dev/null)"
 check "a call to the API that fails stops the driver" "1" "$?"
 check "a call to the API that fails writes no answer" "" "$out"
 
@@ -309,7 +310,7 @@ mkdir -p "$first"
     git commit -q --allow-empty -m "docs: a word"
 ) >/dev/null
 
-QEX_TEST_REPO="$first" out="$("$driver" owner/name "$(git -C "$first" rev-parse main)" "")"
+FAIRQ_TEST_REPO="$first" out="$("$driver" owner/name "$(git -C "$first" rev-parse main)" "")"
 check "the first release starts from 0.0.0" "0.1.0" "$(value_of version "$out")"
 check "the first release has no release before it" "" "$(value_of previous "$out")"
 
@@ -323,9 +324,9 @@ new_tree() {
     rm -rf "$tree"
     mkdir -p "$tree/.github/scripts"
     cp "$root/.github/scripts/set-version.sh" "$tree/.github/scripts/"
-    printf '[package]\nname = "qex"\nversion = "%s"\nedition = "2021"\n' "$number" \
+    printf '[package]\nname = "fairq"\nversion = "%s"\nedition = "2021"\n' "$number" \
         >"$tree/Cargo.toml"
-    printf '[[package]]\nname = "qex"\nversion = "%s"\n' "$number" >"$tree/Cargo.lock"
+    printf '[[package]]\nname = "fairq"\nversion = "%s"\n' "$number" >"$tree/Cargo.lock"
 }
 
 # A DEPENDENCY IN FRONT OF `[package]`.
