@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module reads and writes two types of value: byte sizes and durations.
 //!
 //! The parsers accept the formats that a person or an agent writes without

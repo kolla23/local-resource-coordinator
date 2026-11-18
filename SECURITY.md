@@ -1,5 +1,6 @@
 # Security
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: reports go to this repository's advisories, and the security page is this repository's (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 ## To report a fault
 

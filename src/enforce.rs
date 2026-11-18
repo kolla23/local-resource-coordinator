@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: a test pins the mode of the oom mark (R3 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-10-06: the oom and killed-by-user marks are made and kept 0600.
 // Modified by the local-resource-coordinator fork, 2026-11-02: the oom and killed-by-user marks are opened with O_NOFOLLOW, with a test (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module reports a kill for memory. It applies no limit.
 //!
 //! fairq does not limit a job. A claim decides what STARTS and when, and a job

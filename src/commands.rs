@@ -6,6 +6,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test record sets the new pid_ns fields (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-16: qex gc names each directory with no record that it could not remove, counts only what it removed, and gives the code 1 (issue #194).
 // Modified by the local-resource-coordinator fork, 2026-11-17: qex gc asks the coordinator which ids are free before it removes a directory with no record, so a Submit in progress keeps its directory (issue #200).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};

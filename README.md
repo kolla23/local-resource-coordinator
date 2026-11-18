@@ -1,8 +1,11 @@
-# qex — Queued EXecutor
+# fairq — shared admission control for independent local agents
 <!-- Modified by the local-resource-coordinator fork, 2026-10-02: the test command needs --features test-fixtures. -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: no upstream CI, release or crates.io badges, the install section builds from the source, and the documentation link names docs/ (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: the install section gives the clone address, and says that building needs Rust 1.85 or later (issue #118). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
+
+fairq is an independently maintained fork of qex (https://github.com/stephenc/qex), Apache-2.0.
 
 fairq gives independent agents and harnesses one shared resource scheduler for one
 machine.

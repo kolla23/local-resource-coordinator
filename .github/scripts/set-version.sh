@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 #
 # Puts one version number into Cargo.toml and Cargo.lock.
 #

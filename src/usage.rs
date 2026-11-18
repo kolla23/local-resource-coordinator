@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-06: usage.lock is made and kept 0600.
 // Modified by the local-resource-coordinator fork, 2026-11-02: usage.lock is opened with O_NOFOLLOW (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module remembers what a job really used, and gives the claim for the
 //! next job of the same kind.
 //!

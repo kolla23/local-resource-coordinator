@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module holds the terminal codes for colour and weight.
 //!
 //! fairq writes these codes only when the standard output is a terminal. A file

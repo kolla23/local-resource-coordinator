@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests pass the clocks Coordinator::new now takes (issue #17); tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-13: qex kill checks the job's identity before its first signal, with reap's check for a leader that ended, and a second refusal for group members qex could not verify (issue #163).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module stops jobs and deletes job records.
 //!
 //! fairq signals the process group of a job, and not the first process only. A

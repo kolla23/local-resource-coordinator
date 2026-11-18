@@ -17,6 +17,7 @@
 # comment names the namespace rows without a count (issue #178).
 # Modified by the local-resource-coordinator fork, 2026-11-18: the Style job
 # runs the tests of the rename script and its checker (issue #28).
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests

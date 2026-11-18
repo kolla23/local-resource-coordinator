@@ -1,7 +1,8 @@
 // Modified by the local-resource-coordinator fork, 2026-10-05: declares the os module (R1 of docs/fork/PORT_PLAN.md).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the Windows build message links this repository (issue #100).
 // Modified by the local-resource-coordinator fork, 2026-11-12: subcommand_word reads the arguments as OsString, so one that is not UTF-8 no longer panics (issue #156).
-//! qex — Queued EXecutor.
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+//! fairq — shared admission control for independent local agents.
 //!
 //! fairq is a job queue for long tasks on a local machine. It controls the
 //! quantity of memory and the number of cores that the jobs use together.

@@ -11,6 +11,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-13: log_without_panic is visible to the crate, for recovery's stop thread (issue #162).
 // Modified by the local-resource-coordinator fork, 2026-11-13: the check in kill_what_the_job_left is its own function with three verdicts, so qex kill uses it before its first signal (issue #163).
 // Modified by the local-resource-coordinator fork, 2026-11-13: a debug-only pause before kill_what_the_job_left's check, for the tests, and group_has_no_process, recovery's probe (issue #162).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module holds the supervisor. One supervisor controls one job.
 //!
 //! The supervisor is a separate process for one reason: the coordinator can

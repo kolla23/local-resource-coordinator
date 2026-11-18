@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-11-17: the capability free-ids (issue #200).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module tells the CLI what the coordinator can do.
 //!
 //! # The fault that this module removes

@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests of the line and record turn the check on, since the default is now never (issue #4); tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-02: update.lock is opened with O_NOFOLLOW, with a test (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the text of a newer release names this project's releases, with a test (issue #113).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! Looks for a newer release of fairq, and says so one time.
 //!
 //! # Who asks

@@ -1,5 +1,6 @@
 # Skills
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: no install from upstream's repository; copy the skill from a clone (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 A skill is a page of instructions that an agent loads when a task matches it.
 The skill in `fairq/` teaches an agent to use fairq instead of a background command

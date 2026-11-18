@@ -6,6 +6,7 @@ description: Run a long local task (a build, a test suite, a training run, a dat
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: install by building from the source, in place of upstream's downloads (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: the build gives the clone address, and says that it needs Rust 1.85 or later (issue #118). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 # fairq — run long tasks and wait for them correctly
 

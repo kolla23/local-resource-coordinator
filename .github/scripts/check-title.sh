@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 #
 # Tests that the title of a pull request follows Conventional Commits.
 #

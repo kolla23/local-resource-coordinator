@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: the sandbox link names this fork's page (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials and tips links are gone (issue #100).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the default [update] url names this project's releases (issue #113).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module holds the text for the `fairq help <topic>` command.
 //!
 //! An agent reads this text to learn the tool. Each topic is thus short and

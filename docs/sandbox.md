@@ -4,6 +4,7 @@ description: What fairq needs from a sandbox, how to test it, and what to change
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the state directory of a sandbox goes under /tmp, since qex refuses one below a folder that shows an unmapped owner (issue #88). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: sandbox reports go to this repository's issues, not the upstream tips issue (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 

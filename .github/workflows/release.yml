@@ -8,6 +8,7 @@
 # Test leg allows unprivileged user namespaces before the e2e step (issue #171).
 # Modified by the local-resource-coordinator fork, 2026-11-14: that step's
 # comment names the namespace rows without a count (issue #178).
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 name: Release
 
 # ONE workflow makes the release, from the tag.

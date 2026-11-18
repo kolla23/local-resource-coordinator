@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests that read the peer directory hold the env lock (issue #5); tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module shares the resource claims between the users of one machine.
 //!
 //! Each coordinator writes its claims to a file in a shared directory. Each

@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: test State gains the config-look fields (issue #17).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module holds the event stream of the coordinator.
 //!
 //! # The fault that this module removes

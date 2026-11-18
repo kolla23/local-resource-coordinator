@@ -4,6 +4,7 @@ description: Every command, option, claim word and configuration field.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-10-01: the update check defaults to never (issue #4). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: the default [update] url names this project's releases (issue #113). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 

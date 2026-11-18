@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module selects the part of a log file that a command shows.
 //!
 //! `fairq logs` and `fairq status` share these options, so the two commands always

@@ -6,6 +6,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: state_dir checks the owner of the state directory and the directories above it, and makes it private (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the three opens of a pid file use O_NOFOLLOW, with a test that the sweep does not claim a linked pid file (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: hold_pid_file gives DirGone when a sweep deleted the socket directory, and a sweep claims nothing through a pid file with no name, with tests (issue #132).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module gives the location of each file that fairq uses.
 //!
 //! fairq uses the XDG directories on Linux and on macOS. On macOS it does not use

@@ -5,10 +5,13 @@ description: A resource-aware local job queue and CLI job scheduler for long-run
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: fault reports go to this repository's issues; the testimonials link is gone (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: install by building from the source, in place of upstream's downloads, and the source link names this repository (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: the install section gives the clone address, and says that building needs Rust 1.85 or later (issue #118). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
-# qex — Queued EXecutor
+# fairq — shared admission control for independent local agents
+
+fairq is an independently maintained fork of qex (https://github.com/stephenc/qex), Apache-2.0.
 
 **A local job queue for the long tasks that you start from a terminal.** fairq is a
 resource-aware job scheduler for one machine: it holds your builds, tests and

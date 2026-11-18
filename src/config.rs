@@ -4,6 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: a read returns the clocks its age was measured against; a read with a future mtime has no age (issue #17).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the config file is read only when the user or root owns it and other users cannot write it (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the default [update] url names this project's releases (issue #113).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module reads the config file `~/.config/fairq.toml`.
 //!
 //! Each field has a default value. The config file is thus optional. If the

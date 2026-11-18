@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-11-17: the FreeIds request and its answer (issue #200).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module defines the messages between the CLI and the coordinator.
 //!
 //! Each message is one JSON object on one line. This format is simple to read

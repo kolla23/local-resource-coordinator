@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-01: append sets 0600 on a history file that exists (issue #56).
 // Modified by the local-resource-coordinator fork, 2026-11-02: append opens the history with O_NOFOLLOW (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module keeps a short record of every job that fairq accepted.
 //!
 //! The record of a job is the interface for an agent. When that record is gone,

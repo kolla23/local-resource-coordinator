@@ -1,5 +1,6 @@
 # How to make a change to fairq
 <!-- Modified by the local-resource-coordinator fork, 2026-10-02: clippy and the e2e tests need --features test-fixtures. -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 ## Work on a branch, and merge with a pull request
 

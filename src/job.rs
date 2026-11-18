@@ -3,6 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: read_all_from_disk skips a symbolic link in jobs/ (issue #129).
 // Modified by the local-resource-coordinator fork, 2026-11-03: read_all_from_disk skips a record whose id is not its folder's name (issue #135).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the record names the pid namespace of its pid, pid_ns and pid_ns_init_start (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module holds the job state that fairq writes to the disk.
 //!
 //! The file `status.json` is the primary record of a job result. The supervisor

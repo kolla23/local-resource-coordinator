@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module holds the JSON Schema for the two formats that fairq publishes.
 //!
 //! An agent reads a schema to write a job file, or to read the `--json` output.

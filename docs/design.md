@@ -3,6 +3,7 @@ title: How fairq operates
 description: The coordinator, the supervisor, the files on the disk, and the limits.
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: the limits name the group that qex can stop after a pid is reused (issue #115). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 

@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module reads the text that a person wrote in place of a job id.
 //!
 //! The text can be a full id, the start of an id, the name of a job, the id of

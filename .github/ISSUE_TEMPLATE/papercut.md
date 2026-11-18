@@ -6,6 +6,7 @@ labels: ''
 assignees: ''
 ---
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: the search goes to this repository, and security faults go to its advisories (issue #109). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 <!--
 A SECURITY FAULT DOES NOT GO HERE. Report it privately at

@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module decides if two commands come from one context.
 //!
 //! `fairq abort` with no scope option acts on the jobs of the caller, and not on

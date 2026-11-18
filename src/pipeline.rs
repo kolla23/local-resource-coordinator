@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module reads a file that describes several jobs, and submits them
 //! together.
 //!

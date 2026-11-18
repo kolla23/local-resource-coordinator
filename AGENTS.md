@@ -1,9 +1,9 @@
-# local-resource-coordinator (placeholder name)
+# fairq (repository: local-resource-coordinator)
 
 An independently maintained fork of qex (Apache-2.0). It is a local coordinator that decides RUN/WAIT for commands that humans and AI agents submit in parallel, so that shared work doesn't exhaust CPU or RAM. The users are developers running several agents or builds on one machine.
 
 ## Stack
-- Rust (edition 2021, MSRV 1.85), a single crate `qex`. Dependencies: clap, serde/serde_json, toml, serde_yaml_ng, uuid, libc, anyhow.
+- Rust (edition 2021, MSRV 1.85), a single crate `fairq`. Dependencies: clap, serde/serde_json, toml, serde_yaml_ng, uuid, libc, anyhow.
 - No database. State lives in atomic job files. IPC runs over Unix sockets.
 - Upstream builds only on Unix (Linux, macOS). On Windows, build and test inside WSL2.
 - Upstream: https://github.com/stephenc/qex. We fork from v0.33.0 (`78b4e86`, tag `base/qex-v0.33.0`).

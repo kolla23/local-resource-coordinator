@@ -14,6 +14,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-16: a keyed Submit that meets a submission in progress under its key waits for it to end, then gets its job or makes its own, so a dedupe answer always names a job (issue #190).
 // Modified by the local-resource-coordinator fork, 2026-11-16: a Submit whose record write fails removes its job directory before it frees its id, and names a directory it could not remove in the answer and the log (issue #187).
 // Modified by the local-resource-coordinator fork, 2026-11-17: the FreeIds request says which ids no job and no submission in progress holds (issue #200).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module holds the coordinator.
 //!
 //! The coordinator keeps the queue, starts each job when the machine has

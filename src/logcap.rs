@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-01: the tail file is set to 0600 when it exists (issue #56).
 // Modified by the local-resource-coordinator fork, 2026-11-02: the tail file is opened with O_NOFOLLOW (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module holds the limit on the output of one stream of one job.
 //!
 //! A job wrote 386MB of standard output in a review, and nothing stopped it.

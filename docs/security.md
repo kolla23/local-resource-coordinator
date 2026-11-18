@@ -5,6 +5,7 @@ description: What fairq writes to the disk, who can read it, and where the trust
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: the state directory, job records and the config file must be yours (issue #88). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: qex opens the files it writes in the state and job directories without following a symbolic link (issue #88). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: reports go to this repository's advisories (issue #100). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 

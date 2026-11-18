@@ -3,6 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-01: run and note set 0600 on a hook.log that exists, with a unit test; a test comment no longer says run opened no file (issue #56).
 // Modified by the local-resource-coordinator fork, 2026-11-02: run and note open hook.log with O_NOFOLLOW (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-14: a failed test of the hook's state sends no signal to its group, and its verdict says so; a debug-only test switch reaps the hook before that test (issue #178).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module runs the command that fairq starts when a job stops.
 //!
 //! The hook is a property of the machine and of the person at it, and not a

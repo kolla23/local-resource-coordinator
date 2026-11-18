@@ -2,6 +2,7 @@
 # test job `testjob` and the `test-fixtures` feature that the e2e suite needs.
 # Modified by the local-resource-coordinator fork, 2026-11-03: repository,
 # homepage and documentation name this fork's repository, not upstream's site.
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 [package]
 name = "fairq"
 # NOT the version of a release. `main` holds this number for ever, and no pull
@@ -10,7 +11,7 @@ name = "fairq"
 # CONTRIBUTING.md and `src/version.rs`.
 version = "0.0.0-dev"
 edition = "2021"
-description = "Queued EXecutor — shared admission control for independent local agents"
+description = "fairq — shared admission control for independent local agents"
 license = "Apache-2.0"
 repository = "https://github.com/kolla23/local-resource-coordinator"
 homepage = "https://github.com/kolla23/local-resource-coordinator"

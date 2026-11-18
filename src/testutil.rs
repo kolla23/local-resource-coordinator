@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: add peers_env and temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! Test-only helpers.
 
 use std::sync::{Mutex, MutexGuard, OnceLock};

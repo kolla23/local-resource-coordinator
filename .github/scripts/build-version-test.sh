@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Modified by the local-resource-coordinator fork, 2026-10-31: cd ... || exit 1 (shellcheck SC2164)
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 #
 # Tests what `build.rs` makes a binary report.
 #

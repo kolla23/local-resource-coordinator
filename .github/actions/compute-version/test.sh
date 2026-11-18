@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Modified by the local-resource-coordinator fork, 2026-10-31: cd ... || exit 1 (shellcheck SC2164); 2026-11-01: stop when jq or git is missing (#74)
+# Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 #
 # Tests the rules that give the version number, and the driver that feeds them.
 #

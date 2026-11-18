@@ -6,6 +6,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: a zombie group leader is no live job; zombie_group_leader forwards to src/os/ (issue #97).
 // Modified by the local-resource-coordinator fork, 2026-11-03: group_members and process_uids forward to src/os/ (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-03: the two forwarders lose their lint expectation, since the fix calls them; pid_namespace_identity forwards to src/os/ (issue #115).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module reads the machine capacity and the current machine load.
 //! It also holds the process functions that fairq needs.
 //!

@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-06: daemon.log and spawn.lock are made and kept 0600.
 // Modified by the local-resource-coordinator fork, 2026-11-02: connect_existing_result reports a refused state directory; the sandbox link names this fork's page (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: daemon.log, spawn.lock and the probe file are opened with O_NOFOLLOW, with a test for the probe (issue #88).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module connects the CLI to the coordinator.
 //!
 //! If no coordinator operates, the CLI starts one. Many CLI processes can do

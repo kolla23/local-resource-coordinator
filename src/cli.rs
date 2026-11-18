@@ -1,3 +1,4 @@
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module defines the command line of fairq.
 //!
 //! An agent is a frequent reader of this help text. Each description is thus
@@ -14,7 +15,7 @@ use std::path::PathBuf;
     // Not the number in Cargo.toml: `main` holds `0.0.0-dev` for ever, and
     // `build.rs` calculates the number of this build. See `src/version.rs`.
     version = crate::version::VERSION,
-    about = "Queued EXecutor. Shared admission control for independent agents on this machine.",
+    about = "fairq. Shared admission control for independent agents on this machine.",
     long_about = None,
     disable_help_subcommand = true,
     subcommand_required = false,

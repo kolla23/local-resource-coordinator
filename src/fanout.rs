@@ -1,4 +1,5 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module reads a file of input lines, and makes one job for each line.
 //!
 //! `fairq submit --each-line inputs.txt -- ./process {}` is the shape. Every job

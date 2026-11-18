@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: the peer test holds the env lock (issue #5); tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-10-01: test State gains the config-look fields; the config read takes its clocks before the lock (issue #17).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! This module decides when each job starts.
 //!
 //! The rule is simple: a job starts when the machine has capacity for its

@@ -42,6 +42,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-16: four tests of a Submit whose record write fails: its job directory goes and its id makes a job; a keyed resend that waited makes the job; a link at the directory is removed and not followed; a directory that cannot be removed is named in the answer and the log; and the failed-mkdir test checks that no leftover is named (issue #187).
 // Modified by the local-resource-coordinator fork, 2026-11-16: three tests that qex gc names a directory with no record that it could not remove, in its text and its JSON, with no control byte (issue #194).
 // Modified by the local-resource-coordinator fork, 2026-11-17: five tests that qex gc leaves the directory of a Submit in progress, leaves what an earlier coordinator cannot vouch for, asks in parts, removes what a killed coordinator left and stops on another answer (issue #200).
+// Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -4344,7 +4345,7 @@ fn every_path_in_the_state_directory_keeps_its_mode() {
         || h.job_dir(&aborted).join("hook.log").exists(),
     );
     q(&["pause", "queue"]);
-    // An abort writes the record of a queued job with write_status_unsynced (job.rs:842).
+    // An abort writes the record of a queued job with write_status_unsynced (src/job.rs).
     let cancelled = q(&["submit", "--", TESTJOB, "print", "never"]);
     q(&["abort", "--all", "--keep-running"]);
     h.until(
@@ -20609,6 +20610,22 @@ fn no_shipped_word_promises_the_limit_that_went() {
         ("claim that failed", "the same, in the words of a record"),
     ];
 
+    for page in shipped_pages() {
+        let text = std::fs::read_to_string(&page)
+            .unwrap_or_else(|e| panic!("the gate must read {}: {e}", page.display()));
+        for (word, what) in refused {
+            assert!(
+                !text.contains(word),
+                "{} names `{word}` ({what}). fairq limits no job, so no shipped word may \
+                 promise that it does.",
+                page.display()
+            );
+        }
+    }
+}
+
+/// The pages that ship with fairq. Every gate over shipped text reads this one list.
+fn shipped_pages() -> Vec<std::path::PathBuf> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut pages: Vec<std::path::PathBuf> = vec![
         root.join("README.md"),
@@ -20640,18 +20657,187 @@ fn no_shipped_word_promises_the_limit_that_went() {
         docs.len()
     );
     pages.append(&mut docs);
+    pages
+}
 
-    for page in pages {
-        let text = std::fs::read_to_string(&page)
-            .unwrap_or_else(|e| panic!("the gate must read {}: {e}", page.display()));
-        for (word, what) in refused {
+/// The sentence that names the project fairq comes from, on one line of each front page.
+const ATTRIBUTION: &str =
+    "fairq is an independently maintained fork of qex (https://github.com/stephenc/qex), Apache-2.0.";
+
+/// Says whether a line names the old program outside the forms that stay after the rename:
+/// a dated header, the attribution, upstream's repository, the schema ids and one comment.
+fn names_the_old_program(line: &str) -> bool {
+    if line.contains("Modified by the local-resource-coordinator fork, ") {
+        return false;
+    }
+    let rest = line
+        .replace(ATTRIBUTION, "")
+        .replace("upstream's or to `cargo install qex`", "")
+        .replace("stephenc/qex", "")
+        .replace("github.com/qex/schema", "");
+    rest.to_lowercase().contains("qex")
+}
+
+fn rust_files_under(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+    let entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("the gate must read {}: {e}", dir.display()));
+    for entry in entries {
+        let path = entry.expect("each directory entry must be readable").path();
+        if path.is_dir() {
+            rust_files_under(&path, found);
+        } else if path.extension().is_some_and(|x| x == "rs") {
+            found.push(path);
+        }
+    }
+}
+
+/// No shipped page and no line of the program's source names the program qex.
+#[test]
+fn no_shipped_page_names_the_program_qex() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut sources = Vec::new();
+    rust_files_under(&root.join("src"), &mut sources);
+    assert!(
+        sources.len() >= 44,
+        "the gate must read every .rs file under src/, and it found {}",
+        sources.len()
+    );
+    let build = root.join("build.rs");
+
+    let mut misses = Vec::new();
+    for file in shipped_pages().iter().chain(&sources).chain([&build]) {
+        let text = std::fs::read_to_string(file)
+            .unwrap_or_else(|e| panic!("the gate must read {}: {e}", file.display()));
+        for (n, line) in text.lines().enumerate() {
+            if names_the_old_program(line) {
+                misses.push(format!("{}:{}: {line}", file.display(), n + 1));
+            }
+        }
+    }
+    assert!(
+        misses.is_empty(),
+        "the program is named fairq, and these lines name it qex:\n{}",
+        misses.join("\n")
+    );
+}
+
+/// The front pages say where fairq comes from, as the licence of the fork asks.
+#[test]
+fn the_readme_names_the_project_that_fairq_comes_from() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for page in ["README.md", "docs/index.md"] {
+        let text = std::fs::read_to_string(root.join(page))
+            .unwrap_or_else(|e| panic!("the test must read {page}: {e}"));
+        assert!(
+            text.lines().any(|l| l == ATTRIBUTION),
+            "{page} must hold this sentence on one line: {ATTRIBUTION}"
+        );
+    }
+}
+
+/// The items of a list that the program prints after `marker`, separated by commas.
+fn listed_after(text: &str, marker: &str, end: &str) -> Vec<String> {
+    let line = text
+        .lines()
+        .find_map(|l| l.split_once(marker).map(|(_, rest)| rest))
+        .unwrap_or_else(|| panic!("no line holds `{marker}`:\n{text}"));
+    let list = line.split(end).next().unwrap_or_default();
+    list.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// No help page, completion or schema that the program prints names it qex.
+#[test]
+fn no_help_page_of_the_program_names_qex() {
+    let h = Harness::with_default_config("help-names");
+    let mut outputs: Vec<(String, String)> = Vec::new();
+
+    let top = h.ok(&["--help"]);
+    let commands: Vec<String> = top
+        .lines()
+        .skip_while(|l| !l.starts_with("Commands:"))
+        .skip(1)
+        .take_while(|l| !l.trim().is_empty())
+        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+        .collect();
+    assert!(
+        commands.len() >= 25,
+        "the Commands section of --help must list every command, and it gave {commands:?}"
+    );
+    outputs.push(("--help".into(), top));
+    for command in &commands {
+        outputs.push((
+            format!("{command} --help"),
+            h.ok(&[command.as_str(), "--help"]),
+        ));
+    }
+
+    let help = h.ok(&["help"]);
+    let topics = listed_after(&help, "Topics for `fairq help <topic>`:", "\n");
+    assert!(
+        topics.len() >= 12,
+        "`help` must list the topics, and it gave {topics:?}"
+    );
+    outputs.push(("help".into(), help));
+    for topic in &topics {
+        outputs.push((format!("help {topic}"), h.ok(&["help", topic.as_str()])));
+    }
+
+    let shells = listed_after(&h.ok(&["completions", "--help"]), "[possible values:", "]");
+    assert!(
+        shells.len() >= 5,
+        "`completions --help` must list the shells, and it gave {shells:?}"
+    );
+    for shell in &shells {
+        outputs.push((
+            format!("completions {shell}"),
+            h.ok(&["completions", shell.as_str()]),
+        ));
+    }
+
+    let refused = h.fairq(&["schema"]);
+    let schemas = listed_after(
+        &String::from_utf8_lossy(&refused.stderr),
+        "The schemas are:",
+        "\n",
+    );
+    assert!(
+        schemas.len() >= 4,
+        "`schema` must list the schemas, and it gave {schemas:?}"
+    );
+    for schema in &schemas {
+        outputs.push((
+            format!("schema {schema}"),
+            h.ok(&["schema", schema.as_str()]),
+        ));
+    }
+
+    for (args, text) in &outputs {
+        assert!(!text.is_empty(), "`fairq {args}` printed nothing");
+        for line in text.lines() {
             assert!(
-                !text.contains(word),
-                "{} names `{word}` ({what}). fairq limits no job, so no shipped word may \
-                 promise that it does.",
-                page.display()
+                !names_the_old_program(line),
+                "`fairq {args}` names the program qex: {line}"
             );
         }
+    }
+
+    for args in [&["--version"][..], &["version"][..]] {
+        let out = h.ok(args);
+        let first = out.lines().next().unwrap_or_default();
+        let version = first.strip_prefix("fairq ").unwrap_or_else(|| {
+            panic!(
+                "`fairq {}` must start with `fairq <version>`: {first}",
+                args.join(" ")
+            )
+        });
+        assert!(
+            !version.trim().is_empty() && !version.contains(' '),
+            "`fairq {}` must print `fairq <version>` first: {first}",
+            args.join(" ")
+        );
     }
 }
 
