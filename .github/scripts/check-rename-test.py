@@ -45,6 +45,7 @@ def apply(repo, spec):
             f.write(data)
         g(repo, "add", "--", path)
         if kind == EXEC:
+            os.chmod(full, 0o755)
             g(repo, "update-index", "--chmod=+x", "--", path)
 
 
