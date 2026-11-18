@@ -132,6 +132,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "fairq"
+version = "0.0.0-dev"
+dependencies = [
+ "anyhow",
+ "clap",
+ "clap_complete",
+ "libc",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "toml",
+ "uuid",
+]
+
+[[package]]
 name = "futures-core"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -248,21 +263,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "qex"
-version = "0.0.0-dev"
-dependencies = [
- "anyhow",
- "clap",
- "clap_complete",
- "libc",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "toml",
- "uuid",
 ]
 
 [[package]]
