@@ -43,6 +43,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-16: three tests that qex gc names a directory with no record that it could not remove, in its text and its JSON, with no control byte (issue #194).
 // Modified by the local-resource-coordinator fork, 2026-11-17: five tests that qex gc leaves the directory of a Submit in progress, leaves what an earlier coordinator cannot vouch for, asks in parts, removes what a killed coordinator left and stops on another answer (issue #200).
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+// Modified by the local-resource-coordinator fork, 2026-11-18: four tests that gc, clean, list and a command that names a job pass on a coordinator's refusal of the job list (issue #205).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -25885,8 +25886,19 @@ struct ARecordingCoordinator {
 impl ARecordingCoordinator {
     const BUILD: &'static str = "11111111-0000-4000-8000-000000000001";
     const TEST: &'static str = "22222222-0000-4000-8000-000000000002";
+    const REFUSAL: &'static str = "the coordinator of the test refuses the job list";
 
     fn new(name: &str, capabilities: &'static [&'static str]) -> Self {
+        Self::start(name, capabilities, false)
+    }
+
+    /// The same coordinator, but it answers each `list` request with an error
+    /// that carries [`Self::REFUSAL`].
+    fn refusing_list(name: &str, capabilities: &'static [&'static str]) -> Self {
+        Self::start(name, capabilities, true)
+    }
+
+    fn start(name: &str, capabilities: &'static [&'static str], refuse_list: bool) -> Self {
         use std::io::{BufRead, BufReader, Write};
 
         let root = std::env::temp_dir().join(format!("qx{name}{}", std::process::id()));
@@ -25935,6 +25947,9 @@ impl ARecordingCoordinator {
                             }),
                             "capabilities" => serde_json::json!({
                                 "result": "capabilities", "names": capabilities,
+                            }),
+                            "list" if refuse_list => serde_json::json!({
+                                "result": "error", "kind": "internal", "message": Self::REFUSAL,
                             }),
                             "list" => serde_json::json!({ "result": "jobs", "jobs": jobs }),
                             "status" => {
@@ -26179,6 +26194,82 @@ fn an_earlier_coordinator_gets_the_earlier_requests() {
         ops.iter().any(|op| op == "list") && ops.iter().filter(|op| *op == "cancel").count() == 2,
         "the earlier requests must do the work: {ops:?}"
     );
+}
+
+/// When the coordinator refuses the job list, `fairq gc` says why: it passes the coordinator's
+/// own text on, as `fairq list` does (#205).
+#[test]
+fn gc_passes_on_why_the_coordinator_refused_the_job_list() {
+    let c = ARecordingCoordinator::refusing_list("gclist", &["free-ids"]);
+
+    let out = c.fairq(&["gc", "--older-than", "1h"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(1),
+            String::new(),
+            format!("fairq: {}\n", ARecordingCoordinator::REFUSAL)
+        )
+    );
+    assert!(c.ops().iter().any(|op| op == "list"), "{:?}", c.ops());
+}
+
+/// When the coordinator refuses the job list, `fairq clean` says why (#205).
+#[test]
+fn clean_passes_on_why_the_coordinator_refused_the_job_list() {
+    // With no `resolve`, a deletion that names a record reads the whole list.
+    let c = ARecordingCoordinator::refusing_list("cleanlist", &["locks", "retries"]);
+
+    let out = c.fairq(&["clean", "11111111"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(1),
+            String::new(),
+            format!("fairq: {}\n", ARecordingCoordinator::REFUSAL)
+        )
+    );
+    assert!(c.ops().iter().any(|op| op == "list"), "{:?}", c.ops());
+}
+
+/// When a coordinator with no `query` refuses the job list, `fairq list` says why, as it does
+/// when the `query` request is refused (#205).
+#[test]
+fn list_passes_on_why_an_earlier_coordinator_refused_the_job_list() {
+    let c = ARecordingCoordinator::refusing_list("listlist", &["locks", "retries"]);
+
+    let out = c.fairq(&["list"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(1),
+            String::new(),
+            format!("fairq: {}\n", ARecordingCoordinator::REFUSAL)
+        )
+    );
+    assert!(c.ops().iter().any(|op| op == "list"), "{:?}", c.ops());
+}
+
+/// When a coordinator with no `resolve` refuses the job list, a command that names a job says
+/// why. The code stays the one that every resolver fault gives (#205).
+#[test]
+fn a_command_that_names_a_job_passes_on_why_the_job_list_was_refused() {
+    let c = ARecordingCoordinator::refusing_list("statuslist", &["locks", "retries"]);
+
+    let out = c.fairq(&["status", "build"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(127),
+            String::new(),
+            format!("fairq: {}\n", ARecordingCoordinator::REFUSAL)
+        )
+    );
+    assert!(c.ops().iter().any(|op| op == "list"), "{:?}", c.ops());
 }
 
 /// A job that stopped leaves the memory of the coordinator, and every command
