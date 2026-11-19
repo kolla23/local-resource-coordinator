@@ -7,6 +7,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-16: qex gc names each directory with no record that it could not remove, counts only what it removed, and gives the code 1 (issue #194).
 // Modified by the local-resource-coordinator fork, 2026-11-17: qex gc asks the coordinator which ids are free before it removes a directory with no record, so a Submit in progress keeps its directory (issue #200).
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+// Modified by the local-resource-coordinator fork, 2026-11-18: fairq gc, clean, list and a command that names a job pass on the coordinator's text when it refuses the job list (issue #205).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -705,6 +706,16 @@ fn partial_fan_out(what: &str, group: uuid::Uuid, submitted: &[(String, uuid::Uu
 /// not print them all for a reader who asks what operates.
 const LIST_RECENT_AGE: u64 = 3600;
 
+/// Asks the coordinator for every record. A refusal comes back with the coordinator's own
+/// text, as the `query` request's does (#205).
+fn job_list(client: &mut Client) -> Result<Vec<JobStatus>> {
+    match client.call(&Request::List)? {
+        Response::Jobs { jobs } => Ok(jobs),
+        Response::Error { message, .. } => bail!("{message}"),
+        _ => bail!("the coordinator did not give the job list"),
+    }
+}
+
 /// Gives the jobs that a filter keeps: the rows, or the full records when the
 /// filter asks for them, then the count that the limit left out and the count
 /// that the age left out.
@@ -732,9 +743,7 @@ fn query_jobs(
         };
     }
 
-    let Response::Jobs { mut jobs } = client.call(&Request::List)? else {
-        bail!("the coordinator did not give the job list");
-    };
+    let mut jobs = job_list(client)?;
     let state =
         crate::resolve::state_filter(&filter).map_err(|e| anyhow::anyhow!("--state: {e}"))?;
     let now = crate::sys::now_secs();
@@ -3547,9 +3556,7 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
         return Ok(worst);
     }
 
-    let Response::Jobs { jobs } = client.call(&Request::List)? else {
-        bail!("the coordinator did not give the job list");
-    };
+    let jobs = job_list(&mut client)?;
 
     let now = crate::sys::now_secs();
     // A job that a job in the queue still needs is not finished for the purpose
@@ -3998,9 +4005,7 @@ fn expand_ids(raws: &[String]) -> Result<Vec<String>> {
 /// the same, and only slower, so the reader gets no message about it.
 fn resolve_many(client: &mut Client, raws: &[String]) -> Result<Vec<Result<Targets>>> {
     if !client.can("resolve")? {
-        let Response::Jobs { jobs } = client.call(&Request::List)? else {
-            bail!("the coordinator did not give the job list");
-        };
+        let jobs = job_list(client)?;
         return Ok(raws
             .iter()
             .map(|raw| resolve_targets_in(&jobs, raw))
@@ -6796,9 +6801,7 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
 
     let now = crate::sys::now_secs();
     let mut client = Client::connect()?;
-    let Response::Jobs { jobs } = client.call(&Request::List)? else {
-        bail!("the coordinator did not give the job list");
-    };
+    let jobs = job_list(&mut client)?;
 
     let held = held_by_unfinished(&jobs);
     let mut held_back = 0usize;
