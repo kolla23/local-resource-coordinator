@@ -1,6 +1,7 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test record sets the new pid_ns fields (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+// Modified by the local-resource-coordinator fork, 2026-11-19: fairq top passes on the coordinator's text when it refuses the query or the job list (issue #212).
 //! This module holds the `fairq top` command.
 //!
 //! The command shows the queue and refreshes it. For each job it shows the
@@ -1438,14 +1439,12 @@ fn read_the_queue(
             filter: Box::new(filter),
         })? {
             Response::Found { jobs, older, .. } => (jobs, older),
+            Response::Error { message, .. } => bail!("{message}"),
             _ => bail!("the coordinator did not give the job list"),
         }
     } else {
         // An earlier coordinator has no filter, and it gives every record.
-        let Response::Jobs { jobs } = client.call(&Request::List)? else {
-            bail!("the coordinator did not give the job list");
-        };
-        (jobs, 0)
+        (crate::commands::job_list(client)?, 0)
     };
     jobs.sort_by_key(|j| (j.submitted_at, j.sequence));
     let info = client.call(&Request::Info)?;
