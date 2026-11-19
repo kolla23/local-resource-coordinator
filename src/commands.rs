@@ -8,6 +8,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-17: qex gc asks the coordinator which ids are free before it removes a directory with no record, so a Submit in progress keeps its directory (issue #200).
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 // Modified by the local-resource-coordinator fork, 2026-11-18: fairq gc, clean, list and a command that names a job pass on the coordinator's text when it refuses the job list (issue #205).
+// Modified by the local-resource-coordinator fork, 2026-11-19: a command that names a job passes on the coordinator's text when it refuses the resolve request, and fairq top can call job_list (issue #212).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -708,7 +709,7 @@ const LIST_RECENT_AGE: u64 = 3600;
 
 /// Asks the coordinator for every record. A refusal comes back with the coordinator's own
 /// text, as the `query` request's does (#205).
-fn job_list(client: &mut Client) -> Result<Vec<JobStatus>> {
+pub fn job_list(client: &mut Client) -> Result<Vec<JobStatus>> {
     match client.call(&Request::List)? {
         Response::Jobs { jobs } => Ok(jobs),
         Response::Error { message, .. } => bail!("{message}"),
@@ -4015,8 +4016,10 @@ fn resolve_many(client: &mut Client, raws: &[String]) -> Result<Vec<Result<Targe
     let request = Request::Resolve {
         handles: raws.to_vec(),
     };
-    let Response::Resolved { found } = client.call(&request)? else {
-        bail!("the coordinator did not read the ids");
+    let found = match client.call(&request)? {
+        Response::Resolved { found } => found,
+        Response::Error { message, .. } => bail!("{message}"),
+        _ => bail!("the coordinator did not read the ids"),
     };
     if found.len() != raws.len() {
         bail!("the coordinator did not give one answer for each id");
