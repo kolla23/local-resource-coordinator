@@ -45,6 +45,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 // Modified by the local-resource-coordinator fork, 2026-11-18: four tests that gc, clean, list and a command that names a job pass on a coordinator's refusal of the job list (issue #205).
 // Modified by the local-resource-coordinator fork, 2026-11-19: three tests that fairq top and a command that names a job pass on a coordinator's refusal of a query, the job list or the ids, and one that top shows an earlier coordinator's list; the test coordinator refuses the requests that a test names (issue #212).
+// Modified by the local-resource-coordinator fork, 2026-11-19: tests that a refusal of the coordinator gives the fault code of the command and 127 only for an answer about the id, that pause --drain and top pass on a refused info, that top then keeps the jobs of the coordinator, and that top --once gives 124 for a time limit only; that pause --drain gives 124 when the coordinator goes silent and says when it closes the connection; the test coordinator can refuse info and capabilities, go silent or close the connection, also after a named request, and answers pause (issues #213, #218 and #219).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -23494,7 +23495,7 @@ fn a_wait_does_not_take_the_spawn_lock_for_a_notice() {
     );
 }
 
-/// `fairq top --once` is a QUERY, and a query that fairq could not answer gives 124.
+/// `fairq top --once` is a QUERY, and a query that got no answer inside the limit gives 124.
 ///
 /// The page that a person watches keeps drawing and gives 0, because a display
 /// that drew did its work. An agent scripts `--once`, and 0 from a query says
@@ -23528,7 +23529,7 @@ fn a_page_that_fairq_could_not_fill_gives_124_for_a_query() {
     assert_eq!(
         out.status.code(),
         Some(124),
-        "a query that fairq could not answer gives 124: {}",
+        "a query that got no answer inside the limit gives 124: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     // The page is still there. The two forms write one page, and a reader who
@@ -23548,8 +23549,8 @@ fn a_page_that_fairq_could_not_fill_gives_124_for_a_query() {
 /// NO COORDINATOR IS AN ANSWER, and it gives 0.
 ///
 /// The records on the disk describe a machine with no coordinator, so the page
-/// is true and the query succeeded. Only a coordinator that fairq could not reach
-/// gives 124.
+/// is true and the query succeeded. Only a coordinator that gave no answer
+/// inside the limit gives 124.
 #[test]
 fn a_page_with_no_coordinator_gives_zero_for_a_query() {
     let h = Harness::with_default_config("topnocoord");
@@ -23563,6 +23564,33 @@ fn a_page_with_no_coordinator_gives_zero_for_a_query() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(String::from_utf8_lossy(&out.stdout).contains("budget"));
+}
+
+/// A state directory that fairq refuses is no time limit, so the query gives 1 and not 124
+/// (#219). The page is still written, and the cause reaches the reader.
+#[test]
+fn a_page_behind_a_refused_state_directory_gives_1_for_a_query() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Harness::with_default_config("toprefused");
+    let state = h.root.join("state");
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+    let out = h.fairq_within(&["top", "--once"], Duration::from_secs(30));
+
+    // The harness asks `info --no-start` when it cannot see the processes.
+    std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("budget"));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("fairq will not use"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// `fairq top` measures a job process whose command name is not UTF-8 (#131).
@@ -23815,6 +23843,29 @@ fn a_coordinator_that_answers_nothing_is_not_no_such_job() {
             out.status.code(),
             Some(127),
             "`fairq {}` said that a job does not exist, and the coordinator gave no answer: {}",
+            form.join(" "),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+/// The resolver of ids keeps the code 124 for a coordinator that did not answer: `status` and
+/// `logs` report that fault themselves, with the rule that `main` uses (#213).
+#[test]
+fn a_coordinator_that_answers_nothing_gives_124_to_a_command_that_names_a_job() {
+    let mut h = Harness::with_default_config("resolverlimit");
+    h.extra_env
+        .push((fairq_ceiling_variable(), "3".to_string()));
+    let run = h.root.join("state/fairq/run");
+    std::fs::create_dir_all(&run).unwrap();
+    let _silent = a_socket_that_accepts_and_says_nothing(&run.join("s"));
+
+    for form in [vec!["status", "abc"], vec!["logs", "abc"]] {
+        let out = h.fairq_within(&form, Duration::from_secs(60));
+        assert_eq!(
+            out.status.code(),
+            Some(124),
+            "`fairq {}`: {}",
             form.join(" "),
             String::from_utf8_lossy(&out.stderr)
         );
@@ -25874,6 +25925,15 @@ fn a_silent_coordinator_is_named_when_it_used_the_limit() {
     );
 }
 
+/// What the coordinator of the test does with a request it does not answer: it refuses
+/// with [`ARecordingCoordinator::REFUSAL`], says nothing, or closes the connection.
+#[derive(Clone, Copy)]
+enum Fault {
+    Refuse,
+    Silent,
+    Close,
+}
+
 /// A coordinator of the test that records each request, and that answers like
 /// a version with the capabilities that the test gives.
 ///
@@ -25905,6 +25965,18 @@ impl ARecordingCoordinator {
         name: &str,
         capabilities: &'static [&'static str],
         refused: &'static [&'static str],
+    ) -> Self {
+        Self::refusing_after(name, capabilities, refused, None, Fault::Refuse)
+    }
+
+    /// The same coordinator, but it meets `refused` with `fault`, and only once a request with
+    /// the op `after` arrived: a command that reads `info` before its own request gets that far.
+    fn refusing_after(
+        name: &str,
+        capabilities: &'static [&'static str],
+        refused: &'static [&'static str],
+        after: Option<&'static str>,
+        fault: Fault,
     ) -> Self {
         use std::io::{BufRead, BufReader, Write};
 
@@ -25943,9 +26015,26 @@ impl ARecordingCoordinator {
                         let Ok(line) = line else { return };
                         let request: serde_json::Value = serde_json::from_str(&line).unwrap();
                         let op = request["op"].as_str().unwrap_or("").to_string();
+                        let armed = after.is_none_or(|a| {
+                            seen.lock().unwrap().iter().any(|l: &String| {
+                                serde_json::from_str::<serde_json::Value>(l).unwrap()["op"] == a
+                            })
+                        });
                         seen.lock().unwrap().push(line.clone());
                         let can = |c: &str| capabilities.contains(&c);
                         let answer = match op.as_str() {
+                            op if armed && refused.contains(&op) => match fault {
+                                Fault::Refuse => serde_json::json!({
+                                    "result": "error", "kind": "internal",
+                                    "message": Self::REFUSAL,
+                                }),
+                                Fault::Silent => {
+                                    // Longer than the ceiling that the row gives fairq.
+                                    std::thread::sleep(Duration::from_secs(60));
+                                    return;
+                                }
+                                Fault::Close => return,
+                            },
                             "info" => serde_json::json!({
                                 "result": "info", "pid": 4321,
                                 "version": env!("CARGO_PKG_VERSION"),
@@ -25954,9 +26043,6 @@ impl ARecordingCoordinator {
                             }),
                             "capabilities" => serde_json::json!({
                                 "result": "capabilities", "names": capabilities,
-                            }),
-                            op if refused.contains(&op) => serde_json::json!({
-                                "result": "error", "kind": "internal", "message": Self::REFUSAL,
                             }),
                             "list" => serde_json::json!({ "result": "jobs", "jobs": jobs }),
                             "status" => {
@@ -26030,6 +26116,11 @@ impl ARecordingCoordinator {
                             }
                             "pause_state" => serde_json::json!({
                                 "result": "pause_state", "queue": null, "locks": [],
+                            }),
+                            "pause" if can("pause") => serde_json::json!({
+                                "result": "pause_state", "queue": null, "locks": [],
+                                "pauses": [],
+                                "receipt": {"pause_id": "p1", "created": true, "until": null},
                             }),
                             _ => serde_json::json!({
                                 "result": "error", "kind": "internal",
@@ -26261,7 +26352,7 @@ fn list_passes_on_why_an_earlier_coordinator_refused_the_job_list() {
 }
 
 /// When a coordinator with no `resolve` refuses the job list, a command that names a job says
-/// why. The code stays the one that every resolver fault gives (#205).
+/// why (#205). A refusal says nothing about the job, so the code is 121 and not 127 (#213).
 #[test]
 fn a_command_that_names_a_job_passes_on_why_the_job_list_was_refused() {
     let c = ARecordingCoordinator::refusing_list("statuslist", &["locks", "retries"]);
@@ -26271,7 +26362,7 @@ fn a_command_that_names_a_job_passes_on_why_the_job_list_was_refused() {
     assert_eq!(
         code_and_streams(&out),
         (
-            Some(127),
+            Some(121),
             String::new(),
             format!("fairq: {}\n", ARecordingCoordinator::REFUSAL)
         )
@@ -26280,7 +26371,7 @@ fn a_command_that_names_a_job_passes_on_why_the_job_list_was_refused() {
 }
 
 /// When a coordinator with `resolve` refuses the `resolve` request, a command that names a job
-/// says why, with the code that every resolver fault gives (#212).
+/// says why (#212), with the code 121 of a command that speaks for a job (#213).
 #[test]
 fn a_command_that_names_a_job_passes_on_why_the_ids_were_refused() {
     let c = ARecordingCoordinator::refusing("statusresolve", &["resolve"], &["resolve"]);
@@ -26290,7 +26381,7 @@ fn a_command_that_names_a_job_passes_on_why_the_ids_were_refused() {
     assert_eq!(
         code_and_streams(&out),
         (
-            Some(127),
+            Some(121),
             String::new(),
             format!("fairq: {}\n", ARecordingCoordinator::REFUSAL)
         )
@@ -26298,8 +26389,124 @@ fn a_command_that_names_a_job_passes_on_why_the_ids_were_refused() {
     assert!(c.ops().iter().any(|op| op == "resolve"), "{:?}", c.ops());
 }
 
-/// When the coordinator refuses the `query` request, `fairq top --once` says why, and its code
-/// says the page holds the disk alone (#212).
+/// `fairq rerun` speaks for a job too, so a refused `resolve` gives 121 there as well (#213).
+#[test]
+fn rerun_gives_121_when_the_ids_were_refused() {
+    let c = ARecordingCoordinator::refusing("rerunresolve", &["resolve"], &["resolve"]);
+
+    let out = c.fairq(&["rerun", "build"]);
+
+    // A development build of the coordinator gets a warning first; the refusal is the last line.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        (out.status.code(), stderr.lines().last()),
+        (
+            Some(121),
+            Some(format!("fairq: {}", ARecordingCoordinator::REFUSAL).as_str())
+        ),
+        "{stderr}"
+    );
+    assert!(c.ops().iter().any(|op| op == "resolve"), "{:?}", c.ops());
+}
+
+/// `fairq logs` never speaks for a job, so a refused `resolve` gives 1 there (#213).
+#[test]
+fn logs_gives_1_when_the_ids_were_refused() {
+    let c = ARecordingCoordinator::refusing("logsresolve", &["resolve"], &["resolve"]);
+
+    let out = c.fairq(&["logs", "build"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(1),
+            String::new(),
+            format!("fairq: {}\n", ARecordingCoordinator::REFUSAL)
+        )
+    );
+    assert!(c.ops().iter().any(|op| op == "resolve"), "{:?}", c.ops());
+}
+
+/// `fairq cancel` never speaks for a job, so a refused `resolve` gives 1 there (#213).
+#[test]
+fn cancel_gives_1_when_the_ids_were_refused() {
+    let c = ARecordingCoordinator::refusing("cancelresolve", &["resolve"], &["resolve"]);
+
+    let out = c.fairq(&["cancel", "build"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(1),
+            String::new(),
+            format!("fairq: {}\n", ARecordingCoordinator::REFUSAL)
+        )
+    );
+    assert!(c.ops().iter().any(|op| op == "resolve"), "{:?}", c.ops());
+}
+
+/// `fairq kill` never speaks for a job, so a refused `resolve` gives 1 there (#213).
+#[test]
+fn kill_gives_1_when_the_ids_were_refused() {
+    let c = ARecordingCoordinator::refusing("killresolve", &["resolve"], &["resolve"]);
+
+    let out = c.fairq(&["kill", "build"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(1),
+            String::new(),
+            format!("fairq: {}\n", ARecordingCoordinator::REFUSAL)
+        )
+    );
+    assert!(c.ops().iter().any(|op| op == "resolve"), "{:?}", c.ops());
+}
+
+/// The control of the rows above: when the coordinator ANSWERS that no job has the name, the
+/// code stays 127 (#213).
+#[test]
+fn a_name_that_the_coordinator_does_not_know_still_gives_127() {
+    let c = ARecordingCoordinator::new("statusnosuch", &["resolve"]);
+
+    let out = c.fairq(&["status", "nosuch"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(127),
+            String::new(),
+            "fairq: there is no job or pipeline with the id or the name `nosuch`\n".to_string()
+        )
+    );
+    assert!(c.ops().iter().any(|op| op == "resolve"), "{:?}", c.ops());
+}
+
+/// The same control for a coordinator with no `resolve`: fairq reads the job list itself, and
+/// a name that the list does not hold still gives 127 (#213).
+#[test]
+fn a_name_that_an_earlier_coordinator_does_not_know_still_gives_127() {
+    let c = ARecordingCoordinator::new("statusnosuchlist", &["locks", "retries"]);
+
+    let out = c.fairq(&["status", "nosuch"]);
+
+    assert_eq!(
+        code_and_streams(&out),
+        (
+            Some(127),
+            String::new(),
+            "fairq: there is no job or pipeline with the id or the name `nosuch`\n".to_string()
+        )
+    );
+    let ops = c.ops();
+    assert!(
+        ops.iter().any(|op| op == "list") && !ops.iter().any(|op| op == "resolve"),
+        "{ops:?}"
+    );
+}
+
+/// When the coordinator refuses the `query` request, `fairq top --once` says why (#212). A
+/// refusal is an answer and not a time limit, so the code is 1 and not 124 (#219).
 #[test]
 fn top_passes_on_why_the_coordinator_refused_the_query() {
     let c = ARecordingCoordinator::refusing("topquery", &["query"], &["query"]);
@@ -26309,14 +26516,15 @@ fn top_passes_on_why_the_coordinator_refused_the_query() {
     assert_eq!(
         (out.status.code(), String::from_utf8_lossy(&out.stderr)),
         (
-            Some(124),
+            Some(1),
             format!("fairq: {}\n", ARecordingCoordinator::REFUSAL).into()
         )
     );
     assert!(c.ops().iter().any(|op| op == "query"), "{:?}", c.ops());
 }
 
-/// When a coordinator with no `query` refuses the job list, `fairq top --once` says why (#212).
+/// When a coordinator with no `query` refuses the job list, `fairq top --once` says why (#212),
+/// with the code 1 of a refusal (#219).
 #[test]
 fn top_passes_on_why_an_earlier_coordinator_refused_the_job_list() {
     let c = ARecordingCoordinator::refusing_list("toplist", &["locks", "retries"]);
@@ -26326,11 +26534,154 @@ fn top_passes_on_why_an_earlier_coordinator_refused_the_job_list() {
     assert_eq!(
         (out.status.code(), String::from_utf8_lossy(&out.stderr)),
         (
-            Some(124),
+            Some(1),
             format!("fairq: {}\n", ARecordingCoordinator::REFUSAL).into()
         )
     );
     assert!(c.ops().iter().any(|op| op == "list"), "{:?}", c.ops());
+}
+
+/// When the coordinator refuses the `info` request, `fairq top --once` says why and gives the
+/// code 1 of a refusal (#218, #219).
+#[test]
+fn top_passes_on_why_the_coordinator_refused_the_info() {
+    let c = ARecordingCoordinator::refusing("topinfo", &["query"], &["info"]);
+
+    let out = c.fairq(&["top", "--once"]);
+
+    assert_eq!(
+        (out.status.code(), String::from_utf8_lossy(&out.stderr)),
+        (
+            Some(1),
+            format!("fairq: {}\n", ARecordingCoordinator::REFUSAL).into()
+        )
+    );
+    let ops = c.ops();
+    assert!(
+        ops.iter().any(|op| op == "query") && ops.iter().any(|op| op == "info"),
+        "{ops:?}"
+    );
+}
+
+/// When the coordinator gives its jobs and refuses the `info` request, the page of `fairq top
+/// --once` still names those jobs, and fairq says why and gives the code 1 (#218).
+#[test]
+fn top_keeps_the_jobs_of_the_coordinator_when_it_refused_the_info() {
+    // A coordinator with no `query` gives whole records in its `list`, the names included.
+    let c = ARecordingCoordinator::refusing("topinfojobs", &["locks", "retries"], &["info"]);
+
+    let out = c.fairq(&["top", "--once", "--no-color"]);
+
+    let page = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        (out.status.code(), String::from_utf8_lossy(&out.stderr)),
+        (
+            Some(1),
+            format!("fairq: {}\n", ARecordingCoordinator::REFUSAL).into()
+        ),
+        "{page}"
+    );
+    assert!(page.contains("build") && page.contains("test"), "{page}");
+    let ops = c.ops();
+    assert!(
+        ops.iter().any(|op| op == "list") && ops.iter().any(|op| op == "info"),
+        "{ops:?}"
+    );
+}
+
+/// When the coordinator refuses the `info` request, `fairq pause --drain` says why, and not a
+/// fixed sentence that fits a lost connection as well (#218).
+#[test]
+fn pause_drain_passes_on_why_the_coordinator_refused_the_info() {
+    let c = ARecordingCoordinator::refusing_after(
+        "draininfo",
+        &["pause", "pause-requests"],
+        &["info"],
+        Some("pause"),
+        Fault::Refuse,
+    );
+
+    let out = c.fairq(&["pause", "queue", "--drain"]);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        (out.status.code(), stderr.lines().last()),
+        (
+            Some(1),
+            Some(format!("fairq: {}", ARecordingCoordinator::REFUSAL).as_str())
+        ),
+        "{stderr}"
+    );
+    let ops = c.ops();
+    assert!(
+        ops.iter().any(|op| op == "pause") && ops.iter().any(|op| op == "info"),
+        "{ops:?}"
+    );
+}
+
+/// When the coordinator goes silent on `info` after the pause, `fairq pause --drain` gives
+/// the 124 of a time limit and says so, not 1 and a fixed sentence (#218).
+#[test]
+fn pause_drain_gives_124_when_the_coordinator_goes_silent_on_the_info() {
+    let c = ARecordingCoordinator::refusing_after(
+        "drainsilent",
+        &["pause", "pause-requests"],
+        &["info"],
+        Some("pause"),
+        Fault::Silent,
+    );
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_fairq"));
+    cmd.args(["pause", "queue", "--drain"]);
+    isolate(&mut cmd, &c.root, &c.root.join("peers"));
+    cmd.env(fairq_ceiling_variable(), "3");
+
+    let out = cmd.output().expect("fairq did not start");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(124), "{stderr}");
+    assert!(
+        stderr.contains("took the request and gave no answer in 3.0 seconds"),
+        "{stderr}"
+    );
+    let ops = c.ops();
+    assert!(
+        ops.iter()
+            .skip_while(|op| *op != "pause")
+            .any(|op| op == "info"),
+        "{ops:?}"
+    );
+}
+
+/// When the coordinator closes the connection on `info` after the pause, `fairq pause --drain`
+/// says so, with the code 1, and not a fixed sentence (#218).
+#[test]
+fn pause_drain_says_when_the_coordinator_closes_the_connection_on_the_info() {
+    let c = ARecordingCoordinator::refusing_after(
+        "drainclose",
+        &["pause", "pause-requests"],
+        &["info"],
+        Some("pause"),
+        Fault::Close,
+    );
+
+    let out = c.fairq(&["pause", "queue", "--drain"]);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        (out.status.code(), stderr.lines().last()),
+        (
+            Some(1),
+            Some("fairq: the coordinator closed the connection without an answer")
+        ),
+        "{stderr}"
+    );
+    let ops = c.ops();
+    assert!(
+        ops.iter()
+            .skip_while(|op| *op != "pause")
+            .any(|op| op == "info"),
+        "{ops:?}"
+    );
 }
 
 /// When a coordinator with no `query` gives the job list, `fairq top --once` shows its jobs
