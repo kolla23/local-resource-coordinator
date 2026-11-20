@@ -9,6 +9,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 // Modified by the local-resource-coordinator fork, 2026-11-18: fairq gc, clean, list and a command that names a job pass on the coordinator's text when it refuses the job list (issue #205).
 // Modified by the local-resource-coordinator fork, 2026-11-19: a command that names a job passes on the coordinator's text when it refuses the resolve request, and fairq top can call job_list (issue #212).
+// Modified by the local-resource-coordinator fork, 2026-11-19: a resolver fault gives 127 only for an answer about the id and the fault code of the command for a refusal, and fairq pause --drain passes on why the coordinator refused (issues #213, #218 and #219).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -104,11 +105,30 @@ pub const EXIT_NO_SUCH_JOB: i32 = 127;
 /// kind. To answer 127 for a job that OPERATES tells the caller that its work
 /// does not exist, and the caller then stops watching a job that continues.
 fn code_for_a_resolver_error(error: &anyhow::Error) -> i32 {
-    if crate::client::is_a_coordinator_timeout(error) {
-        EXIT_TIMEOUT
-    } else {
+    // A refusal, like a missing answer, proves nothing about the job (#213).
+    if error.downcast_ref::<AnswerOfTheRules>().is_some() {
         EXIT_NO_SUCH_JOB
+    } else {
+        crate::code_for_a_fault(error)
     }
+}
+
+/// Marks an error that is the ANSWER OF THE RULES about an id: it names no job, or more than
+/// this command takes. The mark holds the whole message, as `client::ReaderLimitPassed` does.
+#[derive(Debug)]
+struct AnswerOfTheRules(String);
+
+impl std::fmt::Display for AnswerOfTheRules {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for AnswerOfTheRules {}
+
+/// Puts the mark of [`AnswerOfTheRules`] on an error, and keeps its words.
+fn answer_of_the_rules(error: anyhow::Error) -> anyhow::Error {
+    anyhow::Error::new(AnswerOfTheRules(format!("{error:#}")))
 }
 
 /// The age of a record that `fairq clean --auto` deletes.
@@ -4009,7 +4029,7 @@ fn resolve_many(client: &mut Client, raws: &[String]) -> Result<Vec<Result<Targe
         let jobs = job_list(client)?;
         return Ok(raws
             .iter()
-            .map(|raw| resolve_targets_in(&jobs, raw))
+            .map(|raw| resolve_targets_in(&jobs, raw).map_err(answer_of_the_rules))
             .collect());
     }
 
@@ -4027,7 +4047,7 @@ fn resolve_many(client: &mut Client, raws: &[String]) -> Result<Vec<Result<Targe
     Ok(found
         .into_iter()
         .map(|one| match one.error {
-            Some(text) => Err(anyhow::anyhow!("{text}")),
+            Some(text) => Err(answer_of_the_rules(anyhow::anyhow!("{text}"))),
             None => Ok(Targets::from_answer(one.jobs, one.group)),
         })
         .collect())
@@ -4049,7 +4069,7 @@ fn resolve_id(client: &mut Client, raw: &str) -> Result<uuid::Uuid> {
     if found.group.is_none() && found.ids.len() == 1 {
         return Ok(found.ids[0]);
     }
-    bail!(
+    Err(answer_of_the_rules(anyhow::anyhow!(
         "`{raw}` is a pipeline of {}, and this command takes one job. Name \
          the stage that you want:\n{}",
         count_of(found.ids.len(), "job"),
@@ -4060,7 +4080,7 @@ fn resolve_id(client: &mut Client, raw: &str) -> Result<uuid::Uuid> {
             .map(|j| format!("  {} {}", j.id, safe_name(&j.name)))
             .collect::<Vec<_>>()
             .join("\n")
-    )
+    )))
 }
 
 /// Finds a job id in the state directory, without a coordinator.
@@ -5426,10 +5446,11 @@ fn pause_report(json: bool, forensic: bool) -> Result<i32> {
 }
 
 /// Gives the number of jobs that operate now.
-fn jobs_running(client: &mut Client) -> Option<usize> {
-    match client.call(&Request::Info) {
-        Ok(Response::Info { jobs_running, .. }) => Some(jobs_running),
-        _ => None,
+fn jobs_running(client: &mut Client) -> Result<usize> {
+    match client.call(&Request::Info)? {
+        Response::Info { jobs_running, .. } => Ok(jobs_running),
+        Response::Error { message, .. } => bail!("{message}"),
+        _ => bail!("the coordinator did not give the number of jobs that operate"),
     }
 }
 
@@ -5439,10 +5460,7 @@ fn jobs_running(client: &mut Client) -> Option<usize> {
 /// tell me when it is quiet. This is the second one.
 fn drain_queue(client: &mut Client) -> Result<i32> {
     loop {
-        let Some(running) = jobs_running(client) else {
-            bail!("the coordinator did not give the number of jobs that operate");
-        };
-        if running == 0 {
+        if jobs_running(client)? == 0 {
             println!("the machine is quiet: no job of this queue operates");
             return Ok(0);
         }

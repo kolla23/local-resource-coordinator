@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: the Windows build message links this repository (issue #100).
 // Modified by the local-resource-coordinator fork, 2026-11-12: subcommand_word reads the arguments as OsString, so one that is not UTF-8 no longer panics (issue #156).
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+// Modified by the local-resource-coordinator fork, 2026-11-19: code_for_a_fault holds the exit code rule of main, so a command that reports its own fault uses the same rule (issues #213, #218 and #219).
 //! fairq — shared admission control for independent local agents.
 //!
 //! fairq is a job queue for long tasks on a local machine. It controls the
@@ -148,29 +149,28 @@ fn main() {
             // Write the cause of each error. An agent then sees the full
             // sequence and does not need to run the command a second time.
             eprintln!("fairq: {e:#}");
-            // The limit for an answer of the coordinator gives 124 in EVERY
-            // command. That code says one thing: fairq stopped waiting because it
-            // reached a limit. It is a fact about the COMMAND and not about a
-            // job, so it holds for `fairq list` and `fairq top` as much as for
-            // `fairq wait`. This takes no promise away: each of those commands
-            // waited for ever before, and gave no code at all.
-            if client::is_a_coordinator_timeout(&e) {
-                commands::EXIT_TIMEOUT
-            }
-            // A command that gives the code of a JOB must not report a fault of
-            // its own with a code from the job band. The code 1 is the most
-            // common code of a program that failed, so a `fairq run` that could
-            // not start looked exactly like a job that failed. Every other
-            // command keeps the code 1, which is conventional and unambiguous:
-            // `fairq list` never claims to speak for a job.
-            else if speaks_for_a_job(&subcommand_word()) {
-                commands::EXIT_FAIRQ_FAILED
-            } else {
-                1
-            }
+            code_for_a_fault(&e)
         }
     };
     std::process::exit(code);
+}
+
+/// Gives the exit code for a fault of fairq itself, by the command that met it. An error that
+/// reaches `main` and a fault that a command reports itself take it from here.
+#[cfg(unix)]
+fn code_for_a_fault(error: &anyhow::Error) -> i32 {
+    // A limit that ended the wait gives 124 in EVERY command: it is a fact about the COMMAND
+    // and not about a job. See `client::CoordinatorTimeout`.
+    if client::is_a_coordinator_timeout(error) {
+        commands::EXIT_TIMEOUT
+    }
+    // A command that gives the code of a JOB takes its own fault from the band, so the fault
+    // never looks like a job that failed. Every other command keeps the conventional 1.
+    else if speaks_for_a_job(&subcommand_word()) {
+        commands::EXIT_FAIRQ_FAILED
+    } else {
+        1
+    }
 }
 
 /// Writes one line when a newer release of fairq exists.

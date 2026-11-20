@@ -2,6 +2,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-03: a test record sets the new pid_ns fields (issue #115).
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 // Modified by the local-resource-coordinator fork, 2026-11-19: fairq top passes on the coordinator's text when it refuses the query or the job list (issue #212).
+// Modified by the local-resource-coordinator fork, 2026-11-19: fairq top passes on why the coordinator refused the info request, and --once gives 124 for a time limit only (issues #213, #218 and #219).
 //! This module holds the `fairq top` command.
 //!
 //! The command shows the queue and refreshes it. For each job it shows the
@@ -122,7 +123,7 @@ pub fn run(args: crate::cli::TopArgs) -> Result<i32> {
         // and the records on the disk describe it. The second means that fairq
         // could not read the state at all, and the page then shows the disk
         // alone while a coordinator holds jobs that the page does not name.
-        let mut reached = true;
+        let mut fault = None;
         // The jobs that stopped long ago, which the coordinator counts and
         // does not send. The page adds them to the jobs that it does not show.
         let mut older = 0usize;
@@ -130,21 +131,29 @@ pub fn run(args: crate::cli::TopArgs) -> Result<i32> {
             Ok(Some(mut client)) => match read_the_queue(&mut client) {
                 Ok((jobs, info, count)) => {
                     older = count;
+                    // A refused `info` leaves the jobs that the coordinator gave, so the page
+                    // keeps them, and the cause and the code say what is missing.
+                    if let Some(Response::Error { message, .. }) = &info {
+                        let e = anyhow::anyhow!("{message}");
+                        say_once(&mut said_the_cause, &e);
+                        fault = Some(crate::code_for_a_fault(&e));
+                    }
                     (jobs, info)
                 }
                 Err(e) => {
                     say_once(&mut said_the_cause, &e);
-                    reached = false;
+                    fault = Some(crate::code_for_a_fault(&e));
                     (crate::job::read_all_from_disk(), None)
                 }
             },
             Ok(None) => (crate::job::read_all_from_disk(), None),
             Err(e) => {
                 say_once(&mut said_the_cause, &e);
-                reached = false;
+                fault = Some(crate::code_for_a_fault(&e));
                 (crate::job::read_all_from_disk(), None)
             }
         };
+        let reached = fault.is_none();
 
         if args.once {
             // The CPU column is the change in the CPU time between two
@@ -167,11 +176,7 @@ pub fn run(args: crate::cli::TopArgs) -> Result<i32> {
             // a page that fairq could not fill must not carry it: an agent then
             // reads an empty page as the state of the machine and acts on it,
             // and a false success is worse than a wait, because nobody sees it.
-            return Ok(if reached {
-                0
-            } else {
-                crate::commands::EXIT_TIMEOUT
-            });
+            return Ok(fault.unwrap_or(0));
         }
 
         let mut hidden;
