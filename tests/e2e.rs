@@ -46,6 +46,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-18: four tests that gc, clean, list and a command that names a job pass on a coordinator's refusal of the job list (issue #205).
 // Modified by the local-resource-coordinator fork, 2026-11-19: three tests that fairq top and a command that names a job pass on a coordinator's refusal of a query, the job list or the ids, and one that top shows an earlier coordinator's list; the test coordinator refuses the requests that a test names (issue #212).
 // Modified by the local-resource-coordinator fork, 2026-11-19: tests that a refusal of the coordinator gives the fault code of the command and 127 only for an answer about the id, that pause --drain and top pass on a refused info, that top then keeps the jobs of the coordinator, and that top --once gives 124 for a time limit only; that pause --drain gives 124 when the coordinator goes silent and says when it closes the connection; the test coordinator can refuse info and capabilities, go silent or close the connection, also after a named request, and answers pause (issues #213, #218 and #219).
+// Modified by the local-resource-coordinator fork, 2026-11-20: tests that a command passes on why the coordinator refused the info request, that fairq version does, that no command names a pid that fairq did not read, and that a pid of 0 or below is refused (issues #221 and #222).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -25925,13 +25926,17 @@ fn a_silent_coordinator_is_named_when_it_used_the_limit() {
     );
 }
 
-/// What the coordinator of the test does with a request it does not answer: it refuses
-/// with [`ARecordingCoordinator::REFUSAL`], says nothing, or closes the connection.
+/// What the coordinator of the test does with a request it does not answer: it refuses with
+/// [`ARecordingCoordinator::REFUSAL`], says nothing, closes the connection, or answers wrongly.
 #[derive(Clone, Copy)]
 enum Fault {
     Refuse,
     Silent,
     Close,
+    Other,
+    Garbled,
+    /// An `info` answer that holds this pid, from a development build that no test runs.
+    Pid(i32),
 }
 
 /// A coordinator of the test that records each request, and that answers like
@@ -26022,6 +26027,13 @@ impl ARecordingCoordinator {
                         });
                         seen.lock().unwrap().push(line.clone());
                         let can = |c: &str| capabilities.contains(&c);
+                        let info = |pid: i32, version: &str| {
+                            serde_json::json!({
+                                "result": "info", "pid": pid, "version": version,
+                                "jobs_running": 0, "jobs_queued": 2, "cpu_budget": 1,
+                                "mem_budget": 1, "cpu_claimed": 0, "mem_claimed": 0,
+                            })
+                        };
                         let answer = match op.as_str() {
                             op if armed && refused.contains(&op) => match fault {
                                 Fault::Refuse => serde_json::json!({
@@ -26034,13 +26046,13 @@ impl ARecordingCoordinator {
                                     return;
                                 }
                                 Fault::Close => return,
+                                Fault::Other => serde_json::json!({ "result": "ok" }),
+                                Fault::Garbled => {
+                                    serde_json::json!({ "result": "of-a-later-version" })
+                                }
+                                Fault::Pid(pid) => info(pid, "0.0.0-dev+gfixture"),
                             },
-                            "info" => serde_json::json!({
-                                "result": "info", "pid": 4321,
-                                "version": env!("CARGO_PKG_VERSION"),
-                                "jobs_running": 0, "jobs_queued": 2, "cpu_budget": 1,
-                                "mem_budget": 1, "cpu_claimed": 0, "mem_claimed": 0,
-                            }),
+                            "info" => info(4321, env!("CARGO_PKG_VERSION")),
                             "capabilities" => serde_json::json!({
                                 "result": "capabilities", "names": capabilities,
                             }),
@@ -26682,6 +26694,235 @@ fn pause_drain_says_when_the_coordinator_closes_the_connection_on_the_info() {
             .any(|op| op == "info"),
         "{ops:?}"
     );
+}
+
+/// When the coordinator refuses the `info` request, `fairq pause queue` says why, sends no
+/// pause, and prints no remedy that names a pid fairq never read (#222).
+#[test]
+fn pause_passes_on_why_the_coordinator_refused_the_info_before_the_pause() {
+    let c = ARecordingCoordinator::refusing("pauseinfo", &["pause", "pause-requests"], &["info"]);
+
+    let out = c.fairq(&["pause", "queue"]);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("kill 0"), "{stderr}");
+    assert_eq!(
+        (out.status.code(), stderr.lines().last()),
+        (
+            Some(1),
+            Some(format!("fairq: {}", ARecordingCoordinator::REFUSAL).as_str())
+        ),
+        "{stderr}"
+    );
+    assert!(!c.ops().iter().any(|op| op == "pause"), "{:?}", c.ops());
+}
+
+/// When the coordinator refuses the `info` request, `fairq version` and its `--json` form say
+/// why, write nothing on stdout, and do not report that no coordinator operates (#221).
+#[test]
+fn version_passes_on_why_the_coordinator_refused_the_info() {
+    for form in [&["version"][..], &["version", "--json"][..]] {
+        let c = ARecordingCoordinator::refusing("versioninfo", &["pause"], &["info"]);
+
+        let out = c.fairq(form);
+
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            (out.status.code(), stderr.lines().last(), stdout.as_ref()),
+            (
+                Some(1),
+                Some(format!("fairq: {}", ARecordingCoordinator::REFUSAL).as_str()),
+                ""
+            ),
+            "{form:?}: {stdout}{stderr}"
+        );
+        assert_eq!(c.ops(), ["info"], "{form:?}");
+    }
+}
+
+/// When the `info` answer holds a pid of 0 or below, `fairq version` and its `--json` form
+/// refuse it, and print no line that names that pid as a coordinator (#222).
+#[test]
+fn version_refuses_an_info_whose_pid_names_no_process() {
+    for (form, pid) in [
+        (&["version"][..], 0),
+        (&["version", "--json"][..], 0),
+        (&["version"][..], -1),
+        (&["version", "--json"][..], -1),
+    ] {
+        let c = ARecordingCoordinator::refusing_after(
+            "versionpid",
+            &["pause"],
+            &["info"],
+            None,
+            Fault::Pid(pid),
+        );
+
+        let out = c.fairq(form);
+
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let says = format!("fairq: the coordinator gave a pid that names no process: {pid}");
+        assert_eq!(
+            (out.status.code(), stderr.lines().last(), stdout.as_ref()),
+            (Some(1), Some(says.as_str()), ""),
+            "{form:?} {pid}: {stdout}{stderr}"
+        );
+        assert_eq!(c.ops(), ["info"], "{form:?} {pid}");
+    }
+}
+
+/// When the `info` answer is of another kind or a line that fairq cannot read, `fairq version`
+/// and its `--json` form say so; a closed connection still reads as no coordinator (#221).
+#[test]
+fn version_names_an_answer_it_cannot_read_and_not_a_closed_connection() {
+    let mut wrong = Vec::new();
+    for (form, none) in [
+        (&["version"][..], "coordinator: none operates"),
+        (&["version", "--json"][..], "\"running\": false"),
+    ] {
+        for (fault_name, fault) in [
+            ("other", Fault::Other),
+            ("garbled", Fault::Garbled),
+            ("close", Fault::Close),
+        ] {
+            let c = ARecordingCoordinator::refusing_after(
+                "versionread",
+                &["pause"],
+                &["info"],
+                None,
+                fault,
+            );
+
+            let out = c.fairq(form);
+
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let last = stderr.lines().last().unwrap_or("");
+            let right = match fault_name {
+                "other" => {
+                    out.status.code() == Some(1)
+                        && stdout.is_empty()
+                        && last == "fairq: the coordinator did not give its version"
+                }
+                "garbled" => {
+                    out.status.code() == Some(1)
+                        && stdout.is_empty()
+                        && last.starts_with("fairq: reading this answer of the coordinator:")
+                }
+                _ => out.status.code() == Some(0) && stdout.contains(none),
+            };
+            if !right || c.ops() != ["info"] {
+                wrong.push(format!(
+                    "{form:?}/{fault_name}: code {:?}, ops {:?}, stdout {stdout:?}, last: {last}",
+                    out.status.code(),
+                    c.ops()
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Each command that asks the coordinator what it can do, against a coordinator that meets
+/// `info` with each fault: no output names a pid or a version that fairq did not read (#222).
+#[test]
+fn no_command_names_a_pid_that_fairq_did_not_read() {
+    const CAPS: &[&str] = &["pause", "pause-requests", "abort", "events", "own-job"];
+    let file = std::env::temp_dir().join(format!("qxunread{}.toml", std::process::id()));
+    std::fs::write(&file, "[[jobs]]\nname = \"build\"\ncommand = [\"true\"]\n").unwrap();
+    let file_arg = file.to_string_lossy().to_string();
+    // The command, its arguments, and the request after which `info` meets the fault.
+    let commands: Vec<(&str, Vec<&str>, Option<&'static str>)> = vec![
+        ("pause", vec!["pause", "queue"], None),
+        ("resume", vec!["resume", "queue", "--all"], None),
+        ("abort", vec!["abort", "--all"], None),
+        ("events", vec!["events", "--timeout", "10s"], None),
+        ("submit", vec!["submit", "--", "true"], None),
+        ("run", vec!["run", "--", "true"], None),
+        ("pipeline", vec!["pipeline", &file_arg], None),
+        ("run", vec!["run", "--", "true"], Some("capabilities")),
+        ("version", vec!["version"], Some("info")),
+    ];
+    let refusal = format!("fairq: {}", ARecordingCoordinator::REFUSAL);
+    let faults = [
+        ("refuse", Fault::Refuse, refusal.as_str()),
+        (
+            "close",
+            Fault::Close,
+            "fairq: the coordinator closed the connection without an answer",
+        ),
+        (
+            "other",
+            Fault::Other,
+            "fairq: the coordinator did not give its version",
+        ),
+        (
+            "garbled",
+            Fault::Garbled,
+            "fairq: reading this answer of the coordinator:",
+        ),
+        (
+            "pid0",
+            Fault::Pid(0),
+            "fairq: the coordinator gave a pid that names no process: 0",
+        ),
+        (
+            "pidneg",
+            Fault::Pid(-1),
+            "fairq: the coordinator gave a pid that names no process: -1",
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (command, args, after) in &commands {
+        for (fault_name, fault, says) in faults {
+            // These four ask for the version first, as a courtesy, and that read meets the
+            // fault and spends the connection: the question about the capabilities never goes out.
+            if after.is_none()
+                && matches!(*command, "events" | "submit" | "run" | "pipeline")
+                && matches!(fault_name, "close" | "garbled")
+            {
+                continue;
+            }
+            let name = format!("unread{command}{fault_name}");
+            let c = ARecordingCoordinator::refusing_after(&name, CAPS, &["info"], *after, fault);
+            let out = c.fairq(args);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let all = format!("{}{stderr}", String::from_utf8_lossy(&out.stdout));
+            let last = stderr.lines().last().unwrap_or("");
+            let ops = c.ops();
+            let code = match *command {
+                "submit" | "run" | "pipeline" => 121,
+                _ => 1,
+            };
+            let unread = [
+                "kill 0",
+                "kill -",
+                "pid 0",
+                "pid -",
+                "version unknown",
+                "is older",
+            ]
+            .iter()
+            .any(|text| all.contains(text));
+            let sent = ops
+                .iter()
+                .any(|op| ["pause", "resume", "abort", "events", "submit"].contains(&op.as_str()));
+            let says_why = out.status.code() == Some(code)
+                && last
+                    .strip_prefix(says)
+                    .is_some_and(|rest| rest.is_empty() || fault_name == "garbled");
+            if unread || sent || !ops.iter().any(|op| op == "info") || !says_why {
+                wrong.push(format!(
+                    "{command}/{fault_name}/{after:?}: code {:?}, ops {ops:?}, last line: {last}",
+                    out.status.code()
+                ));
+            }
+        }
+    }
+    std::fs::remove_file(&file).ok();
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// When a coordinator with no `query` gives the job list, `fairq top --once` shows its jobs

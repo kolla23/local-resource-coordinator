@@ -10,6 +10,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-18: fairq gc, clean, list and a command that names a job pass on the coordinator's text when it refuses the job list (issue #205).
 // Modified by the local-resource-coordinator fork, 2026-11-19: a command that names a job passes on the coordinator's text when it refuses the resolve request, and fairq top can call job_list (issue #212).
 // Modified by the local-resource-coordinator fork, 2026-11-19: a resolver fault gives 127 only for an answer about the id and the fault code of the command for a refusal, and fairq pause --drain passes on why the coordinator refused (issues #213, #218 and #219).
+// Modified by the local-resource-coordinator fork, 2026-11-20: a command passes on why the coordinator refused the info request, no remedy names a pid that fairq did not read, and a pid of 0 or below is refused (issues #221 and #222).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -2381,6 +2382,10 @@ fn warn_if_version_differs(client: &mut Client) {
         ..
     }) = client.call(&Request::Info)
     {
+        // A pid that names no process: say nothing here. The question that follows refuses it.
+        if a_pid_of_a_process(pid).is_err() {
+            return;
+        }
         // Each message below covers one fact, and one command writes one
         // message at the most. Two messages about one fact teach a reader to
         // read neither.
@@ -5637,8 +5642,12 @@ pub fn version(args: cli::VersionArgs) -> Result<i32> {
                 pid,
                 program_replaced,
                 ..
-            }) => Some((version, pid, program_replaced)),
+            }) => Some((version, a_pid_of_a_process(pid)?, program_replaced)),
+            Ok(Response::Error { message, .. }) => bail!("{message}"),
+            Ok(_) => bail!("the coordinator did not give its version"),
             Err(e) if crate::client::is_a_coordinator_timeout(&e) => return Err(e),
+            // A closed connection is a coordinator that stopped; a line it sent is an answer.
+            Err(e) if e.is::<serde_json::Error>() => return Err(e),
             _ => None,
         },
         None => None,
@@ -6619,24 +6628,24 @@ pub fn rerun(args: cli::RerunArgs) -> Result<i32> {
     }
 }
 
-/// Asks the coordinator what it can do.
-///
-/// The `Capabilities` request did not exist in the first versions, and an
-/// earlier coordinator gives an error for a request that it cannot read. This
-/// function thus reads the version first, because every version answers `Info`,
-/// and it uses a table for an earlier coordinator.
+/// Gives the pid of a coordinator, or an error for a number that names no process.
+/// `kill 0` and `kill -1` signal the reader's own processes, so no message may hold one (#222).
+fn a_pid_of_a_process(pid: i32) -> Result<i32> {
+    if pid > 0 {
+        return Ok(pid);
+    }
+    bail!("the coordinator gave a pid that names no process: {pid}")
+}
+
+/// Asks the coordinator what it can do, and gives the version and the pid of its `Info`.
+/// Every outcome of `Info` but a read answer with a pid above 0 is an error.
 fn coordinator_capabilities(client: &mut Client) -> Result<(Vec<String>, String, i32)> {
-    let (version, pid) = match client.call(&Request::Info) {
-        Ok(Response::Info { version, pid, .. }) => (version, pid),
-        // A COORDINATOR THAT DID NOT ANSWER IS NOT A COORDINATOR OF AN UNKNOWN
-        // VERSION. The words `unknown` and the number 0 below describe a
-        // coordinator that ANSWERED with a form that this version cannot read.
-        // A limit that ended the wait proves nothing about the version, and a
-        // message built from those values names a version that nobody has and
-        // a remedy that reads `kill 0` — a signal to the process group of the
-        // reader.
-        Err(e) if crate::client::is_a_coordinator_timeout(&e) => return Err(e),
-        _ => return Ok((Vec::new(), String::from("unknown"), 0)),
+    // The version and the pid come from an `Info` answer that fairq read, or this is an
+    // error: a remedy built from a pid that nobody read says `kill 0` (#222).
+    let (version, pid) = match client.call(&Request::Info)? {
+        Response::Info { version, pid, .. } => (version, a_pid_of_a_process(pid)?),
+        Response::Error { message, .. } => bail!("{message}"),
+        _ => bail!("the coordinator did not give its version"),
     };
 
     // Every version that fairq supports answers this request. A coordinator that
