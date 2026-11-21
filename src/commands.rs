@@ -11,7 +11,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-19: a command that names a job passes on the coordinator's text when it refuses the resolve request, and fairq top can call job_list (issue #212).
 // Modified by the local-resource-coordinator fork, 2026-11-19: a resolver fault gives 127 only for an answer about the id and the fault code of the command for a refusal, and fairq pause --drain passes on why the coordinator refused (issues #213, #218 and #219).
 // Modified by the local-resource-coordinator fork, 2026-11-20: a command passes on why the coordinator refused the info request, no remedy names a pid that fairq did not read, and a pid of 0 or below is refused (issues #221 and #222).
-// Modified by the local-resource-coordinator fork, 2026-11-21: a fault of the courtesy info read that is no time limit ends the command with that fault (issue #233).
+// Modified by the local-resource-coordinator fork, 2026-11-21: a fault of the courtesy info read that is no time limit ends the command with that fault, and a refused or failed capabilities answer is an error, not a missing capability (issues #233 and #234).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -6656,13 +6656,17 @@ fn coordinator_capabilities(client: &mut Client) -> Result<(Vec<String>, String,
         _ => bail!("the coordinator did not give its version"),
     };
 
-    // Every version that fairq supports answers this request. A coordinator that
-    // does not answer it is below the capability floor, and it gets an empty list;
-    // the floor test then refuses it with the correct words.
-    match client.call(&Request::Capabilities) {
-        Ok(Response::Capabilities { names }) => Ok((names, version, pid)),
-        Err(e) if crate::client::is_a_coordinator_timeout(&e) => Err(e),
-        _ => Ok((Vec::new(), version, pid)),
+    // An answer that is no list is an error (#234). Below the capability floor it is an empty
+    // list, and the floor test of the caller refuses that coordinator with the correct words.
+    let below = matches!(
+        crate::capabilities::check_floor(&version, pid),
+        crate::capabilities::Floor::Below(_)
+    );
+    match client.call(&Request::Capabilities)? {
+        Response::Capabilities { names } => Ok((names, version, pid)),
+        _ if below => Ok((Vec::new(), version, pid)),
+        Response::Error { message, .. } => bail!("{message}"),
+        _ => bail!("the coordinator did not say what it can do"),
     }
 }
 

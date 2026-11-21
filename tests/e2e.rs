@@ -47,7 +47,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-19: three tests that fairq top and a command that names a job pass on a coordinator's refusal of a query, the job list or the ids, and one that top shows an earlier coordinator's list; the test coordinator refuses the requests that a test names (issue #212).
 // Modified by the local-resource-coordinator fork, 2026-11-19: tests that a refusal of the coordinator gives the fault code of the command and 127 only for an answer about the id, that pause --drain and top pass on a refused info, that top then keeps the jobs of the coordinator, and that top --once gives 124 for a time limit only; that pause --drain gives 124 when the coordinator goes silent and says when it closes the connection; the test coordinator can refuse info and capabilities, go silent or close the connection, also after a named request, and answers pause (issues #213, #218 and #219).
 // Modified by the local-resource-coordinator fork, 2026-11-20: tests that a command passes on why the coordinator refused the info request, that fairq version does, that no command names a pid that fairq did not read, and that a pid of 0 or below is refused (issues #221 and #222).
-// Modified by the local-resource-coordinator fork, 2026-11-21: the class test of #222 covers every command that reads info as a courtesy, with rerun and submit --each-line, and tests that a time limit at that read stays with the next question (issue #233).
+// Modified by the local-resource-coordinator fork, 2026-11-21: the class test of #222 covers every command that reads info as a courtesy, with rerun and submit --each-line; tests that a time limit at that read stays with the next question, that a refused or failed capabilities answer reaches the reader and that a coordinator below the floor still gets the refusal of the floor; the test coordinator can answer like one from before the capability handshake (issues #233 and #234).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -25938,6 +25938,9 @@ enum Fault {
     Garbled,
     /// An `info` answer that holds this pid, from a development build that no test runs.
     Pid(i32),
+    /// A coordinator from before the capability handshake: an `info` with this version, and
+    /// an error for a request that it cannot read.
+    Earlier(&'static str),
 }
 
 /// A coordinator of the test that records each request, and that answers like
@@ -26052,6 +26055,11 @@ impl ARecordingCoordinator {
                                     serde_json::json!({ "result": "of-a-later-version" })
                                 }
                                 Fault::Pid(pid) => info(pid, "0.0.0-dev+gfixture"),
+                                Fault::Earlier(version) if op == "info" => info(4321, version),
+                                Fault::Earlier(_) => serde_json::json!({
+                                    "result": "error", "kind": "internal",
+                                    "message": "fairq could not read this request",
+                                }),
                             },
                             "info" => info(4321, env!("CARGO_PKG_VERSION")),
                             "capabilities" => serde_json::json!({
@@ -26931,6 +26939,162 @@ fn no_command_names_a_pid_that_fairq_did_not_read() {
     std::fs::remove_file(&file).ok();
     std::fs::remove_file(&lines).ok();
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Each place that asks the coordinator what it can do, when `capabilities` meets each fault:
+/// the reader gets it with the fault code of the command, never as a missing capability (#234).
+#[test]
+fn no_command_reads_a_failed_capabilities_answer_as_a_missing_capability() {
+    const CAPS: &[&str] = &[
+        "pause",
+        "pause-requests",
+        "abort",
+        "events",
+        "own-job",
+        "query",
+        "resolve",
+        "stop-many",
+        "free-ids",
+    ];
+    let pid = std::process::id();
+    let file = std::env::temp_dir().join(format!("qxcaps{pid}.toml"));
+    std::fs::write(&file, "[[jobs]]\nname = \"build\"\ncommand = [\"true\"]\n").unwrap();
+    let file_arg = file.to_string_lossy().to_string();
+    let lines = std::env::temp_dir().join(format!("qxcaps{pid}.txt"));
+    std::fs::write(&lines, "alpha\n").unwrap();
+    let lines_arg = lines.to_string_lossy().to_string();
+    // The command, its arguments, the request after which `capabilities` meets the fault,
+    // and the fault code of the command.
+    let commands: Vec<(&str, Vec<&str>, Option<&'static str>, i32)> = vec![
+        ("pause", vec!["pause", "queue"], None, 1),
+        ("resume", vec!["resume", "queue", "--all"], None, 1),
+        ("abort", vec!["abort", "--all"], None, 1),
+        ("events", vec!["events", "--timeout", "10s"], None, 1),
+        ("version", vec!["version"], None, 1),
+        ("submit", vec!["submit", "--", "true"], None, 121),
+        (
+            "eachline",
+            vec!["submit", "--each-line", &lines_arg, "--", "true", "{}"],
+            None,
+            121,
+        ),
+        ("pipeline", vec!["pipeline", &file_arg], None, 121),
+        ("run", vec!["run", "--", "true"], None, 121),
+        (
+            "ownjob",
+            vec!["run", "--", "true"],
+            Some("capabilities"),
+            121,
+        ),
+        ("list", vec!["list"], None, 1),
+        ("top", vec!["top", "--once"], None, 1),
+        ("kill", vec!["kill", "build"], None, 1),
+        ("cancel", vec!["cancel", "build", "test"], None, 1),
+        ("clean", vec!["clean", "11111111"], None, 1),
+        ("status", vec!["status", "build"], None, 121),
+        ("rerun", vec!["rerun", "build"], None, 121),
+        ("gc", vec!["gc", "--older-than", "1h"], None, 1),
+    ];
+    let refusal = format!("fairq: {}", ARecordingCoordinator::REFUSAL);
+    let faults = [
+        ("refuse", Fault::Refuse, refusal.as_str()),
+        (
+            "close",
+            Fault::Close,
+            "fairq: the coordinator closed the connection without an answer",
+        ),
+        (
+            "other",
+            Fault::Other,
+            "fairq: the coordinator did not say what it can do",
+        ),
+        (
+            "garbled",
+            Fault::Garbled,
+            "fairq: reading this answer of the coordinator:",
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (command, args, after, code) in &commands {
+        for (fault_name, fault, says) in faults {
+            let name = format!("caps{command}{fault_name}");
+            let c = ARecordingCoordinator::refusing_after(
+                &name,
+                CAPS,
+                &["capabilities"],
+                *after,
+                fault,
+            );
+            // `fairq gc` asks only about a directory with no record that is named like a job id.
+            let unheld = c
+                .root
+                .join("state/fairq/jobs")
+                .join(uuid::Uuid::new_v4().to_string());
+            std::fs::create_dir_all(&unheld).unwrap();
+            let out = c.fairq(args);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let all = format!("{}{stderr}", String::from_utf8_lossy(&out.stdout));
+            let last = stderr.lines().last().unwrap_or("");
+            let ops = c.ops();
+            let asked = ops.iter().filter(|op| *op == "capabilities").count();
+            let reads_as_missing = ["fairq refuses this", "cannot do", "is older"]
+                .iter()
+                .any(|text| all.contains(text));
+            let says_why = out.status.code() == Some(*code)
+                && last
+                    .strip_prefix(says)
+                    .is_some_and(|rest| rest.is_empty() || fault_name == "garbled");
+            // The fault ends the command: its question is the last request, and nothing is removed.
+            let stops = ops.last().is_some_and(|op| op == "capabilities")
+                && asked == if after.is_some() { 2 } else { 1 }
+                && unheld.exists();
+            if reads_as_missing || !says_why || !stops {
+                wrong.push(format!(
+                    "{command}/{fault_name}: code {:?}, ops {ops:?}, last line: {last}",
+                    out.status.code()
+                ));
+            }
+        }
+    }
+    std::fs::remove_file(&file).ok();
+    std::fs::remove_file(&lines).ok();
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A coordinator below the capability floor cannot read `capabilities`: a command still gets the
+/// refusal of the floor, and `fairq version` still says what that coordinator cannot do (#234).
+#[test]
+fn a_coordinator_below_the_floor_still_gets_the_refusal_of_the_floor() {
+    let earlier = |name: &str| {
+        ARecordingCoordinator::refusing_after(
+            name,
+            &[],
+            &["info", "capabilities"],
+            None,
+            Fault::Earlier("0.5.2"),
+        )
+    };
+    let c = earlier("floorpause");
+    let out = c.fairq(&["pause", "queue"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains(
+            "is version 0.5.2, and a coordinator says what it can do from 0.6.0 and above"
+        ) && stderr.contains("kill 4321"),
+        "{stderr}"
+    );
+    assert_eq!(c.ops(), ["info", "capabilities"]);
+
+    let c = earlier("floorversion");
+    let out = c.fairq(&["version"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("(this coordinator is older)")
+            && stdout.contains("coordinator: 0.5.2 (pid 4321)"),
+        "{stdout}"
+    );
 }
 
 /// A time limit at the courtesy `info` read is not passed on: the question that follows it

@@ -3,6 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: connect_existing_result reports a refused state directory; the sandbox link names this fork's page (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-02: daemon.log, spawn.lock and the probe file are opened with O_NOFOLLOW, with a test for the probe (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+// Modified by the local-resource-coordinator fork, 2026-11-21: Client::can gives an error for a refused capabilities answer and for an answer of another kind (issue #234).
 //! This module connects the CLI to the coordinator.
 //!
 //! If no coordinator operates, the CLI starts one. Many CLI processes can do
@@ -480,14 +481,14 @@ impl Client {
     /// cannot read, and it takes the earlier request when the answer is no.
     /// The question goes out one time for each connection.
     ///
-    /// A coordinator that gives no list has no capability: every version that
-    /// fairq supports answers this request. A coordinator that did not ANSWER is
-    /// a different fact, and that error goes to the caller.
+    /// Every version that fairq supports answers this request with a list. A refusal, an
+    /// answer of another kind and a coordinator that did not ANSWER are errors for the caller.
     pub fn can(&mut self, capability: &str) -> Result<bool> {
         if self.capabilities.is_none() {
             let names = match self.call(&Request::Capabilities)? {
                 Response::Capabilities { names } => names,
-                _ => Vec::new(),
+                Response::Error { message, .. } => bail!("{message}"),
+                _ => bail!("the coordinator did not say what it can do"),
             };
             self.capabilities = Some(names);
         }
