@@ -11,6 +11,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-19: a command that names a job passes on the coordinator's text when it refuses the resolve request, and fairq top can call job_list (issue #212).
 // Modified by the local-resource-coordinator fork, 2026-11-19: a resolver fault gives 127 only for an answer about the id and the fault code of the command for a refusal, and fairq pause --drain passes on why the coordinator refused (issues #213, #218 and #219).
 // Modified by the local-resource-coordinator fork, 2026-11-20: a command passes on why the coordinator refused the info request, no remedy names a pid that fairq did not read, and a pid of 0 or below is refused (issues #221 and #222).
+// Modified by the local-resource-coordinator fork, 2026-11-21: a fault of the courtesy info read that is no time limit ends the command with that fault (issue #233).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -214,7 +215,7 @@ pub fn submit(args: cli::SubmitArgs) -> Result<i32> {
     let (mut spec, deps) = JobSpec::resolve_with_deps(&opts, &cfg)?;
 
     let mut client = Client::connect()?;
-    warn_if_version_differs(&mut client);
+    warn_if_version_differs(&mut client)?;
 
     // Change each dependency name into an id.
     //
@@ -571,7 +572,7 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
         .unwrap_or_else(|| crate::spec::program_name(&first.command).to_string());
 
     let mut client = Client::connect()?;
-    warn_if_version_differs(&mut client);
+    warn_if_version_differs(&mut client)?;
 
     // Every job of the fan-out waits for the same jobs, so fairq changes each
     // name into an id one time.
@@ -2373,18 +2374,24 @@ fn wait_through_coordinator(
 ///
 /// fairq now starts the program that is on the disk, so a job runs. The two
 /// versions can still behave differently, so the user must know.
-fn warn_if_version_differs(client: &mut Client) {
+fn warn_if_version_differs(client: &mut Client) -> Result<()> {
     let mine = crate::version::VERSION;
+    let answer = match client.call(&Request::Info) {
+        // Any fault but a time limit ends the command here (#233); the question that
+        // follows names the wait that a time limit used.
+        Err(e) if !crate::client::is_a_coordinator_timeout(&e) => return Err(e),
+        answer => answer,
+    };
     if let Ok(Response::Info {
         version,
         pid,
         program_replaced,
         ..
-    }) = client.call(&Request::Info)
+    }) = answer
     {
         // A pid that names no process: say nothing here. The question that follows refuses it.
         if a_pid_of_a_process(pid).is_err() {
-            return;
+            return Ok(());
         }
         // Each message below covers one fact, and one command writes one
         // message at the most. Two messages about one fact teach a reader to
@@ -2425,6 +2432,7 @@ fn warn_if_version_differs(client: &mut Client) {
             _ => {}
         }
     }
+    Ok(())
 }
 
 /// Changes each dependency name into a job id.
@@ -4152,7 +4160,7 @@ pub fn events(args: cli::EventsArgs) -> Result<i32> {
     };
 
     let mut client = Client::connect()?;
-    warn_if_version_differs(&mut client);
+    warn_if_version_differs(&mut client)?;
 
     // Refuse a coordinator that cannot obey, BEFORE the request.
     //
@@ -5501,7 +5509,7 @@ pub fn pipeline(args: cli::PipelineArgs) -> Result<i32> {
         });
 
     let mut client = Client::connect()?;
-    warn_if_version_differs(&mut client);
+    warn_if_version_differs(&mut client)?;
 
     // Test the coordinator once, before the first job, and test EVERY stage.
     //
@@ -6043,7 +6051,7 @@ pub fn run(args: cli::RunArgs) -> Result<i32> {
 
     let (mut spec, deps) = JobSpec::resolve_with_deps(&opts, &cfg)?;
     let mut client = Client::connect()?;
-    warn_if_version_differs(&mut client);
+    warn_if_version_differs(&mut client)?;
     spec.needs = resolve_dependencies(&mut client, &deps.needs, "--needs")?;
     spec.after = resolve_dependencies(&mut client, &deps.after, "--after")?;
     require_capabilities(&mut client, &spec)?;
@@ -6543,7 +6551,7 @@ fn report_run_stop(status: &JobStatus, stopped_here: bool) {
 /// compare the two.
 pub fn rerun(args: cli::RerunArgs) -> Result<i32> {
     let mut client = Client::connect()?;
-    warn_if_version_differs(&mut client);
+    warn_if_version_differs(&mut client)?;
 
     let id = match resolve_id(&mut client, &args.id) {
         Ok(id) => id,

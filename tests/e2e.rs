@@ -47,6 +47,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-19: three tests that fairq top and a command that names a job pass on a coordinator's refusal of a query, the job list or the ids, and one that top shows an earlier coordinator's list; the test coordinator refuses the requests that a test names (issue #212).
 // Modified by the local-resource-coordinator fork, 2026-11-19: tests that a refusal of the coordinator gives the fault code of the command and 127 only for an answer about the id, that pause --drain and top pass on a refused info, that top then keeps the jobs of the coordinator, and that top --once gives 124 for a time limit only; that pause --drain gives 124 when the coordinator goes silent and says when it closes the connection; the test coordinator can refuse info and capabilities, go silent or close the connection, also after a named request, and answers pause (issues #213, #218 and #219).
 // Modified by the local-resource-coordinator fork, 2026-11-20: tests that a command passes on why the coordinator refused the info request, that fairq version does, that no command names a pid that fairq did not read, and that a pid of 0 or below is refused (issues #221 and #222).
+// Modified by the local-resource-coordinator fork, 2026-11-21: the class test of #222 covers every command that reads info as a courtesy, with rerun and submit --each-line, and tests that a time limit at that read stays with the next question (issue #233).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -26833,6 +26834,9 @@ fn no_command_names_a_pid_that_fairq_did_not_read() {
     let file = std::env::temp_dir().join(format!("qxunread{}.toml", std::process::id()));
     std::fs::write(&file, "[[jobs]]\nname = \"build\"\ncommand = [\"true\"]\n").unwrap();
     let file_arg = file.to_string_lossy().to_string();
+    let lines = std::env::temp_dir().join(format!("qxunread{}.txt", std::process::id()));
+    std::fs::write(&lines, "alpha\n").unwrap();
+    let lines_arg = lines.to_string_lossy().to_string();
     // The command, its arguments, and the request after which `info` meets the fault.
     let commands: Vec<(&str, Vec<&str>, Option<&'static str>)> = vec![
         ("pause", vec!["pause", "queue"], None),
@@ -26842,6 +26846,12 @@ fn no_command_names_a_pid_that_fairq_did_not_read() {
         ("submit", vec!["submit", "--", "true"], None),
         ("run", vec!["run", "--", "true"], None),
         ("pipeline", vec!["pipeline", &file_arg], None),
+        (
+            "eachline",
+            vec!["submit", "--each-line", &lines_arg, "--", "true", "{}"],
+            None,
+        ),
+        ("rerun", vec!["rerun", "build"], None),
         ("run", vec!["run", "--", "true"], Some("capabilities")),
         ("version", vec!["version"], Some("info")),
     ];
@@ -26877,12 +26887,9 @@ fn no_command_names_a_pid_that_fairq_did_not_read() {
     let mut wrong = Vec::new();
     for (command, args, after) in &commands {
         for (fault_name, fault, says) in faults {
-            // These four ask for the version first, as a courtesy, and that read meets the
-            // fault and spends the connection: the question about the capabilities never goes out.
-            if after.is_none()
-                && matches!(*command, "events" | "submit" | "run" | "pipeline")
-                && matches!(fault_name, "close" | "garbled")
-            {
+            // `fairq rerun` reads a record of its own after the ids, so only the two faults
+            // that end its courtesy read stop it at `info`.
+            if *command == "rerun" && !matches!(fault_name, "close" | "garbled") {
                 continue;
             }
             let name = format!("unread{command}{fault_name}");
@@ -26893,7 +26900,7 @@ fn no_command_names_a_pid_that_fairq_did_not_read() {
             let last = stderr.lines().last().unwrap_or("");
             let ops = c.ops();
             let code = match *command {
-                "submit" | "run" | "pipeline" => 121,
+                "submit" | "eachline" | "run" | "pipeline" | "rerun" => 121,
                 _ => 1,
             };
             let unread = [
@@ -26922,7 +26929,35 @@ fn no_command_names_a_pid_that_fairq_did_not_read() {
         }
     }
     std::fs::remove_file(&file).ok();
+    std::fs::remove_file(&lines).ok();
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A time limit at the courtesy `info` read is not passed on: the question that follows it
+/// gives the 124 and its own words, as before #233.
+#[test]
+fn a_time_limit_at_the_courtesy_read_stays_with_the_next_question() {
+    let c = ARecordingCoordinator::refusing_after(
+        "courtesysilent",
+        &["events"],
+        &["info"],
+        None,
+        Fault::Silent,
+    );
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_fairq"));
+    cmd.arg("events");
+    isolate(&mut cmd, &c.root, &c.root.join("peers"));
+    cmd.env(fairq_ceiling_variable(), "3");
+
+    let out = cmd.output().expect("fairq did not start");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(124), "{stderr}");
+    assert!(
+        stderr.contains("asked the coordinator nothing more on this connection"),
+        "{stderr}"
+    );
+    assert_eq!(c.ops(), ["info"]);
 }
 
 /// When a coordinator with no `query` gives the job list, `fairq top --once` shows its jobs
