@@ -18,6 +18,8 @@
 # Modified by the local-resource-coordinator fork, 2026-11-18: the Style job
 # runs the tests of the rename script and its checker (issue #28).
 # Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+# Modified by the local-resource-coordinator fork, 2026-11-22: the Style job
+# runs the check for a fallback on a coordinator's answer (issue #238).
 name: CI
 
 # Every push and every pull request. The release workflow runs the same tests
@@ -67,6 +69,9 @@ jobs:
         # The feature builds `testjob` and the e2e suite, which need it; without
         # it, clippy would skip them.
         run: cargo clippy --features test-fixtures --all-targets -- -D warnings
+      - name: Each fallback on a coordinator's answer names the error or says why
+        # It reads src/ with syn, and as an integration test it builds fairq too.
+        run: cargo test --test response_arms
 
   # The R-PRs of docs/fork/PORT_PLAN.md only move code. Their "not a move" lines
   # are expected and explained in the PR, so only a checker error fails the job;
