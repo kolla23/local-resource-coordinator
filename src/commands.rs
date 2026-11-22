@@ -12,6 +12,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-19: a resolver fault gives 127 only for an answer about the id and the fault code of the command for a refusal, and fairq pause --drain passes on why the coordinator refused (issues #213, #218 and #219).
 // Modified by the local-resource-coordinator fork, 2026-11-20: a command passes on why the coordinator refused the info request, no remedy names a pid that fairq did not read, and a pid of 0 or below is refused (issues #221 and #222).
 // Modified by the local-resource-coordinator fork, 2026-11-21: a fault of the courtesy info read that is no time limit ends the command with that fault, and a refused or failed capabilities answer is an error, not a missing capability (issues #233 and #234).
+// Modified by the local-resource-coordinator fork, 2026-11-22: each fallback on a coordinator's answer says why it is right (issue #238).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -282,6 +283,7 @@ pub fn submit(args: cli::SubmitArgs) -> Result<i32> {
             }
             Ok(0)
         }
+        // response-fallback: report_for_a_job names the error
         other => report_for_a_job(other),
     }
 }
@@ -648,6 +650,7 @@ fn submit_each_line(args: cli::SubmitArgs) -> Result<i32> {
                 }
                 submitted.push((name, id));
             }
+            // response-fallback: report_for_a_job names the error
             other => {
                 partial_fan_out(
                     &format!("the coordinator refused the job `{name}`"),
@@ -1106,6 +1109,7 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
         for id in &ids {
             let status = match client.call(&Request::Status { id: *id })? {
                 Response::Status { status } => status,
+                // response-fallback: report_for_a_job names the error
                 other => return report_for_a_job(other),
             };
             let code = if status.state.is_terminal() {
@@ -1127,6 +1131,7 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
         let id = *id;
         let status = match client.call(&Request::Status { id })? {
             Response::Status { status } => status,
+            // response-fallback: report_for_a_job names the error
             other => return report_for_a_job(other),
         };
         // From here the record is for a READER. See `for_display`.
@@ -1784,6 +1789,7 @@ fn wait_for_the_next(
                     Ok(Some(id)) => match client.call(&Request::Status { id }) {
                         Ok(Response::Status { status }) => Some(Some(*status)),
                         // The coordinator answered, and it holds no such job.
+                        // response-fallback: #244 a refused status reads as no such job
                         Ok(_) => Some(None),
                         Err(_) => None,
                     },
@@ -2057,6 +2063,7 @@ impl ReasonReporter {
                 match resolve_id_for_wait(&mut client, raw_id) {
                     Ok(Some(id)) => match client.call(&Request::Status { id }) {
                         Ok(Response::Status { status }) => Some(*status),
+                        // response-fallback: a courtesy read of the reason, on its own connection
                         _ => None,
                     },
                     _ => None,
@@ -2382,6 +2389,7 @@ fn warn_if_version_differs(client: &mut Client) -> Result<()> {
         Err(e) if !crate::client::is_a_coordinator_timeout(&e) => return Err(e),
         answer => answer,
     };
+    // response-fallback: a courtesy read; the question that follows reports the fault (#233)
     if let Ok(Response::Info {
         version,
         pid,
@@ -2492,6 +2500,7 @@ fn pipeline_dependency(
     if by_name {
         let mut all_stopped = true;
         for id in stages {
+            // response-fallback: #245 a refused status reads as a stage that stopped
             if let Response::Status { status } = client.call(&Request::Status { id: *id })? {
                 if !status.state.is_terminal() {
                     all_stopped = false;
@@ -2547,6 +2556,7 @@ fn resolve_one_dependency(
     // failed, and that stage then becomes `skipped` with the correct cause.
     let by_name = name.parse::<uuid::Uuid>().is_err();
     if by_name {
+        // response-fallback: #245 a refused status skips this test
         if let Response::Status { status } = client.call(&Request::Status { id })? {
             if status.state.is_terminal() {
                 bail!(
@@ -3045,6 +3055,7 @@ pub fn kill(args: cli::KillArgs) -> Result<i32> {
                         println!("{id} left the queue");
                         continue;
                     }
+                    // response-fallback: the code below reports every other answer
                     other => other,
                 }
             } else {
@@ -3057,6 +3068,7 @@ pub fn kill(args: cli::KillArgs) -> Result<i32> {
                         println!("{id} received the signal");
                         continue;
                     }
+                    // response-fallback: the code below reports every other answer
                     other => other,
                 }
             };
@@ -3115,6 +3127,7 @@ pub fn abort(args: cli::AbortArgs) -> Result<i32> {
              The pause and every cancel that fairq made are on the disk, so no job starts \
              and no cancelled job comes back. Run `fairq abort` again for the rest.",
         )?;
+    // response-fallback: report names the error
     let Response::Aborted {
         cancelled,
         not_cancelled,
@@ -3389,6 +3402,7 @@ fn stop_many(
 fn report_stop_many(response: Response, worst: &mut i32) -> Result<()> {
     let outcomes = match response {
         Response::Stopped { outcomes } => outcomes,
+        // response-fallback: report names the error
         other => {
             let code = report(other)?;
             if code != 0 && *worst == 0 {
@@ -3472,6 +3486,7 @@ pub fn cancel(args: cli::CancelArgs) -> Result<i32> {
             }
             match client.call(&Request::Cancel { id })? {
                 Response::Ok => println!("{id} left the queue"),
+                // response-fallback: report names the error
                 other => {
                     let code = report(other)?;
                     if code != 0 && worst == 0 {
@@ -3583,6 +3598,7 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
         for id in targets {
             match client.call(&Request::Clean { id })? {
                 Response::Ok => deleted += 1,
+                // response-fallback: report names the error
                 other => worst = report(other)?,
             }
         }
@@ -3697,6 +3713,7 @@ pub fn clean(args: cli::CleanArgs) -> Result<i32> {
     for id in targets {
         match client.call(&Request::Clean { id })? {
             Response::Ok => deleted += 1,
+            // response-fallback: report names the error
             other => worst = report(other)?,
         }
     }
@@ -4242,6 +4259,7 @@ pub fn events(args: cli::EventsArgs) -> Result<i32> {
             Err(e) => return Err(e),
         };
 
+        // response-fallback: report names the error
         let Response::Event { event } = response else {
             return report(response);
         };
@@ -4464,6 +4482,7 @@ fn event_text(event: &crate::events::Event) -> String {
 /// `fairq info` and `fairq top` both use this function. Two texts for one fact
 /// would say two different things after the first change to one of them.
 pub fn queue_line(info: &Response) -> String {
+    // response-fallback: each caller reports every other answer itself
     let Response::Info {
         jobs_running,
         jobs_queued,
@@ -4774,6 +4793,7 @@ pub fn info(args: cli::InfoArgs) -> Result<i32> {
             }
             Ok(0)
         }
+        // response-fallback: report names the error
         other => report(other),
     }
 }
@@ -4784,6 +4804,7 @@ pub fn info(args: cli::InfoArgs) -> Result<i32> {
 /// the pause that a person forgets, and an empty queue in the morning is the
 /// result, so fairq says it every time and not one time.
 fn warn_if_paused(client: &mut Client) {
+    // response-fallback: a courtesy read, and the last question on its connection
     let Ok(Response::PauseState {
         queue,
         locks,
@@ -5124,6 +5145,7 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
                 until,
                 by_pid: std::process::id() as i32,
             })?;
+            // response-fallback: report names the error
             let Response::PauseState {
                 pauses: Some(pauses),
                 receipt: Some(receipt),
@@ -5189,6 +5211,7 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
                 until,
                 by_pid: std::process::id() as i32,
             })?;
+            // response-fallback: report names the error
             let Response::PauseState {
                 locks,
                 receipt: Some(receipt),
@@ -5267,6 +5290,7 @@ pub fn resume(args: cli::ResumeArgs) -> Result<i32> {
         pause_id: pause_id.clone(),
         all,
     })?;
+    // response-fallback: report names the error
     let Response::PauseState {
         queue,
         locks,
@@ -5396,6 +5420,7 @@ fn pause_report(json: bool, forensic: bool) -> Result<i32> {
     // only when nothing operates.
     if let Some(mut client) = Client::connect_existing_result()? {
         let response = client.call(&Request::PauseState)?;
+        // response-fallback: #246 a refusal reads as an earlier coordinator
         if let Response::PauseState {
             queue,
             locks,
@@ -5565,6 +5590,7 @@ pub fn pipeline(args: cli::PipelineArgs) -> Result<i32> {
                 ids.insert(stage.name.clone(), given);
                 submitted.push((stage.name.clone(), given));
             }
+            // response-fallback: report_for_a_job names the error
             other => {
                 eprintln!("{}", stage_refused_text(&stage.name, group));
                 let _ = id;
@@ -5656,6 +5682,7 @@ pub fn version(args: cli::VersionArgs) -> Result<i32> {
             Err(e) if crate::client::is_a_coordinator_timeout(&e) => return Err(e),
             // A closed connection is a coordinator that stopped; a line it sent is an answer.
             Err(e) if e.is::<serde_json::Error>() => return Err(e),
+            // response-fallback: a closed connection is a coordinator that stopped
             _ => None,
         },
         None => None,
@@ -6086,6 +6113,7 @@ pub fn run(args: cli::RunArgs) -> Result<i32> {
             }
             (id, deduplicated)
         }
+        // response-fallback: report_for_a_job names the error
         other => return report_for_a_job(other),
     };
 
@@ -6250,10 +6278,11 @@ fn stop_own_job(client: &mut Client, id: uuid::Uuid) -> bool {
             Ok(Response::Status { status }) if status.state == JobState::Queued => {
                 client.call(&Request::Cancel { id })
             }
-            // Say nothing here. The next turn of the loop reads the state of
-            // the job and reports it, and one true sentence is enough.
+            // Say nothing here: one true sentence is enough.
+            // response-fallback: the next turn of the loop reads the state and reports it
             _ => return false,
         },
+        // response-fallback: the match below reads every other answer
         other => other,
     };
 
@@ -6362,6 +6391,7 @@ fn stream_until_done(
         // attach to the coordinator that replaced this one.
         let status = match client.call(&Request::Status { id }) {
             Ok(Response::Status { status }) => status,
+            // response-fallback: report_for_a_job names the error
             Ok(other) => return report_for_a_job(other),
             // The limit of the reader passed, so fairq asked nothing. That is
             // not a coordinator that stopped, and the reader must not be told
@@ -6460,6 +6490,7 @@ fn status_without_the_coordinator(
                 );
             }
         }
+        // response-fallback: every other answer leaves the record on the disk as the answer
         if let Ok(Response::Status { status }) = client.call(&Request::Status { id }) {
             return Ok(status);
         }
@@ -6632,6 +6663,7 @@ pub fn rerun(args: cli::RerunArgs) -> Result<i32> {
             println!("{new_id}");
             Ok(0)
         }
+        // response-fallback: report_for_a_job names the error
         other => report_for_a_job(other),
     }
 }
@@ -6930,6 +6962,7 @@ pub fn gc(args: cli::GcArgs) -> Result<i32> {
 
     let mut deleted = 0usize;
     for (id, _, _) in &targets {
+        // response-fallback: #197 a refused record stays, with no reason and the code 0
         if let Response::Ok = client.call(&Request::Clean { id: *id })? {
             deleted += 1;
         }

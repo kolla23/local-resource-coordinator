@@ -1,6 +1,7 @@
 //! The check of issue #238: a fallback (`_`, a binding, `else`) on a coordinator's `Response`
 //! names `Response::Error` too, or says why one line above: `// response-fallback: <why>`.
 
+use std::path::{Path, PathBuf};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -309,6 +310,44 @@ fn check_source(text: &str) -> Result<(usize, Vec<(usize, String)>), String> {
     }
     check.found.sort();
     Ok((check.sites, check.found))
+}
+
+fn rust_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            rust_files(&path, files);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            files.push(path);
+        }
+    }
+}
+
+/// The real check: every `.rs` file below `src/` of this package. A file that syn cannot
+/// read ends the test, so no file passes unread.
+#[test]
+fn no_fallback_in_src_reads_a_response_without_naming_its_error() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    rust_files(&root.join("src"), &mut files);
+    files.sort();
+    let (mut sites, mut findings) = (0, 0);
+    for path in &files {
+        let name = path.strip_prefix(root).unwrap().display();
+        let text = std::fs::read_to_string(path).unwrap();
+        let (count, found) = check_source(&text).unwrap_or_else(|e| panic!("{name}:{e}"));
+        sites += count;
+        findings += found.len();
+        for (line, what) in found {
+            println!("{name}:{line}: {what}");
+        }
+    }
+    println!(
+        "checked {} files and {sites} sites that read a Response",
+        files.len()
+    );
+    assert!(sites > 0, "the check found no site that reads a Response");
+    assert_eq!(findings, 0, "the findings are listed above");
 }
 
 /// One row: its name, a source text, and each finding that the check must give for it.

@@ -3,6 +3,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 // Modified by the local-resource-coordinator fork, 2026-11-19: fairq top passes on the coordinator's text when it refuses the query or the job list (issue #212).
 // Modified by the local-resource-coordinator fork, 2026-11-19: fairq top passes on why the coordinator refused the info request, and --once gives 124 for a time limit only (issues #213, #218 and #219).
+// Modified by the local-resource-coordinator fork, 2026-11-22: each fallback on a coordinator's answer says why it is right (issue #238).
 //! This module holds the `fairq top` command.
 //!
 //! The command shows the queue and refreshes it. For each job it shows the
@@ -470,6 +471,7 @@ fn paint_once(
 
 fn header_lines(ordered: &[JobStatus], info: Option<&Response>, unreachable: bool) -> Vec<String> {
     let mut lines = Vec::new();
+    // response-fallback: run reports a refused info; this page has no header for it
     if let Some(Response::Info {
         version,
         program_replaced,
