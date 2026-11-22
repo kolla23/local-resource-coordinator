@@ -1,6 +1,7 @@
 # How to make a change to fairq
 <!-- Modified by the local-resource-coordinator fork, 2026-10-02: clippy and the e2e tests need --features test-fixtures. -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-22: the check for a fallback on a coordinator's answer (issue #238). -->
 
 ## Work on a branch, and merge with a pull request
 
@@ -223,6 +224,9 @@ cargo test --features test-fixtures --test e2e -- --test-threads=2
 
 CI runs each of these on Linux and on macOS, and it also builds for the four
 release targets and tests the earliest version of Rust that `Cargo.toml` names.
+
+Also run `cargo test --test response_arms`, the check for a fallback on a
+coordinator's answer. CI runs it on Linux only, in the Style job.
 
 **Use two test threads.** Each end-to-end test starts real processes and waits
 for them. With more threads the machine becomes busy, a job starts late, and a
