@@ -3,6 +3,8 @@
 # Modified by the local-resource-coordinator fork, 2026-11-03: repository,
 # homepage and documentation name this fork's repository, not upstream's site.
 # Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+# Modified by the local-resource-coordinator fork, 2026-11-22: syn and proc-macro2
+# as dev-dependencies, for the check of coordinator answers (issue #238).
 [package]
 name = "fairq"
 # NOT the version of a release. `main` holds this number for ever, and no pull
@@ -65,3 +67,6 @@ strip = true
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 libc = "0.2"
+# The check of tests/response_arms.rs reads src/ with syn (issue #238).
+syn = { version = "3", default-features = false, features = ["full", "parsing", "printing", "visit"] }
+proc-macro2 = { version = "1", default-features = false, features = ["span-locations"] }

@@ -139,9 +139,11 @@ dependencies = [
  "clap",
  "clap_complete",
  "libc",
+ "proc-macro2",
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "syn 3.0.3",
  "toml",
  "uuid",
 ]
