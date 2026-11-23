@@ -1,5 +1,6 @@
 // Modified by the local-resource-coordinator fork, 2026-10-01: tests that read the peer directory hold the env lock (issue #5); tests use testutil::temp_dir (issue #5).
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
+// Modified by the local-resource-coordinator fork, 2026-11-22: the peer tree is used through directory handles opened without following a link; fairq uses its own folder only when it is a directory that the user owns, and the not-active message names the directory in use.
 //! This module shares the resource claims between the users of one machine.
 //!
 //! Each coordinator writes its claims to a file in a shared directory. Each
@@ -17,7 +18,9 @@
 use crate::config::Config;
 use crate::sys;
 use serde::{Deserialize, Serialize};
+use std::fs::File;
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::{Path, PathBuf};
 
 /// The record that one coordinator publishes.
@@ -81,22 +84,32 @@ fn peers_location(cfg: &Config) -> PathBuf {
     }
 }
 
-/// Gives the directory for the peer files, if the directory is safe.
+/// Gives a handle on the directory for the peer files, if the directory is safe.
 ///
 /// The directory is writable by every user, so this function makes these tests:
 ///
 /// - The path is a directory.
 /// - The directory has the sticky bit. A different user then cannot delete the
 ///   subdirectory of this user.
-/// - The owner is the root user or the current user.
+/// - The owner is the root user or the current user, or every user can write to it.
 ///
 /// If a test fails, the function gives `None`. fairq then operates for one user
 /// only. It does not give an error, because a shared directory is not necessary
 /// for a correct queue.
-fn peer_dir(cfg: &Config) -> Option<PathBuf> {
+fn peer_dir(cfg: &Config) -> Option<File> {
     let dir = peers_location(cfg);
 
-    match std::fs::symlink_metadata(&dir) {
+    let handle = match open_dir(&dir) {
+        Ok(handle) => handle,
+        // Make the directory. The first user of the machine arrives here.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => match make_shared(&dir) {
+            Ok(made) => return Some(made),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => open_dir(&dir).ok()?,
+            Err(_) => return None,
+        },
+        Err(_) => return None,
+    };
+    match handle.metadata() {
         Ok(meta) => {
             if !meta.is_dir() {
                 return None;
@@ -123,16 +136,148 @@ fn peer_dir(cfg: &Config) -> Option<PathBuf> {
             if !world_writable && owner != 0 && owner != current_uid() {
                 return None;
             }
-            Some(dir)
+            Some(handle)
         }
-        Err(_) => {
-            // Make the directory. The first user of the machine arrives here.
-            std::fs::create_dir_all(&dir).ok()?;
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).ok()?;
-            Some(dir)
-        }
+        Err(_) => None,
     }
+}
+
+/// The flags of every directory open: no link at the last name, and no wait.
+const DIR_FLAGS: libc::c_int =
+    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK;
+
+/// Opens the shared directory by its path, without following a link at its name.
+fn open_dir(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(DIR_FLAGS)
+        .open(path)
+}
+
+/// Makes the shared directory with mode 0700, and gives it mode 1777 on its
+/// handle once the handle shows a directory that this user owns.
+fn make_shared(dir: &Path) -> std::io::Result<File> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::PermissionsExt;
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let path = std::ffi::CString::new(dir.as_os_str().as_bytes())?;
+    if unsafe { libc::mkdir(path.as_ptr(), 0o700) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let handle = open_dir(dir)?;
+    let meta = handle.metadata()?;
+    if !meta.is_dir() || meta.uid() != current_uid() {
+        return Err(std::io::ErrorKind::PermissionDenied.into());
+    }
+    handle.set_permissions(std::fs::Permissions::from_mode(0o1777))?;
+    Ok(handle)
+}
+
+/// Opens `name` inside `dir` with `flags`, relative to the handle.
+fn open_at(dir: &File, name: &str, flags: libc::c_int) -> std::io::Result<File> {
+    let name = std::ffi::CString::new(name)?;
+    let fd = unsafe { libc::openat(dir.as_raw_fd(), name.as_ptr(), flags) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(unsafe { File::from_raw_fd(fd) })
+}
+
+/// Deletes `name` inside `dir`, relative to the handle. A missing name is no error.
+fn remove_at(dir: &File, name: &str) {
+    if let Ok(name) = std::ffi::CString::new(name) {
+        unsafe { libc::unlinkat(dir.as_raw_fd(), name.as_ptr(), 0) };
+    }
+}
+
+/// What fairq finds at this user's name in the shared directory.
+#[derive(Debug, PartialEq, Eq)]
+enum Own {
+    /// Nothing yet, or a name that `publish` cannot make.
+    Absent,
+    /// A directory that this user owns.
+    Mine,
+    /// Anything else: this coordinator's claims are not shared.
+    Refused,
+}
+
+/// Opens `name` inside `shared` when it is a directory that `uid` owns.
+fn open_own(shared: &File, name: &str, uid: u32) -> Result<File, Own> {
+    let dir = open_at(shared, name, DIR_FLAGS).map_err(|_| Own::Refused)?;
+    match dir.metadata() {
+        Ok(meta) if meta.is_dir() && meta.uid() == uid => Ok(dir),
+        _ => Err(Own::Refused),
+    }
+}
+
+/// Gives a handle on this user's folder inside `shared`, made when absent: a
+/// directory that `uid` owns, with mode 0755 set on the handle.
+fn own_subdir(shared: &File, name: &str, uid: u32) -> Result<File, Own> {
+    use std::os::unix::fs::PermissionsExt;
+    let cname = std::ffi::CString::new(name).map_err(|_| Own::Refused)?;
+    if unsafe { libc::mkdirat(shared.as_raw_fd(), cname.as_ptr(), 0o755) } != 0
+        && std::io::Error::last_os_error().kind() != std::io::ErrorKind::AlreadyExists
+    {
+        return Err(Own::Absent);
+    }
+    let dir = open_own(shared, name, uid)?;
+    dir.set_permissions(std::fs::Permissions::from_mode(0o755))
+        .ok();
+    Ok(dir)
+}
+
+/// Tells what is at `name` inside `shared`, and changes nothing.
+fn probe_own(shared: &File, name: &str, uid: u32) -> Own {
+    match open_at(shared, name, DIR_FLAGS) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Own::Absent,
+        Err(_) => Own::Refused,
+        Ok(dir) => match dir.metadata() {
+            Ok(meta) if meta.is_dir() && meta.uid() == uid => Own::Mine,
+            _ => Own::Refused,
+        },
+    }
+}
+
+/// Writes `bytes` as `name` inside `dir` in one step: a temporary file, synced,
+/// then renamed into place, each step relative to the handle.
+fn write_record(dir: &File, name: &str, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = std::ffi::CString::new(format!(".{name}.tmp.{}", std::process::id()))?;
+    let cname = std::ffi::CString::new(name)?;
+    let fd = dir.as_raw_fd();
+    unsafe { libc::unlinkat(fd, tmp.as_ptr(), 0) };
+    let flags = libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+    let raw = unsafe { libc::openat(fd, tmp.as_ptr(), flags, 0o644 as libc::c_uint) };
+    if raw < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut file = unsafe { File::from_raw_fd(raw) };
+    let mut written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    if written.is_ok() && unsafe { libc::renameat(fd, tmp.as_ptr(), fd, cname.as_ptr()) } != 0 {
+        written = Err(std::io::Error::last_os_error());
+    }
+    if written.is_err() {
+        unsafe { libc::unlinkat(fd, tmp.as_ptr(), 0) };
+        return written;
+    }
+    dir.sync_all().ok();
+    Ok(())
+}
+
+/// The words that say that this coordinator's own folder in the peer directory is refused.
+const NOT_SHARED: &str = "this coordinator's claims are not shared";
+
+/// Says why this coordinator's claims are not shared, naming its folder.
+fn not_shared(cfg: &Config, name: &str) -> String {
+    let path = peers_location(cfg).join(name);
+    format!(
+        "{NOT_SHARED}: {} is not a directory that this user owns",
+        path.display()
+    )
 }
 
 /// Writes the true state of the shared accounting, for `fairq config show`.
@@ -151,20 +296,26 @@ pub fn describe(cfg: &Config) -> String {
         };
     }
     match peer_dir(cfg) {
-        Some(dir) => {
+        Some(shared) => {
             let c = claims(cfg);
-            format!(
+            let mut said = format!(
                 "on, in {} ({}, {} and {} claimed)",
-                dir.display(),
+                peers_location(cfg).display(),
                 crate::units::count_of(c.count, "other coordinator"),
                 crate::units::count_of(c.cpu as usize, "core"),
                 crate::units::format_size(c.mem)
-            )
+            );
+            let name = user_dir_name(current_uid());
+            if probe_own(&shared, &name, current_uid()) == Own::Refused {
+                said = format!("{said}; {}", not_shared(cfg, &name));
+            }
+            said
         }
         None => format!(
             "NOT ACTIVE; fairq cannot use the directory {}. It must be a directory with the \
-             sticky bit. fairq uses the budget of this user only.",
-            cfg.peers.dir
+             sticky bit that every user can write to, or that belongs to root or to this user. \
+             fairq uses the budget of this user only.",
+            peers_location(cfg).display()
         ),
     }
 }
@@ -202,15 +353,21 @@ pub fn publish(
     if !cfg.peers_enabled() {
         return;
     }
-    let Some(dir) = peer_dir(cfg) else { return };
+    let Some(shared) = peer_dir(cfg) else { return };
 
     let uid = current_uid();
-    let mine = dir.join(user_dir_name(uid));
-    if std::fs::create_dir_all(&mine).is_err() {
-        return;
-    }
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o755)).ok();
+    let name = user_dir_name(uid);
+    let mine = match own_subdir(&shared, &name, uid) {
+        Ok(mine) => mine,
+        Err(Own::Refused) => {
+            static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                crate::daemon::log(&not_shared(cfg, &name));
+            }
+            return;
+        }
+        Err(_) => return,
+    };
 
     let peer = Peer {
         uid,
@@ -224,7 +381,9 @@ pub fn publish(
     };
 
     if let Ok(bytes) = serde_json::to_vec(&peer) {
-        crate::job::write_atomic(&mine.join(peer_file_name(peer.pid)), &bytes, 0o644).ok();
+        // Not `job::write_atomic`: it opens the folder again by its path, and the
+        // record must land in the folder that this handle checked.
+        write_record(&mine, &peer_file_name(peer.pid), &bytes).ok();
     }
 }
 
@@ -233,9 +392,11 @@ pub fn publish(
 /// The coordinator calls this function when it stops, so its claims do not stop
 /// the jobs of a different user.
 pub fn withdraw(cfg: &Config) {
-    if let Some(dir) = peer_dir(cfg) {
-        let mine = dir.join(user_dir_name(current_uid()));
-        std::fs::remove_file(mine.join(peer_file_name(std::process::id() as i32))).ok();
+    if let Some(shared) = peer_dir(cfg) {
+        let uid = current_uid();
+        if let Ok(mine) = open_own(&shared, &user_dir_name(uid), uid) {
+            remove_at(&mine, &peer_file_name(std::process::id() as i32));
+        }
     }
 }
 
@@ -245,12 +406,17 @@ pub fn withdraw(cfg: &Config) {
 /// fails a test. A record that fairq cannot read gives no error, because a
 /// damaged file must not stop the queue.
 pub fn claims(cfg: &Config) -> Claims {
+    claims_for(cfg, current_uid())
+}
+
+/// Reads the claims as the user `me`; `claims` passes the current user.
+fn claims_for(cfg: &Config, me: u32) -> Claims {
     let mut total = Claims::default();
     if !cfg.peers_enabled() {
         return total;
     }
 
-    let Some(dir) = peer_dir(cfg) else {
+    let Some(shared) = peer_dir(cfg) else {
         return total;
     };
 
@@ -260,9 +426,8 @@ pub fn claims(cfg: &Config) -> Claims {
         .as_secs();
     let now = sys::now_secs();
     let boot = sys::boot_id();
-    let me = current_uid();
 
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    let Ok(entries) = std::fs::read_dir(peers_location(cfg)) else {
         return total;
     };
 
@@ -274,6 +439,10 @@ pub fn claims(cfg: &Config) -> Claims {
         // owner of the file. A user thus cannot write a record for a different
         // user.
         let Some(claimed_uid) = name.strip_prefix('u').and_then(|n| n.parse::<u32>().ok()) else {
+            continue;
+        };
+        // An entry that is not a directory, a link included, is skipped.
+        let Ok(user_dir) = open_at(&shared, name, DIR_FLAGS) else {
             continue;
         };
 
@@ -299,7 +468,7 @@ pub fn claims(cfg: &Config) -> Claims {
                 continue;
             }
 
-            let Some(peer) = read_peer(&file.path(), claimed_uid) else {
+            let Some(peer) = read_peer(&user_dir, fname, claimed_uid) else {
                 continue;
             };
 
@@ -310,18 +479,18 @@ pub fn claims(cfg: &Config) -> Claims {
             // A record from a different start of the machine is old. The system
             // uses each process id again after a restart.
             if peer.boot_id != boot {
-                std::fs::remove_file(file.path()).ok();
+                remove_at(&user_dir, fname);
                 continue;
             }
             // A coordinator writes its record frequently. An old record shows a
             // coordinator that stopped without a clean end.
             if now.saturating_sub(peer.updated_at) > stale {
-                std::fs::remove_file(file.path()).ok();
+                remove_at(&user_dir, fname);
                 continue;
             }
             // The process must be alive.
             if !sys::pid_alive(peer.pid) {
-                std::fs::remove_file(file.path()).ok();
+                remove_at(&user_dir, fname);
                 continue;
             }
 
@@ -361,14 +530,9 @@ const MAX_PEER_LEN: u64 = 64 * 1024;
 /// changes nothing. The test that the file IS a regular file comes after the
 /// open, from the file itself, so no other user can change the answer between
 /// a test of the path and the open.
-fn read_peer(path: &Path, expected_uid: u32) -> Option<Peer> {
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-        .ok()?;
+fn read_peer(dir: &File, name: &str, expected_uid: u32) -> Option<Peer> {
+    let flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
+    let file = open_at(dir, name, flags).ok()?;
 
     let meta = file.metadata().ok()?;
     if !meta.is_file() {
@@ -410,6 +574,12 @@ mod tests {
         std::fs::remove_dir_all(&d).ok();
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// Reads one record by its path, through a handle on its folder.
+    fn read_peer(path: &Path, uid: u32) -> Option<Peer> {
+        let dir = open_dir(path.parent()?).ok()?;
+        super::read_peer(&dir, path.file_name()?.to_str()?, uid)
     }
 
     fn cfg_for(dir: &Path) -> Config {
@@ -713,5 +883,182 @@ mod tests {
         let _q = crate::testutil::EnvVar::set(DIR_VARIABLE, "");
         let cfg = Config::default();
         assert_eq!(peers_location(&cfg), PathBuf::from("/tmp/fairq"));
+    }
+
+    /// A FIFO at this user's name gives no wait and no record, and the message
+    /// says that this coordinator's claims are not shared.
+    #[test]
+    fn a_fifo_at_this_users_name_is_refused_without_a_wait() {
+        use std::os::unix::fs::FileTypeExt;
+        let _env = crate::testutil::peers_env();
+        let dir = tmpdir("ufifo");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
+        let fifo = dir.join(user_dir_name(current_uid()));
+        let path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        assert_eq!(
+            unsafe { libc::mkfifo(path.as_ptr(), 0o644) },
+            0,
+            "the test needs a FIFO"
+        );
+        let cfg = cfg_for(&dir);
+
+        publish(&cfg, 1, 1 << 20, Default::default(), Default::default());
+        let kind = std::fs::symlink_metadata(&fifo).unwrap().file_type();
+        assert!(kind.is_fifo(), "the FIFO stays as it was");
+        let said = describe(&cfg);
+        assert!(
+            said.contains("this coordinator's claims are not shared"),
+            "{said}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A file at this user's name keeps its bytes, and the message says that
+    /// this coordinator's claims are not shared.
+    #[test]
+    fn a_file_at_this_users_name_is_refused_and_kept() {
+        let _env = crate::testutil::peers_env();
+        let dir = tmpdir("ufile");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
+        let file = dir.join(user_dir_name(current_uid()));
+        std::fs::write(&file, b"not a folder").unwrap();
+        let cfg = cfg_for(&dir);
+
+        publish(&cfg, 1, 1 << 20, Default::default(), Default::default());
+        assert_eq!(std::fs::read(&file).unwrap(), b"not a folder");
+        let said = describe(&cfg);
+        assert!(
+            said.contains("this coordinator's claims are not shared"),
+            "{said}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A link in place of the shared directory is refused, and its target is
+    /// left as it was.
+    #[test]
+    fn a_link_in_place_of_the_shared_directory_is_refused() {
+        let _env = crate::testutil::peers_env();
+        let dir = tmpdir("sharedlink");
+        let elsewhere = dir.join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::set_permissions(&elsewhere, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        let cfg = cfg_for(&link);
+
+        publish(&cfg, 1, 1 << 20, Default::default(), Default::default());
+        let mode = std::fs::metadata(&elsewhere).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o700, "the link's target keeps its mode");
+        assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
+        let said = describe(&cfg);
+        assert!(said.starts_with("NOT ACTIVE"), "{said}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A link at this user's name that points nowhere is not an absent name:
+    /// nothing is made, and the message says the claims are not shared.
+    #[test]
+    fn a_dangling_link_at_this_users_name_is_refused() {
+        let _env = crate::testutil::peers_env();
+        let dir = tmpdir("udangling");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
+        let name = dir.join(user_dir_name(current_uid()));
+        std::os::unix::fs::symlink(dir.join("nothing"), &name).unwrap();
+        let cfg = cfg_for(&dir);
+
+        publish(&cfg, 1, 1 << 20, Default::default(), Default::default());
+        assert!(
+            !dir.join("nothing").exists(),
+            "nothing is made behind the link"
+        );
+        let said = describe(&cfg);
+        assert!(
+            said.contains("this coordinator's claims are not shared"),
+            "{said}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A folder at this user's name that another user owns is refused, and it
+    /// keeps its mode.
+    #[test]
+    fn a_folder_of_another_user_at_this_users_name_is_refused() {
+        let dir = tmpdir("uother");
+        let shared = open_dir(&dir).unwrap();
+        let name = user_dir_name(current_uid());
+        std::fs::create_dir(dir.join(&name)).unwrap();
+        std::fs::set_permissions(dir.join(&name), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let got = own_subdir(&shared, &name, current_uid() + 1);
+        assert!(matches!(got, Err(Own::Refused)), "the folder is refused");
+        let mode = std::fs::metadata(dir.join(&name))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777;
+        assert_eq!(mode, 0o700, "the folder keeps its mode");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The probe of `fairq config show` refuses a folder at this user's name
+    /// that another user owns, and changes nothing.
+    #[test]
+    fn the_probe_refuses_a_folder_of_another_user_and_changes_nothing() {
+        let dir = tmpdir("probeother");
+        let shared = open_dir(&dir).unwrap();
+        let name = user_dir_name(current_uid());
+        std::fs::create_dir(dir.join(&name)).unwrap();
+        std::fs::set_permissions(dir.join(&name), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(probe_own(&shared, &name, current_uid() + 1), Own::Refused);
+        let mode = std::fs::metadata(dir.join(&name))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777;
+        assert_eq!(mode, 0o700, "the folder keeps its mode");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The records of the other users still count while this user's own name is refused.
+    #[test]
+    fn the_other_users_still_count_while_this_users_folder_is_refused() {
+        let _env = crate::testutil::peers_env();
+        let dir = tmpdir("refused-others");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o1777)).unwrap();
+        let other = current_uid();
+        let theirs = dir.join(user_dir_name(other));
+        std::fs::create_dir_all(&theirs).unwrap();
+        let peer = Peer {
+            uid: other,
+            pid: std::process::id() as i32,
+            boot_id: sys::boot_id(),
+            cpu: 3,
+            mem: 1 << 30,
+            pools: Default::default(),
+            devices: Default::default(),
+            updated_at: sys::now_secs(),
+        };
+        let record = theirs.join(peer_file_name(peer.pid));
+        std::fs::write(&record, serde_json::to_vec(&peer).unwrap()).unwrap();
+        let target = dir.join("target");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::os::unix::fs::symlink(&target, dir.join(user_dir_name(other + 1))).unwrap();
+
+        // Read as the user other + 1, whose own name is a link.
+        let c = claims_for(&cfg_for(&dir), other + 1);
+        assert_eq!(
+            (c.count, c.cpu, c.mem),
+            (1, 3, 1 << 30),
+            "the other user still counts"
+        );
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o700, "the link's target keeps its mode");
+        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

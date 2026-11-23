@@ -6,6 +6,7 @@ description: What fairq writes to the disk, who can read it, and where the trust
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: qex opens the files it writes in the state and job directories without following a symbolic link (issue #88). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-02: reports go to this repository's advisories (issue #100). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-22: the owner rule of the peer directory as fairq applies it; fairq uses the peer directory through open folders. -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -129,9 +130,15 @@ wants to damage your work.
 fairq protects the method against the usual faults of a directory that everybody
 can write:
 
-- `/tmp/fairq` must be a directory, and it must have the sticky bit, and it must
-  belong to root or to you. Without those, the accounting stops and fairq operates
-  for one user only.
+- `/tmp/fairq` must be a directory, and it must have the sticky bit. When not
+  every user can write to it, it must also belong to root or to you. Without
+  those, the accounting stops and fairq operates for one user only.
+- fairq opens `/tmp/fairq`, and its own folder `u<uid>` in it, without following
+  a symbolic link, and it changes, writes and removes files only through those
+  open folders. It uses its own folder only when that folder is a directory that
+  you own. Otherwise this coordinator's claims are not shared: fairq still counts
+  the claims of the other users, and `fairq config show` says so. A folder with
+  your name that another user made first has the same effect.
 - fairq reads the owner of each file, and it discards a file whose owner does not
   agree with the name of its directory.
 - fairq opens each file without following a symbolic link.

@@ -48,6 +48,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-19: tests that a refusal of the coordinator gives the fault code of the command and 127 only for an answer about the id, that pause --drain and top pass on a refused info, that top then keeps the jobs of the coordinator, and that top --once gives 124 for a time limit only; that pause --drain gives 124 when the coordinator goes silent and says when it closes the connection; the test coordinator can refuse info and capabilities, go silent or close the connection, also after a named request, and answers pause (issues #213, #218 and #219).
 // Modified by the local-resource-coordinator fork, 2026-11-20: tests that a command passes on why the coordinator refused the info request, that fairq version does, that no command names a pid that fairq did not read, and that a pid of 0 or below is refused (issues #221 and #222).
 // Modified by the local-resource-coordinator fork, 2026-11-21: the class test of #222 covers every command that reads info as a courtesy, with rerun and submit --each-line; tests that a time limit at that read stays with the next question, that a refused or failed capabilities answer reaches the reader and that a coordinator below the floor still gets the refusal of the floor; the test coordinator can answer like one from before the capability handshake (issues #233 and #234).
+// Modified by the local-resource-coordinator fork, 2026-11-22: tests that fairq uses its own folder in the shared peer directory only when it is a directory that the user owns, and that the not-active message names the directory in use.
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -22381,6 +22382,187 @@ fn two_users_do_not_both_get_the_one_device() {
     );
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A link at this user's name in the peer directory is not followed: its
+/// target keeps its mode and gets no record.
+#[test]
+fn a_link_at_this_users_peer_folder_is_not_followed() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Harness::new("peerlink", PEER_ROW_CONFIG);
+    let target = h.root.join("elsewhere");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let link = h.peers_dir.join(format!("u{}", unsafe { libc::getuid() }));
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+
+    h.ok(&["submit", "--wait", "--", TESTJOB, "exit", "0"]);
+    let pid = h.coordinator_pid();
+    h.ok(&["submit", "--wait", "--", TESTJOB, "exit", "0"]);
+    assert_eq!(h.coordinator_pid(), pid, "one coordinator ran both jobs");
+
+    let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(mode, 0o700, "the link's target keeps its mode");
+    let entries: Vec<_> = std::fs::read_dir(&target)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert!(
+        entries.is_empty(),
+        "the link's target gets no record: {entries:?}"
+    );
+    assert!(is_link(&link), "the link stays as it was");
+    let shown = peers_line(&h);
+    assert!(
+        shown.contains(NOT_SHARED) && shown.contains(&link.display().to_string()),
+        "config show names this user's folder: {shown}"
+    );
+    let log = std::fs::read_to_string(h.root.join("state/fairq/run/daemon.log")).unwrap();
+    assert_eq!(
+        log.matches(NOT_SHARED).count(),
+        1,
+        "one line per coordinator: {log}"
+    );
+}
+
+/// The words that `fairq config show` and the coordinator's log use when this
+/// coordinator's own folder in the peer directory is refused.
+const NOT_SHARED: &str = "this coordinator's claims are not shared";
+
+/// The config of the peer-folder rows: the peer method on, a pinned budget.
+const PEER_ROW_CONFIG: &str = "[peers]\nenabled = true\n\
+     [budget]\ncpu = \"3\"\n\
+     [defaults]\nmem = \"256MB\"\n\
+     [system]\nreserve_mem = \"0\"\nmax_pressure = 100\n";
+
+/// Gives the `peers:` line of `fairq config show`.
+fn peers_line(h: &Harness) -> String {
+    let shown = h.ok(&["config", "show"]);
+    let line = shown.lines().find(|l| l.starts_with("peers:"));
+    line.unwrap_or_else(|| panic!("config show has no peers line: {shown}"))
+        .to_string()
+}
+
+/// The coordinator's stop removes its record only inside a folder it uses: a
+/// link put at this user's name after the start is left as it is.
+#[test]
+fn a_stop_after_a_link_at_this_users_peer_folder_deletes_nothing_behind_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut h = Harness::new("peerstop", PEER_ROW_CONFIG);
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".to_string(), "3".to_string()));
+    h.ok(&["submit", "--wait", "--", TESTJOB, "exit", "0"]);
+    let pid = h.coordinator_pid();
+
+    let mine = h.peers_dir.join(format!("u{}", unsafe { libc::getuid() }));
+    std::fs::remove_dir_all(&mine).unwrap();
+    let target = h.root.join("elsewhere");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let kept = target.join(format!("peer-{pid}.json"));
+    std::fs::write(&kept, b"kept").unwrap();
+    std::os::unix::fs::symlink(&target, &mine).unwrap();
+    assert!(
+        h.root.join("state/fairq/run/s").exists(),
+        "the coordinator had not begun to stop when the link was made"
+    );
+
+    h.until("the coordinator stopped", Duration::from_secs(30), || {
+        Harness::stopped(pid)
+    });
+    let log = std::fs::read_to_string(h.root.join("state/fairq/run/daemon.log")).unwrap();
+    assert!(
+        log.contains("the coordinator stopped"),
+        "the stop ran to its end: {log}"
+    );
+    assert_eq!(
+        std::fs::read(&kept).ok().as_deref(),
+        Some(&b"kept"[..]),
+        "the file behind the link is kept"
+    );
+    let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(mode, 0o700, "the link's target keeps its mode");
+}
+
+/// The reader removes an old record only inside a folder it uses: a record
+/// behind a link at this user's name stays.
+#[test]
+fn an_old_record_behind_a_link_at_this_users_peer_folder_stays() {
+    let h = Harness::new("peerold", PEER_ROW_CONFIG);
+    let me = unsafe { libc::getuid() };
+    let target = h.root.join("elsewhere");
+    std::fs::create_dir(&target).unwrap();
+    let old = target.join("peer-1.json");
+    let record = format!(
+        r#"{{"uid":{me},"pid":1,"boot_id":"an earlier start","cpu":1,"mem":1,"updated_at":1}}"#
+    );
+    std::fs::write(&old, record).unwrap();
+    std::os::unix::fs::symlink(&target, h.peers_dir.join(format!("u{me}"))).unwrap();
+
+    h.ok(&["submit", "--wait", "--", TESTJOB, "exit", "0"]);
+    // `info` reads the claims while this test waits for its answer.
+    h.ok(&["info", "--json"]);
+    assert!(old.exists(), "the record behind the link stays");
+}
+
+/// The control of the rows above: a peer folder that fairq makes itself gets
+/// the record and mode 0755, and loses the record when the coordinator stops.
+#[test]
+fn a_peer_folder_that_fairq_makes_gets_the_record_and_loses_it_at_the_stop() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut h = Harness::new("peerfresh", PEER_ROW_CONFIG);
+    let fresh = h.peers_dir.join("fresh");
+    h.extra_env
+        .push((FAIRQ_PEERS_DIR.to_string(), fresh.display().to_string()));
+    h.extra_env
+        .push(("FAIRQ_IDLE_EXIT_SECS".to_string(), "3".to_string()));
+
+    let shown = peers_line(&h);
+    assert!(
+        shown.contains(&format!("on, in {} (", fresh.display())),
+        "a first run is on: {shown}"
+    );
+    let mode = std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(
+        mode, 0o1777,
+        "fairq makes the shared directory sticky and open"
+    );
+    let mine = fresh.join(format!("u{}", unsafe { libc::getuid() }));
+    assert!(!mine.exists(), "config show makes no folder for this user");
+
+    h.ok(&["submit", "--wait", "--", TESTJOB, "exit", "0"]);
+    let pid = h.coordinator_pid();
+    let record = mine.join(format!("peer-{pid}.json"));
+    assert!(record.exists(), "the coordinator publishes its record");
+    let mode = std::fs::metadata(&mine).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(
+        mode, 0o755,
+        "this user's folder is readable by the other users"
+    );
+    let shown = peers_line(&h);
+    assert!(
+        !shown.contains(NOT_SHARED),
+        "the claims are shared: {shown}"
+    );
+
+    h.until("the coordinator stopped", Duration::from_secs(30), || {
+        Harness::stopped(pid)
+    });
+    assert!(!record.exists(), "the stop removes the record");
+}
+
+/// The message for a peer directory that fairq cannot use names the directory
+/// in use, which the variable moves away from the config file's value.
+#[test]
+fn the_message_for_an_unusable_peer_directory_names_the_directory_in_use() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = Harness::new("peerunusable", PEER_ROW_CONFIG);
+    std::fs::set_permissions(&h.peers_dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let shown = peers_line(&h);
+    assert!(
+        shown.contains("NOT ACTIVE") && shown.contains(&h.peers_dir.display().to_string()),
+        "the message names the directory in use: {shown}"
+    );
 }
 
 /// `fairq info` must report the pools, and a coordinator that cannot answer must
