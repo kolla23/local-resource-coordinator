@@ -27429,6 +27429,95 @@ fn a_dependency_by_name_passes_on_a_refused_status() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// `fairq pause` with a refused `pause_state`: a coordinator that can pause gets its words
+/// passed on with the code 1; only one that cannot pause leaves the file as the answer (#246).
+#[test]
+fn pause_passes_on_a_refused_pause_state() {
+    const CAN_PAUSE: &[&str] = &["pause", "pause-requests"];
+    const EARLIER: &[&str] = &["locks", "retries"];
+    const STATE: &[&str] = &["pause_state"];
+    const STATE_AND_LIST: &[&str] = &["pause_state", "capabilities"];
+    const ALL_THREE: &[&str] = &["info", "capabilities", "pause_state"];
+    const ASKED_ON_REFUSAL: &[&str] = &["pause_state", "info", "capabilities"];
+    let below = Fault::Earlier("0.5.2");
+    let refusal = format!("fairq: {}", ARecordingCoordinator::REFUSAL);
+    let refusal = Some(refusal.as_str());
+    let no_page = Some("fairq: the coordinator did not say what is paused");
+    // The row, what the coordinator can do, the requests that meet the fault, the fault, the
+    // arguments, and the last line of the error output; `None` says that the page comes.
+    let rows = [
+        (
+            "refuse",
+            CAN_PAUSE,
+            STATE,
+            Fault::Refuse,
+            vec!["pause"],
+            refusal,
+        ),
+        (
+            "json",
+            CAN_PAUSE,
+            STATE,
+            Fault::Refuse,
+            vec!["pause", "--json"],
+            refusal,
+        ),
+        (
+            "other",
+            CAN_PAUSE,
+            STATE,
+            Fault::Other,
+            vec!["pause"],
+            no_page,
+        ),
+        (
+            "nolist",
+            CAN_PAUSE,
+            STATE_AND_LIST,
+            Fault::Refuse,
+            vec!["pause"],
+            refusal,
+        ),
+        ("earlier", EARLIER, STATE, below, vec!["pause"], None),
+        ("floor", EARLIER, ALL_THREE, below, vec!["pause"], None),
+        (
+            "control",
+            CAN_PAUSE,
+            &[],
+            Fault::Refuse,
+            vec!["pause"],
+            None,
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (row, capabilities, refused, fault, args, says) in rows {
+        let name = format!("pausestate{row}");
+        let c = ARecordingCoordinator::refusing_after(&name, capabilities, refused, None, fault);
+        // A record that no version can read: the page of the file says so, and no other page.
+        std::fs::write(c.root.join("state/fairq/run/paused.json"), "{\"queue\": ").unwrap();
+        let out = c.fairq(&args);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let last = stderr.lines().last().unwrap_or("");
+        let ops = c.ops();
+        let from_the_file = stdout.contains("could not read");
+        let right = match says {
+            Some(says) => out.status.code() == Some(1) && stdout.is_empty() && last == says,
+            None if row == "control" => !from_the_file && ops.len() == 1,
+            None => from_the_file,
+        };
+        let page = says.is_some() || (out.status.code() == Some(0) && !stdout.is_empty());
+        let asked = !matches!(row, "refuse" | "json") || ops == ASKED_ON_REFUSAL;
+        if !right || !page || !asked || ops.first().is_none_or(|op| op != "pause_state") {
+            wrong.push(format!(
+                "{row}: code {:?}, ops {ops:?}, stdout: {stdout:?}, last line: {last}",
+                out.status.code()
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// When a coordinator with no `query` gives the job list, `fairq top --once` shows its jobs
 /// and answers with the code 0 (#212).
 #[test]

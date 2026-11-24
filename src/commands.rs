@@ -5426,18 +5426,25 @@ fn pause_report(json: bool, forensic: bool) -> Result<i32> {
     // command reports what is paused NOW, and the file alone is that answer
     // only when nothing operates.
     if let Some(mut client) = Client::connect_existing_result()? {
-        let response = client.call(&Request::PauseState)?;
-        // response-fallback: #246 a refusal reads as an earlier coordinator
-        if let Response::PauseState {
-            queue,
-            locks,
-            pauses,
-            since,
-            ..
-        } = response
-        {
-            let picture = PausePicture::new(queue, pauses, since, locks);
-            return print_pause_state(&picture, json, forensic);
+        match client.call(&Request::PauseState)? {
+            Response::PauseState {
+                queue,
+                locks,
+                pauses,
+                since,
+                ..
+            } => {
+                let picture = PausePicture::new(queue, pauses, since, locks);
+                return print_pause_state(&picture, json, forensic);
+            }
+            // A coordinator that can pause refused: its words, and not the file (#246).
+            Response::Error { message, .. } => {
+                let (have, _, _) = coordinator_capabilities(&mut client)?;
+                if have.iter().any(|h| h == "pause") {
+                    bail!("{message}");
+                }
+            }
+            _ => bail!("the coordinator did not say what is paused"),
         }
         // An earlier coordinator cannot answer. It also cannot pause, so the
         // file is the whole truth.
