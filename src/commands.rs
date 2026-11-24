@@ -15,6 +15,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-22: each fallback on a coordinator's answer says why it is right (issue #238).
 // Modified by the local-resource-coordinator fork, 2026-11-23: fairq wait --next, --needs and --after by name, and fairq pause pass on why the coordinator refused a status or the pause state (issues #244, #245 and #246).
 // Modified by the local-resource-coordinator fork, 2026-11-24: an answer of another kind than the one a command asked for is a fault and never the code 0 (issue #250).
+// Modified by the local-resource-coordinator fork, 2026-11-24: the plain wait passes on the coordinator's words for a refused wait and for no such job, and a sentence for an answer of another kind (issue #251).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -404,6 +405,10 @@ fn wait_after_submit(raw_id: &str, timeout: Option<&str>, json: bool, quiet: boo
         }
         WaitOutcome::NoSuchJob => {
             eprintln!("fairq: there is no job with the id {raw_id}");
+            Ok(EXIT_NO_SUCH_JOB)
+        }
+        WaitOutcome::NoSuchJobSaid(words) => {
+            eprintln!("fairq: {words}");
             Ok(EXIT_NO_SUCH_JOB)
         }
         WaitOutcome::Interrupted => Ok(report_broken_wait(&ids, false)),
@@ -1079,6 +1084,10 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
                     eprintln!("fairq: there is no job with the id {id}");
                     return Ok(EXIT_NO_SUCH_JOB);
                 }
+                WaitOutcome::NoSuchJobSaid(words) => {
+                    eprintln!("fairq: {words}");
+                    return Ok(EXIT_NO_SUCH_JOB);
+                }
                 // Give the code of a wait that stopped, and NOT `128 + N`. The
                 // job continues, so the caller must attach to it again.
                 WaitOutcome::Interrupted => {
@@ -1719,6 +1728,10 @@ pub fn wait(args: cli::WaitArgs) -> Result<i32> {
                 );
                 return Ok(EXIT_NO_SUCH_JOB);
             }
+            WaitOutcome::NoSuchJobSaid(words) => {
+                eprintln!("fairq: {words}");
+                return Ok(EXIT_NO_SUCH_JOB);
+            }
             // A signal stopped this wait. Name every job that this command
             // still watched, so the user attaches to all of them again.
             WaitOutcome::Interrupted => {
@@ -1881,12 +1894,14 @@ fn warn_about_the_jobs_that_stay(args: &cli::WaitArgs, ids: &[String], done: &st
 }
 
 enum WaitOutcome {
-    // `JobStatus` is large, and the other two answers hold nothing. A box keeps
+    // `JobStatus` is large, and the other answers are small. A box keeps
     // this type small, because each value of it would otherwise take the space
     // of the largest one.
     Finished(Box<JobStatus>),
     TimedOut,
     NoSuchJob,
+    /// The coordinator holds no such job, in its own words (#251).
+    NoSuchJobSaid(String),
     /// A signal stopped the wait. The job continues.
     Interrupted,
 }
@@ -2365,13 +2380,12 @@ fn wait_through_coordinator(
     match client.recv() {
         Ok(Response::Status { status }) => Ok(Some(WaitOutcome::Finished(status))),
         Ok(Response::Error {
+            message,
             kind: ErrorKind::NoSuchJob,
-            ..
-        }) => Ok(Some(WaitOutcome::NoSuchJob)),
-        // One message for one fault. `report_for_a_job` writes the message of
-        // the coordinator, and a second line here would say the same thing
-        // twice in different words.
-        Ok(other) => bail!("the coordinator gave an answer that fairq did not expect: {other:?}"),
+        }) => Ok(Some(WaitOutcome::NoSuchJobSaid(message))),
+        // The coordinator's words, as `report` gives them for every other command.
+        Ok(Response::Error { message, .. }) => bail!("{message}"),
+        Ok(_) => bail!("the coordinator did not give the state of the job"),
         // The coordinator closed the connection, or the read failed. Both mean
         // that the coordinator stopped: the deadline above ends a wait that
         // reached its time limit, so a fault here is not a time limit.

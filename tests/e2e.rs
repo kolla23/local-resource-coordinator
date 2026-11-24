@@ -51,6 +51,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-22: tests that fairq uses its own folder in the shared peer directory only when it is a directory that the user owns, and that the not-active message names the directory in use.
 // Modified by the local-resource-coordinator fork, 2026-11-23: tests that fairq wait --next, --needs and --after by name, and fairq pause pass on a refused status or pause state (issues #244, #245 and #246).
 // Modified by the local-resource-coordinator fork, 2026-11-24: tests that an answer of another kind than the one a command asked for is a fault (issue #250).
+// Modified by the local-resource-coordinator fork, 2026-11-24: tests that the plain wait passes on the coordinator's words for a refused wait and for no such job (issue #251).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -27617,6 +27618,45 @@ fn an_ok_answer_to_a_request_that_wants_another_is_a_fault() {
         if out.status.code() != Some(code) || last != other || !out.stdout.is_empty() || !asked {
             wrong.push(format!(
                 "{row}: code {:?}, ops {ops:?}, last line: {last}",
+                out.status.code()
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The plain `fairq wait` and `fairq status --wait`, with a refused `wait` or another answer:
+/// the coordinator's words or a sentence, never a Rust debug value; `gone` keeps 127 (#251).
+#[test]
+fn wait_passes_on_a_refused_wait() {
+    const CAPS: &[&str] = &["resolve", "query"];
+    let refusal = format!("fairq: {}", ARecordingCoordinator::REFUSAL);
+    let refusal = refusal.as_str();
+    let no_state = "fairq: the coordinator did not give the state of the job";
+    let mut wrong = Vec::new();
+    for (command, fault_name, fault, code, says) in [
+        ("wait", "refuse", Fault::Refuse, 121, refusal),
+        ("wait", "other", Fault::Other, 121, no_state),
+        ("wait", "info", Fault::Pid(4321), 121, no_state),
+        ("wait", "gone", Fault::NoSuchJob, 127, refusal),
+        ("status", "refuse", Fault::Refuse, 121, refusal),
+        ("status", "other", Fault::Other, 121, no_state),
+        ("status", "gone", Fault::NoSuchJob, 127, refusal),
+    ] {
+        let name = format!("w{command}{fault_name}");
+        let c = ARecordingCoordinator::refusing_after(&name, CAPS, &["wait"], None, fault);
+        let mut args = vec![command, "build"];
+        if command == "status" {
+            args.push("--wait");
+        }
+        let out = c.fairq(&args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let last = stderr.lines().last().unwrap_or("");
+        let ops = c.ops();
+        let asked = ops.last().is_some_and(|op| op == "wait");
+        if out.status.code() != Some(code) || last != says || !out.stdout.is_empty() || !asked {
+            wrong.push(format!(
+                "{command}/{fault_name}: code {:?}, ops {ops:?}, last line: {last}",
                 out.status.code()
             ));
         }
