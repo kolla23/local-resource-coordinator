@@ -13,6 +13,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-20: a command passes on why the coordinator refused the info request, no remedy names a pid that fairq did not read, and a pid of 0 or below is refused (issues #221 and #222).
 // Modified by the local-resource-coordinator fork, 2026-11-21: a fault of the courtesy info read that is no time limit ends the command with that fault, and a refused or failed capabilities answer is an error, not a missing capability (issues #233 and #234).
 // Modified by the local-resource-coordinator fork, 2026-11-22: each fallback on a coordinator's answer says why it is right (issue #238).
+// Modified by the local-resource-coordinator fork, 2026-11-23: fairq wait --next, --needs and --after by name, and fairq pause pass on why the coordinator refused a status or the pause state (issues #244, #245 and #246).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -1788,9 +1789,11 @@ fn wait_for_the_next(
                 Some(mut client) => match resolve_id_for_wait(&mut client, raw) {
                     Ok(Some(id)) => match client.call(&Request::Status { id }) {
                         Ok(Response::Status { status }) => Some(Some(*status)),
-                        // The coordinator answered, and it holds no such job.
-                        // response-fallback: #244 a refused status reads as no such job
-                        Ok(_) => Some(None),
+                        // A refusal is no state of the job: its words and the fault code (#244).
+                        Ok(refusal @ Response::Error { .. }) => {
+                            return report_for_a_job(refusal);
+                        }
+                        Ok(_) => bail!("the coordinator did not give the state of the job"),
                         Err(_) => None,
                     },
                     Ok(None) => Some(None),
@@ -2500,12 +2503,9 @@ fn pipeline_dependency(
     if by_name {
         let mut all_stopped = true;
         for id in stages {
-            // response-fallback: #245 a refused status reads as a stage that stopped
-            if let Response::Status { status } = client.call(&Request::Status { id: *id })? {
-                if !status.state.is_terminal() {
-                    all_stopped = false;
-                    break;
-                }
+            if !dependency_state(client, *id, option)?.is_terminal() {
+                all_stopped = false;
+                break;
             }
         }
         if all_stopped {
@@ -2556,22 +2556,20 @@ fn resolve_one_dependency(
     // failed, and that stage then becomes `skipped` with the correct cause.
     let by_name = name.parse::<uuid::Uuid>().is_err();
     if by_name {
-        // response-fallback: #245 a refused status skips this test
-        if let Response::Status { status } = client.call(&Request::Status { id })? {
-            if status.state.is_terminal() {
-                bail!(
-                    "{option}: the name `{name}` gives the job {}, which already stopped. \
-                     Its state is `{}`.\n\n\
-                     A name can give a job of an earlier run. Did you forget to start a \
-                     new `{name}` job?\n\n\
-                     Use the id that `fairq submit` wrote for this run:\n\
-                     \x20   ID=$(fairq submit --name {name} -- ...)\n\
-                     \x20   fairq submit {option} $ID -- ...\n\n\
-                     An id always names one job, so fairq accepts an id whatever its state.",
-                    &id.to_string()[..8],
-                    status.state
-                );
-            }
+        let state = dependency_state(client, id, option)?;
+        if state.is_terminal() {
+            bail!(
+                "{option}: the name `{name}` gives the job {}, which already stopped. \
+                 Its state is `{}`.\n\n\
+                 A name can give a job of an earlier run. Did you forget to start a \
+                 new `{name}` job?\n\n\
+                 Use the id that `fairq submit` wrote for this run:\n\
+                 \x20   ID=$(fairq submit --name {name} -- ...)\n\
+                 \x20   fairq submit {option} $ID -- ...\n\n\
+                 An id always names one job, so fairq accepts an id whatever its state.",
+                &id.to_string()[..8],
+                state
+            );
         }
     }
 
@@ -2579,6 +2577,15 @@ fn resolve_one_dependency(
         ids.push(id);
     }
     Ok(())
+}
+
+/// Reads the state of one dependency. A refusal is an error, and never a state (#245).
+fn dependency_state(client: &mut Client, id: uuid::Uuid, option: &str) -> Result<JobState> {
+    match client.call(&Request::Status { id })? {
+        Response::Status { status } => Ok(status.state),
+        Response::Error { message, .. } => bail!("{option}: {message}"),
+        _ => bail!("{option}: the coordinator did not give the state of the job"),
+    }
 }
 
 /// Tests if a socket fault is the time limit of the read.
@@ -5419,18 +5426,25 @@ fn pause_report(json: bool, forensic: bool) -> Result<i32> {
     // command reports what is paused NOW, and the file alone is that answer
     // only when nothing operates.
     if let Some(mut client) = Client::connect_existing_result()? {
-        let response = client.call(&Request::PauseState)?;
-        // response-fallback: #246 a refusal reads as an earlier coordinator
-        if let Response::PauseState {
-            queue,
-            locks,
-            pauses,
-            since,
-            ..
-        } = response
-        {
-            let picture = PausePicture::new(queue, pauses, since, locks);
-            return print_pause_state(&picture, json, forensic);
+        match client.call(&Request::PauseState)? {
+            Response::PauseState {
+                queue,
+                locks,
+                pauses,
+                since,
+                ..
+            } => {
+                let picture = PausePicture::new(queue, pauses, since, locks);
+                return print_pause_state(&picture, json, forensic);
+            }
+            // A coordinator that can pause refused: its words, and not the file (#246).
+            Response::Error { message, .. } => {
+                let (have, _, _) = coordinator_capabilities(&mut client)?;
+                if have.iter().any(|h| h == "pause") {
+                    bail!("{message}");
+                }
+            }
+            _ => bail!("the coordinator did not say what is paused"),
         }
         // An earlier coordinator cannot answer. It also cannot pause, so the
         // file is the whole truth.
