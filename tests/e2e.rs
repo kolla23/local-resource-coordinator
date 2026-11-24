@@ -49,6 +49,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-20: tests that a command passes on why the coordinator refused the info request, that fairq version does, that no command names a pid that fairq did not read, and that a pid of 0 or below is refused (issues #221 and #222).
 // Modified by the local-resource-coordinator fork, 2026-11-21: the class test of #222 covers every command that reads info as a courtesy, with rerun and submit --each-line; tests that a time limit at that read stays with the next question, that a refused or failed capabilities answer reaches the reader and that a coordinator below the floor still gets the refusal of the floor; the test coordinator can answer like one from before the capability handshake (issues #233 and #234).
 // Modified by the local-resource-coordinator fork, 2026-11-22: tests that fairq uses its own folder in the shared peer directory only when it is a directory that the user owns, and that the not-active message names the directory in use.
+// Modified by the local-resource-coordinator fork, 2026-11-23: tests that fairq wait --next, --needs and --after by name, and fairq pause pass on a refused status or pause state (issues #244, #245 and #246).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -26123,6 +26124,8 @@ enum Fault {
     /// A coordinator from before the capability handshake: an `info` with this version, and
     /// an error for a request that it cannot read.
     Earlier(&'static str),
+    /// An error of the kind `no_such_job`, with the same words as a refusal.
+    NoSuchJob,
 }
 
 /// A coordinator of the test that records each request, and that answers like
@@ -26237,6 +26240,10 @@ impl ARecordingCoordinator {
                                     serde_json::json!({ "result": "of-a-later-version" })
                                 }
                                 Fault::Pid(pid) => info(pid, "0.0.0-dev+gfixture"),
+                                Fault::NoSuchJob => serde_json::json!({
+                                    "result": "error", "kind": "no_such_job",
+                                    "message": Self::REFUSAL,
+                                }),
                                 Fault::Earlier(version) if op == "info" => info(4321, version),
                                 Fault::Earlier(_) => serde_json::json!({
                                     "result": "error", "kind": "internal",
@@ -27304,6 +27311,38 @@ fn a_time_limit_at_the_courtesy_read_stays_with_the_next_question() {
         "{stderr}"
     );
     assert_eq!(c.ops(), ["info"]);
+}
+
+/// `fairq wait --next` with a refused `status`, or an answer of another kind: the reader gets
+/// the coordinator's words and the code of the fault, never the words of fairq for no job (#244).
+#[test]
+fn wait_next_passes_on_a_refused_status() {
+    const CAPS: &[&str] = &["resolve", "query"];
+    let refusal = format!("fairq: {}", ARecordingCoordinator::REFUSAL);
+    let no_state = "fairq: the coordinator did not give the state of the job";
+    let mut wrong = Vec::new();
+    for (fault_name, fault, code, says) in [
+        ("refuse", Fault::Refuse, 121, refusal.as_str()),
+        ("gone", Fault::NoSuchJob, 127, refusal.as_str()),
+        ("other", Fault::Other, 121, no_state),
+    ] {
+        let name = format!("next{fault_name}");
+        let c = ARecordingCoordinator::refusing_after(&name, CAPS, &["status"], None, fault);
+        let out = c.fairq(&["wait", "--next", "build", "test", "--timeout", "10s"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let last = stderr.lines().last().unwrap_or("");
+        let ops = c.ops();
+        // The refusal ends the command: one `status`, and no word about a job that is absent.
+        let stops = ops.iter().filter(|op| *op == "status").count() == 1
+            && !stderr.contains("there is no job");
+        if out.status.code() != Some(code) || last != says || !stops {
+            wrong.push(format!(
+                "{fault_name}: code {:?}, ops {ops:?}, last line: {last}",
+                out.status.code()
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// When a coordinator with no `query` gives the job list, `fairq top --once` shows its jobs

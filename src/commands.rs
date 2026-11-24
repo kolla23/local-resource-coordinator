@@ -13,6 +13,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-20: a command passes on why the coordinator refused the info request, no remedy names a pid that fairq did not read, and a pid of 0 or below is refused (issues #221 and #222).
 // Modified by the local-resource-coordinator fork, 2026-11-21: a fault of the courtesy info read that is no time limit ends the command with that fault, and a refused or failed capabilities answer is an error, not a missing capability (issues #233 and #234).
 // Modified by the local-resource-coordinator fork, 2026-11-22: each fallback on a coordinator's answer says why it is right (issue #238).
+// Modified by the local-resource-coordinator fork, 2026-11-23: fairq wait --next, --needs and --after by name, and fairq pause pass on why the coordinator refused a status or the pause state (issues #244, #245 and #246).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -1788,9 +1789,11 @@ fn wait_for_the_next(
                 Some(mut client) => match resolve_id_for_wait(&mut client, raw) {
                     Ok(Some(id)) => match client.call(&Request::Status { id }) {
                         Ok(Response::Status { status }) => Some(Some(*status)),
-                        // The coordinator answered, and it holds no such job.
-                        // response-fallback: #244 a refused status reads as no such job
-                        Ok(_) => Some(None),
+                        // A refusal is no state of the job: its words and the fault code (#244).
+                        Ok(refusal @ Response::Error { .. }) => {
+                            return report_for_a_job(refusal);
+                        }
+                        Ok(_) => bail!("the coordinator did not give the state of the job"),
                         Err(_) => None,
                     },
                     Ok(None) => Some(None),
