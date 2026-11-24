@@ -26142,6 +26142,9 @@ impl ARecordingCoordinator {
     const BUILD: &'static str = "11111111-0000-4000-8000-000000000001";
     const TEST: &'static str = "22222222-0000-4000-8000-000000000002";
     const REFUSAL: &'static str = "the coordinator of the test refuses this request";
+    /// A name that `resolve` reads as one pipeline, with the two jobs as its stages.
+    const PIPELINE: &'static str = "nightly";
+    const GROUP: &'static str = "33333333-0000-4000-8000-000000000003";
 
     fn new(name: &str, capabilities: &'static [&'static str]) -> Self {
         Self::refusing(name, capabilities, &[])
@@ -26274,6 +26277,20 @@ impl ARecordingCoordinator {
                                     .iter()
                                     .map(|h| {
                                         let h = h.as_str().unwrap();
+                                        if h == Self::PIPELINE {
+                                            let stage = |id: &str, name: &str| {
+                                                serde_json::json!({
+                                                    "id": id, "name": name, "state": "queued",
+                                                })
+                                            };
+                                            return serde_json::json!({
+                                                "handle": h, "group": Self::GROUP, "error": null,
+                                                "jobs": [
+                                                    stage(Self::BUILD, "build"),
+                                                    stage(Self::TEST, "test"),
+                                                ],
+                                            });
+                                        }
                                         match jobs.iter().find(|j| {
                                             j["name"] == h
                                                 || j["id"].as_str().unwrap().starts_with(h)
@@ -27342,6 +27359,73 @@ fn wait_next_passes_on_a_refused_status() {
             ));
         }
     }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// `--needs` and `--after` with a NAME, with a refused `status` or an answer of another kind:
+/// the command ends with the coordinator's words and 121, and it asks nothing more (#245).
+#[test]
+fn a_dependency_by_name_passes_on_a_refused_status() {
+    const CAPS: &[&str] = &["resolve", "query", "dependencies", "groups", "own-job"];
+    let lines = std::env::temp_dir().join(format!("qxdeps{}.txt", std::process::id()));
+    std::fs::write(&lines, "alpha\n").unwrap();
+    let lines_arg = lines.to_string_lossy().to_string();
+    let commands: Vec<(&str, Vec<&str>)> = vec![
+        ("submit", vec!["submit"]),
+        ("eachline", vec!["submit", "--each-line", &lines_arg]),
+        ("run", vec!["run"]),
+    ];
+    let mut wrong = Vec::new();
+    // A short name for each coordinator: a long one moves the socket of fairq away from it.
+    let mut n = 0;
+    for (command, head) in &commands {
+        for option in ["--needs", "--after"] {
+            for target in ["build", ARecordingCoordinator::PIPELINE] {
+                n += 1;
+                let mut args = head.clone();
+                args.extend([option, target, "--", "true", "{}"]);
+                let row = format!("{command}/{option}/{target}");
+                let refusal = format!("fairq: {option}: {}", ARecordingCoordinator::REFUSAL);
+                let no_state =
+                    format!("fairq: {option}: the coordinator did not give the state of the job");
+                for (fault_name, fault, says) in [
+                    ("refuse", Fault::Refuse, &refusal),
+                    ("other", Fault::Other, &no_state),
+                ] {
+                    let name = format!("dep{n}{fault_name}");
+                    let c = ARecordingCoordinator::refusing_after(
+                        &name,
+                        CAPS,
+                        &["status"],
+                        None,
+                        fault,
+                    );
+                    let out = c.fairq(&args);
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    let last = stderr.lines().last().unwrap_or("");
+                    let ops = c.ops();
+                    // The refusal ends the command: one `status`, and it is the last request.
+                    let stops = ops.iter().filter(|op| *op == "status").count() == 1
+                        && ops.last().is_some_and(|op| op == "status");
+                    if out.status.code() != Some(121) || last != says || !stops {
+                        wrong.push(format!(
+                            "{row}/{fault_name}: code {:?}, ops {ops:?}, last line: {last}",
+                            out.status.code()
+                        ));
+                    }
+                }
+                // The control: a dependency that still waits passes, and the command goes on.
+                let c = ARecordingCoordinator::new(&format!("dep{n}control"), CAPS);
+                c.fairq(&args);
+                let ops = c.ops();
+                let asked = ops.iter().position(|op| op == "status");
+                if asked.is_none_or(|at| !ops[at..].iter().any(|op| op == "capabilities")) {
+                    wrong.push(format!("{row}/control: ops {ops:?}"));
+                }
+            }
+        }
+    }
+    std::fs::remove_file(&lines).ok();
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 

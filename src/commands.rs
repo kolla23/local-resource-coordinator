@@ -2503,12 +2503,9 @@ fn pipeline_dependency(
     if by_name {
         let mut all_stopped = true;
         for id in stages {
-            // response-fallback: #245 a refused status reads as a stage that stopped
-            if let Response::Status { status } = client.call(&Request::Status { id: *id })? {
-                if !status.state.is_terminal() {
-                    all_stopped = false;
-                    break;
-                }
+            if !dependency_state(client, *id, option)?.is_terminal() {
+                all_stopped = false;
+                break;
             }
         }
         if all_stopped {
@@ -2559,22 +2556,20 @@ fn resolve_one_dependency(
     // failed, and that stage then becomes `skipped` with the correct cause.
     let by_name = name.parse::<uuid::Uuid>().is_err();
     if by_name {
-        // response-fallback: #245 a refused status skips this test
-        if let Response::Status { status } = client.call(&Request::Status { id })? {
-            if status.state.is_terminal() {
-                bail!(
-                    "{option}: the name `{name}` gives the job {}, which already stopped. \
-                     Its state is `{}`.\n\n\
-                     A name can give a job of an earlier run. Did you forget to start a \
-                     new `{name}` job?\n\n\
-                     Use the id that `fairq submit` wrote for this run:\n\
-                     \x20   ID=$(fairq submit --name {name} -- ...)\n\
-                     \x20   fairq submit {option} $ID -- ...\n\n\
-                     An id always names one job, so fairq accepts an id whatever its state.",
-                    &id.to_string()[..8],
-                    status.state
-                );
-            }
+        let state = dependency_state(client, id, option)?;
+        if state.is_terminal() {
+            bail!(
+                "{option}: the name `{name}` gives the job {}, which already stopped. \
+                 Its state is `{}`.\n\n\
+                 A name can give a job of an earlier run. Did you forget to start a \
+                 new `{name}` job?\n\n\
+                 Use the id that `fairq submit` wrote for this run:\n\
+                 \x20   ID=$(fairq submit --name {name} -- ...)\n\
+                 \x20   fairq submit {option} $ID -- ...\n\n\
+                 An id always names one job, so fairq accepts an id whatever its state.",
+                &id.to_string()[..8],
+                state
+            );
         }
     }
 
@@ -2582,6 +2577,15 @@ fn resolve_one_dependency(
         ids.push(id);
     }
     Ok(())
+}
+
+/// Reads the state of one dependency. A refusal is an error, and never a state (#245).
+fn dependency_state(client: &mut Client, id: uuid::Uuid, option: &str) -> Result<JobState> {
+    match client.call(&Request::Status { id })? {
+        Response::Status { status } => Ok(status.state),
+        Response::Error { message, .. } => bail!("{option}: {message}"),
+        _ => bail!("{option}: the coordinator did not give the state of the job"),
+    }
 }
 
 /// Tests if a socket fault is the time limit of the read.
