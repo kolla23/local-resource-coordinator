@@ -50,6 +50,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-21: the class test of #222 covers every command that reads info as a courtesy, with rerun and submit --each-line; tests that a time limit at that read stays with the next question, that a refused or failed capabilities answer reaches the reader and that a coordinator below the floor still gets the refusal of the floor; the test coordinator can answer like one from before the capability handshake (issues #233 and #234).
 // Modified by the local-resource-coordinator fork, 2026-11-22: tests that fairq uses its own folder in the shared peer directory only when it is a directory that the user owns, and that the not-active message names the directory in use.
 // Modified by the local-resource-coordinator fork, 2026-11-23: tests that fairq wait --next, --needs and --after by name, and fairq pause pass on a refused status or pause state (issues #244, #245 and #246).
+// Modified by the local-resource-coordinator fork, 2026-11-24: tests that an answer of another kind than the one a command asked for is a fault (issue #250).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -27511,6 +27512,111 @@ fn pause_passes_on_a_refused_pause_state() {
         if !right || !page || !asked || ops.first().is_none_or(|op| op != "pause_state") {
             wrong.push(format!(
                 "{row}: code {:?}, ops {ops:?}, stdout: {stdout:?}, last line: {last}",
+                out.status.code()
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// `fairq status` with `--quiet`, `--json` or `--follow` and an answer of another kind: 121 and
+/// a sentence, never the code 0 of a job that succeeded (#250). The `r` rows are the controls.
+#[test]
+fn status_reads_an_answer_of_another_kind_as_a_fault() {
+    const CAPS: &[&str] = &["resolve", "query"];
+    let no_state = "fairq: the coordinator did not give the state of the job";
+    let refusal = format!("fairq: {}", ARecordingCoordinator::REFUSAL);
+    let refusal = refusal.as_str();
+    let mut wrong = Vec::new();
+    for (row, option, fault, says) in [
+        ("plain", None, Fault::Other, no_state),
+        ("quiet", Some("--quiet"), Fault::Other, no_state),
+        ("json", Some("--json"), Fault::Other, no_state),
+        ("follow", Some("--follow"), Fault::Other, no_state),
+        ("info", None, Fault::Pid(4321), no_state),
+        ("refuse", None, Fault::Refuse, refusal),
+        ("rquiet", Some("--quiet"), Fault::Refuse, refusal),
+        ("rfollow", Some("--follow"), Fault::Refuse, refusal),
+    ] {
+        let name = format!("st{row}");
+        let c = ARecordingCoordinator::refusing_after(&name, CAPS, &["status"], None, fault);
+        let mut args = vec!["status", "build"];
+        args.extend(option);
+        let out = c.fairq(&args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let last = stderr.lines().last().unwrap_or("");
+        let ops = c.ops();
+        let asked = ops.last().is_some_and(|op| op == "status");
+        if out.status.code() != Some(121) || last != says || !out.stdout.is_empty() || !asked {
+            wrong.push(format!(
+                "{row}: code {:?}, ops {ops:?}, last line: {last}",
+                out.status.code()
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Every other command whose request wants an answer other than `ok`: an `ok` answer is a
+/// fault with the command's fault code, never the code 0 of work that was done (#250).
+#[test]
+fn an_ok_answer_to_a_request_that_wants_another_is_a_fault() {
+    const CAPS: &[&str] = &[
+        "abort",
+        "dependencies",
+        "events",
+        "groups",
+        "locks",
+        "own-job",
+        "pause",
+        "pause-requests",
+        "query",
+        "resolve",
+        "retries",
+        "stop-many",
+    ];
+    const PIPELINE: &str = "[[jobs]]\nname = \"one\"\ncommand = [\"true\"]\n";
+    let other = "fairq: the coordinator did not give the answer that fairq asked for";
+    let mut wrong = Vec::new();
+    for (row, op, words, code) in [
+        ("submit", "submit", "submit -- true", 121),
+        ("eachline", "submit", "submit --each-line L -- true {}", 121),
+        ("pipeline", "submit", "pipeline P", 121),
+        ("run", "submit", "run -- true", 121),
+        ("abort", "abort", "abort", 1),
+        ("cancel", "cancel_many", "cancel build test", 1),
+        ("kill", "kill_many", "kill build test", 1),
+        ("events", "events", "events", 1),
+        ("info", "info", "info", 1),
+        ("pause", "pause", "pause queue", 1),
+        ("lock", "pause", "pause lock db", 1),
+        ("resume", "resume", "resume", 1),
+    ] {
+        let name = format!("ok{row}");
+        // The thread of the coordinator keeps the list for the life of the test.
+        let refused: &'static [&'static str] = Box::leak(Box::new([op]));
+        let c = ARecordingCoordinator::refusing_after(&name, CAPS, refused, None, Fault::Other);
+        let lines = c.root.join("lines.txt");
+        std::fs::write(&lines, "alpha\n").unwrap();
+        let pipeline = c.root.join("p.toml");
+        std::fs::write(&pipeline, PIPELINE).unwrap();
+        let (lines, pipeline) = (lines.to_string_lossy(), pipeline.to_string_lossy());
+        let args: Vec<&str> = words
+            .split(' ')
+            .map(|w| match w {
+                "L" => &lines,
+                "P" => &pipeline,
+                w => w,
+            })
+            .collect();
+        let out = c.fairq(&args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let last = stderr.lines().last().unwrap_or("");
+        let ops = c.ops();
+        let asked = ops.last().is_some_and(|o| o == op);
+        if out.status.code() != Some(code) || last != other || !out.stdout.is_empty() || !asked {
+            wrong.push(format!(
+                "{row}: code {:?}, ops {ops:?}, last line: {last}",
                 out.status.code()
             ));
         }

@@ -14,6 +14,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-21: a fault of the courtesy info read that is no time limit ends the command with that fault, and a refused or failed capabilities answer is an error, not a missing capability (issues #233 and #234).
 // Modified by the local-resource-coordinator fork, 2026-11-22: each fallback on a coordinator's answer says why it is right (issue #238).
 // Modified by the local-resource-coordinator fork, 2026-11-23: fairq wait --next, --needs and --after by name, and fairq pause pass on why the coordinator refused a status or the pause state (issues #244, #245 and #246).
+// Modified by the local-resource-coordinator fork, 2026-11-24: an answer of another kind than the one a command asked for is a fault and never the code 0 (issue #250).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -1110,8 +1111,9 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
         for id in &ids {
             let status = match client.call(&Request::Status { id: *id })? {
                 Response::Status { status } => status,
-                // response-fallback: report_for_a_job names the error
-                other => return report_for_a_job(other),
+                // A refusal is no state of the job: its words and the fault code (#250).
+                refusal @ Response::Error { .. } => return report_for_a_job(refusal),
+                _ => bail!("the coordinator did not give the state of the job"),
             };
             let code = if status.state.is_terminal() {
                 exit_code_for(&status)
@@ -1132,8 +1134,9 @@ pub fn status(args: cli::StatusArgs) -> Result<i32> {
         let id = *id;
         let status = match client.call(&Request::Status { id })? {
             Response::Status { status } => status,
-            // response-fallback: report_for_a_job names the error
-            other => return report_for_a_job(other),
+            // A refusal is no state of the job: its words and the fault code (#250).
+            refusal @ Response::Error { .. } => return report_for_a_job(refusal),
+            _ => bail!("the coordinator did not give the state of the job"),
         };
         // From here the record is for a READER. See `for_display`.
         let status = Box::new(for_display(*status));
@@ -3924,8 +3927,9 @@ fn report(response: Response) -> Result<i32> {
                 _ => 1,
             })
         }
-        Response::Ok => Ok(0),
-        other => bail!("the coordinator gave an answer that fairq did not expect: {other:?}"),
+        // A request whose answer is `ok` takes that answer before it calls this function, so
+        // every other answer here, `ok` too, is not the answer that fairq asked for.
+        _ => bail!("the coordinator did not give the answer that fairq asked for"),
     }
 }
 
@@ -6405,8 +6409,9 @@ fn stream_until_done(
         // attach to the coordinator that replaced this one.
         let status = match client.call(&Request::Status { id }) {
             Ok(Response::Status { status }) => status,
-            // response-fallback: report_for_a_job names the error
-            Ok(other) => return report_for_a_job(other),
+            // A refusal is no state of the job: its words and the fault code (#250).
+            Ok(refusal @ Response::Error { .. }) => return report_for_a_job(refusal),
+            Ok(_) => bail!("the coordinator did not give the state of the job"),
             // The limit of the reader passed, so fairq asked nothing. That is
             // not a coordinator that stopped, and the reader must not be told
             // that it is. The record on the disk says whether the job has a
