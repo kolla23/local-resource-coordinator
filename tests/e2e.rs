@@ -52,6 +52,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-23: tests that fairq wait --next, --needs and --after by name, and fairq pause pass on a refused status or pause state (issues #244, #245 and #246).
 // Modified by the local-resource-coordinator fork, 2026-11-24: tests that an answer of another kind than the one a command asked for is a fault (issue #250).
 // Modified by the local-resource-coordinator fork, 2026-11-24: tests that the plain wait passes on the coordinator's words for a refused wait and for no such job (issue #251).
+// Modified by the local-resource-coordinator fork, 2026-11-24: a test that fairq pause with no word writes the pause file only when no coordinator answered, and passes on a failed write (issue #252).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -28806,4 +28807,127 @@ fn the_hook_verdict_is_not_appended_through_a_link() {
     assert_eq!(h.state_of(&id), "completed");
     let said = format!("the stop hook of the job {id} ran in");
     assert!(log.contains(&said), "{log}");
+}
+
+/// `fairq pause` with no word writes the pause file only when no coordinator answered. While a
+/// coordinator that cannot pause operates, the report reads the file and leaves it (#252).
+#[test]
+fn pause_with_no_word_leaves_the_file_while_a_coordinator_operates() {
+    use std::os::unix::process::CommandExt;
+    const EARLIER: &[&str] = &["locks", "retries"];
+    const STATE: &[&str] = &["pause_state"];
+    const ALL_THREE: &[&str] = &["info", "capabilities", "pause_state"];
+    const ASKED: &[&str] = &["pause_state", "info", "capabilities"];
+    // The shape of v0.20 to v0.31: one record for the queue and one for each lock, and no id.
+    const RECORD: &str = r#"{"queue":{"paused_at":10,"by_pid":7,"reason":"a demo","until":null},
+        "locks":{"gpu0":{"paused_at":20,"by_pid":7}}}"#;
+    // The same shape with an end that passed: the report ends that request, in memory only.
+    const ENDED: &str = r#"{"queue":{"paused_at":10,"by_pid":7,"reason":"a demo","until":20}}"#;
+    // The ids of the page, for the queue and for the lock; `None` when no page of the file came.
+    let ids = |out: &Output| -> Option<(String, String)> {
+        let page: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+        if out.status.code() != Some(0) || page["pauses"][0]["reason"] != "a demo" {
+            return None;
+        }
+        let lock = &page["locks"][0]["pauses"][0];
+        Some((
+            page["pauses"][0]["pause_id"].as_str()?.to_string(),
+            lock["pause_id"].as_str()?.to_string(),
+        ))
+    };
+    let runs = |out: &Output| {
+        let page = serde_json::from_slice::<serde_json::Value>(&out.stdout);
+        out.status.code() == Some(0) && page.is_ok_and(|page| page["paused"] == false)
+    };
+    let mut wrong = Vec::new();
+    for (row, refused, record) in [
+        ("earlier", STATE, RECORD),
+        ("floor", ALL_THREE, RECORD),
+        ("ended", STATE, ENDED),
+    ] {
+        let name = format!("pausefile{row}");
+        let fault = Fault::Earlier("0.5.2");
+        let c = ARecordingCoordinator::refusing_after(&name, EARLIER, refused, None, fault);
+        let file = c.root.join("state/fairq/run/paused.json");
+        std::fs::write(&file, record).unwrap();
+        for run in 1..=2 {
+            let out = c.fairq(&["pause", "--json"]);
+            // The page holds what the file holds, so the command went past the write.
+            if !(ids(&out).is_some() || row == "ended" && runs(&out)) {
+                wrong.push(format!("{row}/{run}: not the page of the file: {out:?}"));
+            }
+            let after = std::fs::read_to_string(&file).unwrap_or_default();
+            if after != record {
+                wrong.push(format!("{row}/{run}: the file changed: {after}"));
+            }
+        }
+        if c.ops() != [ASKED, ASKED].concat() {
+            wrong.push(format!("{row}: ops {:?}", c.ops()));
+        }
+    }
+    // No coordinator: the id that the page gives is the id that the file keeps.
+    let h = Harness::with_default_config("pausefilenone");
+    let file = h.root.join("state/fairq/run/paused.json");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, RECORD).unwrap();
+    let first = ids(&h.fairq(&["pause", "--json"]));
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let kept: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+    let id_of = |record: &serde_json::Value| record["id"].as_str().unwrap_or("").to_string();
+    let in_file = (id_of(&kept["queue"][0]), id_of(&kept["locks"]["gpu0"][0]));
+    if first.as_ref() != Some(&in_file) || in_file.0.is_empty() || in_file.1.is_empty() {
+        wrong.push(format!(
+            "none: the page gave {first:?}, and the file keeps {in_file:?}"
+        ));
+    }
+    let second = ids(&h.fairq(&["pause", "--json"]));
+    if second != first {
+        wrong.push(format!(
+            "none: the second page gave {second:?}, and the first {first:?}"
+        ));
+    }
+    // No coordinator and an end that passed: the file keeps the request, with its id, for the
+    // coordinator that gives the time of the pause back.
+    let h = Harness::with_default_config("pausefilenoneend");
+    let file = h.root.join("state/fairq/run/paused.json");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, ENDED).unwrap();
+    let out = h.fairq(&["pause", "--json"]);
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let kept: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+    if !runs(&out) || id_of(&kept["queue"][0]).is_empty() || kept["queue"][0]["until"] != 20 {
+        wrong.push(format!(
+            "none-ended: the page {out:?}, and the file keeps {text}"
+        ));
+    }
+    // No coordinator, and the write fails: the command says why, prints no page and leaves the
+    // file. A file size limit of 0 fails it for root too; SIGXFSZ ignored, the write gives EFBIG.
+    let h = Harness::with_default_config("pausefilenowrite");
+    let file = h.root.join("state/fairq/run/paused.json");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, RECORD).unwrap();
+    let mut cmd = h.command(&["pause", "--json"]);
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+            let none = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            match libc::setrlimit(libc::RLIMIT_FSIZE, &none) {
+                0 => Ok(()),
+                _ => Err(std::io::Error::last_os_error()),
+            }
+        });
+    }
+    let out = cmd.output().unwrap();
+    let said = String::from_utf8_lossy(&out.stderr);
+    let after = std::fs::read_to_string(&file).unwrap_or_default();
+    let named = said.contains(".paused.json.tmp.") && said.contains("File too large");
+    if out.status.success() || !out.stdout.is_empty() || !named || after != RECORD {
+        wrong.push(format!(
+            "write-fails: the command gave {out:?}, and the file keeps {after}"
+        ));
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
