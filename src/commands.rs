@@ -16,6 +16,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-23: fairq wait --next, --needs and --after by name, and fairq pause pass on why the coordinator refused a status or the pause state (issues #244, #245 and #246).
 // Modified by the local-resource-coordinator fork, 2026-11-24: an answer of another kind than the one a command asked for is a fault and never the code 0 (issue #250).
 // Modified by the local-resource-coordinator fork, 2026-11-24: the plain wait passes on the coordinator's words for a refused wait and for no such job, and a sentence for an answer of another kind (issue #251).
+// Modified by the local-resource-coordinator fork, 2026-11-24: fairq pause with no word writes the pause file only when no coordinator answered, and passes on a failed write (issue #252).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -5440,10 +5441,12 @@ pub fn resume(args: cli::ResumeArgs) -> Result<i32> {
 /// must not make the thing that it asks about. When no coordinator operates,
 /// the file on the disk holds the answer.
 fn pause_report(json: bool, forensic: bool) -> Result<i32> {
-    // A coordinator that did not answer must not read as no coordinator: this
-    // command reports what is paused NOW, and the file alone is that answer
-    // only when nothing operates.
-    if let Some(mut client) = Client::connect_existing_result()? {
+    // A coordinator that did not answer must not read as none: this command
+    // reports what is paused NOW, and the file is that answer only when
+    // nothing that can pause answered.
+    let client = Client::connect_existing_result()?;
+    let no_coordinator = client.is_none();
+    if let Some(mut client) = client {
         match client.call(&Request::PauseState)? {
             Response::PauseState {
                 queue,
@@ -5464,24 +5467,21 @@ fn pause_report(json: bool, forensic: bool) -> Result<i32> {
             }
             _ => bail!("the coordinator did not say what is paused"),
         }
-        // An earlier coordinator cannot answer. It also cannot pause, so the
-        // file is the whole truth.
+        // An earlier coordinator cannot say what is paused. It also cannot
+        // pause, so the file is the whole truth.
     }
 
     // End a pause that reached the time of `--for`.
     //
-    // The scheduler does this step, and no scheduler operates now. Without it
+    // The scheduler does this step, and none that does it operates now. Without it
     // this command reports a pause that the next command ends at once — a
     // report that lies in the dangerous direction, because the reader believes
     // that the machine stays quiet.
     let mut paused = crate::pause::Paused::read();
-    // Write an id that `read` gave to a record of the earlier shape, before
-    // this command prints it. No coordinator operates, so nobody else writes
-    // the file, and an id that this command printed and did not keep would be
-    // a different id for the next reader. A request whose end passed stays in
-    // the file for the coordinator, which pays the time of the pause back.
-    if paused.id_not_in_the_file && !paused.queue.iter().any(|r| r.fault) {
-        paused.write().ok();
+    // Keep the ids `read` gave, before `expire` ends a request in memory, and
+    // only when no coordinator answered: beside one, the file stays (#252).
+    if no_coordinator && paused.id_not_in_the_file && !paused.queue.iter().any(|r| r.fault) {
+        paused.write()?;
     }
     paused.expire(crate::sys::now_secs());
 
