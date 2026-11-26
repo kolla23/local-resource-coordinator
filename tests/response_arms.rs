@@ -210,20 +210,21 @@ fn read_readers(text: &str, readers: &mut Readers) -> Result<(), String> {
     Ok(())
 }
 
-/// The first argument of `matches!` and its pattern.
-struct MatchesBody(Expr, Pat);
+/// The first argument of `matches!`, its pattern, and its guard.
+struct MatchesBody(Expr, Pat, Option<Expr>);
 
 impl syn::parse::Parse for MatchesBody {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let value: Expr = input.parse()?;
         input.parse::<Token![,]>()?;
         let pat = Pat::parse_multi_with_leading_vert(input)?;
+        let mut guard = None;
         if input.peek(Token![if]) {
             input.parse::<Token![if]>()?;
-            input.parse::<Expr>()?;
+            guard = Some(input.parse::<Expr>()?);
         }
         input.parse::<Option<Token![,]>>()?;
-        Ok(MatchesBody(value, pat))
+        Ok(MatchesBody(value, pat, guard))
     }
 }
 
@@ -472,9 +473,10 @@ impl<'ast> Visit<'ast> for Check<'_> {
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
         let line = node.path.span().start().line;
         if node.path.is_ident("matches") {
-            if let Ok(MatchesBody(value, pat)) = node.parse_body::<MatchesBody>() {
+            if let Ok(MatchesBody(value, pat, guard)) = node.parse_body::<MatchesBody>() {
                 self.pattern(&pat, &value, line, "this matches!");
                 self.visit_expr(&value);
+                guard.iter().for_each(|g| self.visit_expr(g));
                 return;
             }
         }
@@ -487,7 +489,7 @@ impl<'ast> Visit<'ast> for Check<'_> {
             }
             // The shape of a drop is not read there, so any reader call in such a body is a finding.
             Err(_) if self.calls_a_reader(node.tokens.clone()) => {
-                self.flag(line, READER_MACRO.into());
+                self.flag_once(line, READER_MACRO.into());
             }
             Err(_) => {}
         }
@@ -1238,8 +1240,9 @@ fn f(page: &mut Page, client: &mut Client, child: &mut Child) -> Result<()> {
     ),
     (
         "the arguments of a macro are read, and the code of tests is left alone",
-        r#"fn f(client: &mut Client) {
+        r#"fn f(client: &mut Client, count: Option<u32>) -> bool {
     println!("{}", client.call(&Request::Info).map_or(0, count));
+    matches!(count, Some(_) if client.can("pause").unwrap_or(false))
 }
 #[cfg(test)]
 mod tests {
@@ -1248,7 +1251,10 @@ mod tests {
         assert!(client.call(&Request::Ping).is_ok());
     }
 }"#,
-        &[(2, "this .map_or() drops the Err of a coordinator reader")],
+        &[
+            (2, "this .map_or() drops the Err of a coordinator reader"),
+            (3, DROP_OR),
+        ],
     ),
     (
         "a macro that syn cannot read and that calls a reader is a finding",
@@ -1261,8 +1267,9 @@ fn f(client: &mut Client, jobs_running: usize, can: bool) {
     let plain = json!({ "running": jobs_running, "can": can });
     // response-fallback: a page that shows no count when the coordinator refuses
     let marked = json!({ "running": jobs_running(client).unwrap_or(0) });
+    let _ = client.call(&Request::Ping); let late = json!({ "can": client.can("pause")? });
 }"#,
-        &[(5, READER_MACRO), (6, READER_MACRO)],
+        &[(5, READER_MACRO), (6, READER_MACRO), (10, LET_WILD)],
     ),
 ];
 
