@@ -35,6 +35,8 @@ const DROPS: [&str; 10] = [
 const ARM: &str = "this arm takes the Err of a coordinator reader unread";
 const UNREAD: &str = "leaves the Err of a coordinator reader unread";
 const LET_WILD: &str = "this let _ drops the answer of a coordinator reader";
+const READER_MACRO: &str =
+    "syn cannot read the body of this macro, which calls a coordinator reader";
 
 /// What the patterns of one site name.
 #[derive(Default)]
@@ -271,6 +273,22 @@ impl Check<'_> {
         }
     }
 
+    /// True when the tokens of a macro call a reader, at any depth: the name of a free reader
+    /// or of a method of `ANSWERS`, directly before `(..)`.
+    fn calls_a_reader(&self, tokens: proc_macro2::TokenStream) -> bool {
+        let trees: Vec<proc_macro2::TokenTree> = tokens.into_iter().collect();
+        trees.iter().enumerate().any(|(i, tree)| match tree {
+            proc_macro2::TokenTree::Ident(word) => {
+                let word = word.to_string();
+                let called = matches!(trees.get(i + 1), Some(proc_macro2::TokenTree::Group(g))
+                    if g.delimiter() == proc_macro2::Delimiter::Parenthesis);
+                called && (ANSWERS.contains(&word.as_str()) || self.readers.contains(&word))
+            }
+            proc_macro2::TokenTree::Group(group) => self.calls_a_reader(group.stream()),
+            _ => false,
+        })
+    }
+
     /// True while an expression holds the `Result` of a reader: behind parentheses, a reference
     /// or other methods. A `?` hands the `Err` on, and a method of `DROPS` has dropped it.
     fn holds_a_reader(&self, expr: &Expr) -> bool {
@@ -466,6 +484,10 @@ impl<'ast> Visit<'ast> for Check<'_> {
             Err(_) if holds_the_word_response(node.tokens.clone()) => {
                 let text = "syn cannot read the body of this macro, which names a Response";
                 self.flag(line, text.into());
+            }
+            // The shape of a drop is not read there, so any reader call in such a body is a finding.
+            Err(_) if self.calls_a_reader(node.tokens.clone()) => {
+                self.flag(line, READER_MACRO.into());
             }
             Err(_) => {}
         }
@@ -1227,6 +1249,20 @@ mod tests {
     }
 }"#,
         &[(2, "this .map_or() drops the Err of a coordinator reader")],
+    ),
+    (
+        "a macro that syn cannot read and that calls a reader is a finding",
+        r#"fn jobs_running(client: &mut Client) -> Result<usize> {
+    read_the_count(client.call(&Request::Info)?)
+}
+fn f(client: &mut Client, jobs_running: usize, can: bool) {
+    let shown = json!({ "running": jobs_running(client).unwrap_or(0) });
+    let other = serde_json::json!({ "can": client.can("pause").is_ok() });
+    let plain = json!({ "running": jobs_running, "can": can });
+    // response-fallback: a page that shows no count when the coordinator refuses
+    let marked = json!({ "running": jobs_running(client).unwrap_or(0) });
+}"#,
+        &[(5, READER_MACRO), (6, READER_MACRO)],
     ),
 ];
 
