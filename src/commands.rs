@@ -17,6 +17,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-24: an answer of another kind than the one a command asked for is a fault and never the code 0 (issue #250).
 // Modified by the local-resource-coordinator fork, 2026-11-24: the plain wait passes on the coordinator's words for a refused wait and for no such job, and a sentence for an answer of another kind (issue #251).
 // Modified by the local-resource-coordinator fork, 2026-11-24: fairq pause with no word writes the pause file only when no coordinator answered, and passes on a failed write (issue #252).
+// Modified by the local-resource-coordinator fork, 2026-11-25: a reason above each place that drops the Err of a coordinator reader, for the check of tests/response_arms.rs (issue #242).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -1811,9 +1812,11 @@ fn wait_for_the_next(
                             return report_for_a_job(refusal);
                         }
                         Ok(_) => bail!("the coordinator did not give the state of the job"),
+                        // response-fallback: no answer from the coordinator: the record answers
                         Err(_) => None,
                     },
                     Ok(None) => Some(None),
+                    // response-fallback: #214 a refusal reads as a coordinator that did not answer
                     Err(_) => None,
                 },
                 None => None,
@@ -2088,6 +2091,7 @@ impl ReasonReporter {
                         // response-fallback: a courtesy read of the reason, on its own connection
                         _ => None,
                     },
+                    // response-fallback: #214 a refusal reads as a coordinator that did not answer
                     _ => None,
                 }
             }
@@ -2338,8 +2342,10 @@ fn wait_through_coordinator(
     let id = match resolve_id_for_wait(&mut client, raw_id) {
         Ok(Some(id)) => id,
         Ok(None) => return Ok(Some(WaitOutcome::NoSuchJob)),
+        // response-fallback: #214 a refusal reads as a coordinator that did not answer
         Err(_) if the_limit_passed() => return Ok(Some(WaitOutcome::TimedOut)),
         // The coordinator did not answer. Find the answer without it.
+        // response-fallback: #214 a refusal reads as a coordinator that did not answer
         Err(_) => return Ok(None),
     };
 
@@ -2390,6 +2396,7 @@ fn wait_through_coordinator(
         // The coordinator closed the connection, or the read failed. Both mean
         // that the coordinator stopped: the deadline above ends a wait that
         // reached its time limit, so a fault here is not a time limit.
+        // response-fallback: a closed connection or a failed read is a coordinator that stopped
         Err(_) => Ok(None),
     }
 }
@@ -2408,6 +2415,7 @@ fn warn_if_version_differs(client: &mut Client) -> Result<()> {
         // Any fault but a time limit ends the command here (#233); the question that
         // follows names the wait that a time limit used.
         Err(e) if !crate::client::is_a_coordinator_timeout(&e) => return Err(e),
+        // response-fallback: the Result goes on whole to the if-let below, which has its reason
         answer => answer,
     };
     // response-fallback: a courtesy read; the question that follows reports the fault (#233)
@@ -4052,6 +4060,7 @@ fn resolve_targets_in(jobs: &[JobStatus], raw: &str) -> Result<Targets> {
 /// named nothing, and it named two things.
 fn expand_ids(raws: &[String]) -> Result<Vec<String>> {
     // ONE request for every value, whatever the number of values.
+    // response-fallback: #214 a refusal reads as no coordinator, and the raw ids go on
     let answers = Client::connect_existing().and_then(|mut c| resolve_many(&mut c, raws).ok());
     let Some(answers) = answers else {
         return Ok(raws.to_vec());
@@ -5193,6 +5202,7 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
             // Say what a pause does NOT do. A person who asked for a quiet
             // machine must not believe that the jobs which operate stopped.
             if !(json || args.json) {
+                // response-fallback: #226 a refused info reads as no job that operates
                 let running = jobs_running(&mut client).unwrap_or(0);
                 if running > 0 {
                     // The singular and the plural are separate texts. ASD-STE100
@@ -6434,6 +6444,7 @@ fn stream_until_done(
             Err(e) if crate::client::is_a_passed_reader_limit(&e) => {
                 Box::new(crate::job::read_status(dir)?)
             }
+            // response-fallback: status_without_the_coordinator reads the record and says so
             Err(_) => {
                 status_without_the_coordinator(client, id, dir, owns_job, &mut announced_loss)?
             }
@@ -6513,6 +6524,7 @@ fn status_without_the_coordinator(
         if started_here {
             // A coordinator that did not answer is not a coordinator that
             // refuses. Keep the job in that case, which is the safe direction.
+            // response-fallback: #261 a refusal reads as a coordinator that keeps the job
             if coordinator_owns_jobs(client).unwrap_or(false) {
                 own_the_job(client, id);
             } else {
