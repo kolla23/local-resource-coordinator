@@ -26134,6 +26134,8 @@ enum Fault {
     BesideAHeldWait,
     /// A `resolved` answer with no entry in `found`, whatever the handles.
     EmptyFound,
+    /// A refusal after 1.5 s: past a `--timeout 1s`, inside the 2 s read limit of a wait.
+    LateRefuse,
 }
 
 /// A coordinator of the test that records each request, and that answers like
@@ -26251,6 +26253,13 @@ impl ARecordingCoordinator {
                                     return;
                                 }
                                 Fault::Close => return,
+                                Fault::LateRefuse => {
+                                    std::thread::sleep(Duration::from_millis(1500));
+                                    serde_json::json!({
+                                        "result": "error", "kind": "internal",
+                                        "message": Self::REFUSAL,
+                                    })
+                                }
                                 Fault::Other => serde_json::json!({ "result": "ok" }),
                                 Fault::Garbled => {
                                     serde_json::json!({ "result": "of-a-later-version" })
@@ -27814,8 +27823,8 @@ fn a_wait_passes_on_a_later_refused_read_of_the_ids() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// What is no answer about the ids keeps its path: the rules' 127 for an unknown name, a closed
-/// connection as no answer (also in `--next`), and the reason reporter's refused read (#214).
+/// What is no answer about the ids keeps its path: 127 for an unknown name, a closed connection
+/// (also in `--next`), the limit before a late refusal, the reporter's refused read (#214).
 #[test]
 fn a_wait_keeps_the_other_paths_of_a_read_of_the_ids() {
     const CAPS: &[&str] = &["resolve", "query"];
@@ -27868,6 +27877,22 @@ fn a_wait_keeps_the_other_paths_of_a_read_of_the_ids() {
     ];
     let right = out.status.code() == Some(127) && stderr == no_job && c.ops() == asked;
     check("next-close", right, &c, &out);
+
+    // The refusal of the later read arrives once the limit passed: the limit ended the wait.
+    let (after, late) = (Some("resolve"), Fault::LateRefuse);
+    let c = ARecordingCoordinator::refusing_after("idslate", CAPS, &["resolve"], after, late);
+    let out = c.fairq(&["wait", "build", "--timeout", "1s"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let unsaid = !stderr.contains(ARecordingCoordinator::REFUSAL);
+    let asked = [
+        "capabilities",
+        "resolve",
+        "pause_state",
+        "capabilities",
+        "resolve",
+    ];
+    let right = out.status.code() == Some(124) && unsaid && c.ops() == asked;
+    check("late", right, &c, &out);
 
     let held = Fault::BesideAHeldWait;
     let c =

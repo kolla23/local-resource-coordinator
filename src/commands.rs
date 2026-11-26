@@ -2345,10 +2345,11 @@ fn wait_through_coordinator(
     let id = match resolve_id_for_wait(&mut client, raw_id) {
         Ok(Some(id)) => id,
         Ok(None) => return Ok(Some(WaitOutcome::NoSuchJob)),
-        // An answer that is not the ids is no coordinator that stopped (#214).
-        Err(e) if crate::client::is_an_answer(&e) => return Err(e),
         // response-fallback: a limit ended the read, so the wait reached its limit
         Err(_) if the_limit_passed() => return Ok(Some(WaitOutcome::TimedOut)),
+        // An answer that is not the ids is no coordinator that stopped (#214). It comes after the
+        // limit: the read timeout above lets an answer arrive once the limit passed.
+        Err(e) if crate::client::is_an_answer(&e) => return Err(e),
         // The coordinator did not answer. Find the answer without it.
         // response-fallback: no answer from the coordinator: the record answers
         Err(_) => return Ok(None),
