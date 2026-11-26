@@ -27815,7 +27815,7 @@ fn a_wait_passes_on_a_later_refused_read_of_the_ids() {
 }
 
 /// What is no answer about the ids keeps its path: the rules' 127 for an unknown name, a closed
-/// connection as a coordinator that stopped, and the reason reporter's refused read (#214).
+/// connection as no answer (also in `--next`), and the reason reporter's refused read (#214).
 #[test]
 fn a_wait_keeps_the_other_paths_of_a_read_of_the_ids() {
     const CAPS: &[&str] = &["resolve", "query"];
@@ -27849,6 +27849,25 @@ fn a_wait_keeps_the_other_paths_of_a_read_of_the_ids() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     let stopped = stderr.contains("fairq: the coordinator stopped.");
     check("close", out.status.code() == Some(124) && stopped, &c, &out);
+
+    // The loop of `--next` meets the closed connection at its own read, and reads the record.
+    let (after, close) = (Some("resolve"), Fault::Close);
+    let c = ARecordingCoordinator::refusing_after("idsnextclose", CAPS, &["resolve"], after, close);
+    let out = c.fairq(&["wait", "--next", "build", "test", "--timeout", "2s"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let no_job = format!(
+        "fairq: there is no job with the id {}\n",
+        ARecordingCoordinator::BUILD
+    );
+    let asked = [
+        "capabilities",
+        "resolve",
+        "pause_state",
+        "capabilities",
+        "resolve",
+    ];
+    let right = out.status.code() == Some(127) && stderr == no_job && c.ops() == asked;
+    check("next-close", right, &c, &out);
 
     let held = Fault::BesideAHeldWait;
     let c =
