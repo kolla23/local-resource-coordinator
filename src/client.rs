@@ -4,6 +4,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-02: daemon.log, spawn.lock and the probe file are opened with O_NOFOLLOW, with a test for the probe (issue #88).
 // Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28).
 // Modified by the local-resource-coordinator fork, 2026-11-21: Client::can gives an error for a refused capabilities answer and for an answer of another kind (issue #234).
+// Modified by the local-resource-coordinator fork, 2026-11-26: a mark on the error for a refused capabilities answer and for an answer of another kind, so that a wait tells an answer from no answer (issue #214).
 //! This module connects the CLI to the coordinator.
 //!
 //! If no coordinator operates, the CLI starts one. Many CLI processes can do
@@ -487,8 +488,8 @@ impl Client {
         if self.capabilities.is_none() {
             let names = match self.call(&Request::Capabilities)? {
                 Response::Capabilities { names } => names,
-                Response::Error { message, .. } => bail!("{message}"),
-                _ => bail!("the coordinator did not say what it can do"),
+                Response::Error { message, .. } => return Err(an_answer(message)),
+                _ => return Err(an_answer("the coordinator did not say what it can do")),
             };
             self.capabilities = Some(names);
         }
@@ -920,6 +921,29 @@ fn timed_out(message: String) -> anyhow::Error {
 /// code 124 says that a limit ended the command, and that is what happened.
 pub fn is_a_coordinator_timeout(error: &anyhow::Error) -> bool {
     error.downcast_ref::<CoordinatorTimeout>().is_some() || is_a_passed_reader_limit(error)
+}
+
+/// Marks an error that is an ANSWER of the coordinator: a refusal, or an answer of another
+/// kind. A wait keeps it apart from a coordinator that did not answer (#214).
+#[derive(Debug)]
+pub struct AnswerOfTheCoordinator(String);
+
+impl std::fmt::Display for AnswerOfTheCoordinator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for AnswerOfTheCoordinator {}
+
+/// Gives an error with the mark of [`AnswerOfTheCoordinator`], and these words.
+pub fn an_answer(words: impl Into<String>) -> anyhow::Error {
+    anyhow::Error::new(AnswerOfTheCoordinator(words.into()))
+}
+
+/// Says whether the coordinator ANSWERED, and this error holds what it said.
+pub fn is_an_answer(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<AnswerOfTheCoordinator>().is_some()
 }
 
 /// Says whether a read ended because it reached its own limit.
