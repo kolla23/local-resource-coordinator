@@ -1,6 +1,7 @@
-//! The check of issue #238: a fallback (`_`, a binding, `else`) on a coordinator's `Response`
-//! names `Response::Error` too, or says why one line above: `// response-fallback: <why>`.
+//! The check of issues #238 and #242: a fallback (`_`, a binding, `else`, a method) on an answer
+//! of the coordinator names its error, or says why one line above: `// response-fallback: <why>`.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -8,6 +9,34 @@ use syn::visit::{self, Visit};
 use syn::{Attribute, Expr, Pat, Token};
 
 const MARKER: &str = "// response-fallback:";
+
+/// The `Client` methods that give an answer of the coordinator. With each free function that
+/// takes a `Client`, they are the readers of #242; a function that only calls one is not seen.
+const ANSWERS: [&str; 5] = ["call", "call_within", "can", "recv", "recv_opt"];
+
+/// The `Client` methods that give no answer. A method in neither list fails the real check.
+const NO_ANSWER: [&str; 4] = ["send", "set_read_timeout", "wait_readable", "write_quietly"];
+
+/// The methods that turn the `Err` of a reader into a default. Not seen: a `Result` held in a
+/// variable, a closure with no reader call in it, a named `ok` arm in a shared reporter (#250).
+const DROPS: [&str; 10] = [
+    "is_err",
+    "is_err_and",
+    "is_ok",
+    "is_ok_and",
+    "map_or",
+    "map_or_else",
+    "ok",
+    "unwrap_or",
+    "unwrap_or_default",
+    "unwrap_or_else",
+];
+
+const ARM: &str = "this arm takes the Err of a coordinator reader unread";
+const UNREAD: &str = "leaves the Err of a coordinator reader unread";
+const LET_WILD: &str = "this let _ drops the answer of a coordinator reader";
+const READER_MACRO: &str =
+    "syn cannot read the body of this macro, which calls a coordinator reader";
 
 /// What the patterns of one site name.
 #[derive(Default)]
@@ -111,26 +140,99 @@ fn is_cfg_test(attrs: &[Attribute]) -> bool {
     })
 }
 
-/// The first argument of `matches!` and its pattern.
-struct MatchesBody(Expr, Pat);
+/// What a pattern does with an `Err`: `None` takes none, `Some(true)` names the fault
+/// (`Err(e)`), `Some(false)` takes it unread (`Err(_)`, `_`, a binding).
+fn names_the_fault(pat: &Pat) -> Option<bool> {
+    match pat {
+        Pat::TupleStruct(p) if p.path.is_ident("Err") => Some(match p.elems.first() {
+            Some(Pat::Ident(e)) => !e.ident.to_string().starts_with("_"),
+            Some(Pat::Wild(_) | Pat::Rest(_)) | None => false,
+            Some(_) => true,
+        }),
+        Pat::Paren(p) => names_the_fault(&p.pat),
+        Pat::Reference(p) => names_the_fault(&p.pat),
+        Pat::Guard(p) => names_the_fault(&p.pat),
+        Pat::Or(p) => p.cases.iter().filter_map(names_the_fault).min(),
+        _ if takes(pat) == Takes::Everything => Some(false),
+        _ => None,
+    }
+}
+
+/// The free functions that take a `Client`, and the methods of `impl Client` that take `self`.
+#[derive(Default)]
+struct Readers {
+    free: BTreeSet<String>,
+    methods: BTreeSet<String>,
+}
+
+fn is_client(ty: &syn::Type) -> bool {
+    match ty {
+        syn::Type::Reference(r) => is_client(&r.elem),
+        syn::Type::Path(p) => p.path.segments.last().is_some_and(|s| s.ident == "Client"),
+        _ => false,
+    }
+}
+
+impl<'ast> Visit<'ast> for Readers {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        let takes_a_client =
+            |arg: &syn::FnArg| matches!(arg, syn::FnArg::Typed(t) if is_client(&t.ty));
+        if node.sig.inputs.iter().any(takes_a_client) {
+            self.free.insert(node.sig.ident.to_string());
+        }
+        visit::visit_item_fn(self, node);
+    }
+
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        if node.trait_.is_none() && is_client(&node.self_ty) {
+            for item in &node.items {
+                if let syn::ImplItem::Fn(f) = item {
+                    if f.sig.receiver().is_some() {
+                        self.methods.insert(f.sig.ident.to_string());
+                    }
+                }
+            }
+        }
+        visit::visit_item_impl(self, node);
+    }
+}
+
+fn parse(text: &str) -> Result<syn::File, String> {
+    syn::parse_file(text).map_err(|e| {
+        let at = e.span().start();
+        format!("{}:{}: syn cannot read this file: {e}", at.line, at.column)
+    })
+}
+
+/// Adds the readers that one source text declares.
+fn read_readers(text: &str, readers: &mut Readers) -> Result<(), String> {
+    readers.visit_file(&parse(text)?);
+    Ok(())
+}
+
+/// The first argument of `matches!`, its pattern, and its guard.
+struct MatchesBody(Expr, Pat, Option<Expr>);
 
 impl syn::parse::Parse for MatchesBody {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let value: Expr = input.parse()?;
         input.parse::<Token![,]>()?;
         let pat = Pat::parse_multi_with_leading_vert(input)?;
+        let mut guard = None;
         if input.peek(Token![if]) {
             input.parse::<Token![if]>()?;
-            input.parse::<Expr>()?;
+            guard = Some(input.parse::<Expr>()?);
         }
         input.parse::<Option<Token![,]>>()?;
-        Ok(MatchesBody(value, pat))
+        Ok(MatchesBody(value, pat, guard))
     }
 }
 
 struct Check<'a> {
     lines: Vec<&'a str>,
+    readers: &'a BTreeSet<String>,
     sites: usize,
+    calls: usize,
     used: Vec<usize>,
     found: Vec<(usize, String)>,
 }
@@ -159,6 +261,82 @@ impl Check<'_> {
         }
     }
 
+    /// True for the call of a reader: a free function that takes a `Client`, a method of `ANSWERS`.
+    fn is_a_reader(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Call(call) => match &*call.func {
+                Expr::Path(p) => (p.path.segments.last())
+                    .is_some_and(|s| self.readers.contains(&s.ident.to_string())),
+                _ => false,
+            },
+            Expr::MethodCall(m) => ANSWERS.contains(&m.method.to_string().as_str()),
+            _ => false,
+        }
+    }
+
+    /// True when the tokens of a macro call a reader, at any depth: the name of a free reader
+    /// or of a method of `ANSWERS`, directly before `(..)`.
+    fn calls_a_reader(&self, tokens: proc_macro2::TokenStream) -> bool {
+        let trees: Vec<proc_macro2::TokenTree> = tokens.into_iter().collect();
+        trees.iter().enumerate().any(|(i, tree)| match tree {
+            proc_macro2::TokenTree::Ident(word) => {
+                let word = word.to_string();
+                let called = matches!(trees.get(i + 1), Some(proc_macro2::TokenTree::Group(g))
+                    if g.delimiter() == proc_macro2::Delimiter::Parenthesis);
+                called && (ANSWERS.contains(&word.as_str()) || self.readers.contains(&word))
+            }
+            proc_macro2::TokenTree::Group(group) => self.calls_a_reader(group.stream()),
+            _ => false,
+        })
+    }
+
+    /// True while an expression holds the `Result` of a reader: behind parentheses, a reference
+    /// or other methods. A `?` hands the `Err` on, and a method of `DROPS` has dropped it.
+    fn holds_a_reader(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Paren(p) => self.holds_a_reader(&p.expr),
+            Expr::Reference(r) => self.holds_a_reader(&r.expr),
+            Expr::MethodCall(m) if !self.is_a_reader(expr) => {
+                !DROPS.contains(&m.method.to_string().as_str()) && self.holds_a_reader(&m.receiver)
+            }
+            _ => self.is_a_reader(expr),
+        }
+    }
+
+    /// A finding of #242, unless its line has a finding or a reason already: one line, one marker.
+    fn flag_once(&mut self, line: usize, text: String) {
+        if !self.found.iter().any(|f| f.0 == line) && !self.used.contains(&(line - 1)) {
+            self.flag(line, text);
+        }
+    }
+
+    /// A match on the call of a reader: each arm that takes an `Err` unread is a finding, up
+    /// to the first arm with no guard that takes every `Err`.
+    fn arms_of_a_reader(&mut self, node: &syn::ExprMatch) {
+        if !self.holds_a_reader(&node.expr) {
+            return;
+        }
+        for arm in &node.arms {
+            let Some(named) = names_the_fault(&arm.pat) else {
+                continue;
+            };
+            if !named {
+                self.flag_once(arm.span().start().line, ARM.into());
+            }
+            if !matches!(arm.pat, Pat::Guard(_)) {
+                break;
+            }
+        }
+    }
+
+    /// One pattern on a `Response`, on the call of a reader, or on both.
+    fn pattern(&mut self, pat: &Pat, value: &Expr, line: usize, kind: &str) {
+        self.one_pattern(pat, line, kind);
+        if self.holds_a_reader(value) && names_the_fault(pat) != Some(true) {
+            self.flag_once(line, format!("{kind} {UNREAD}"));
+        }
+    }
+
     /// One pattern with an `else`, or with nothing, for every value that it does not name.
     fn one_pattern(&mut self, pat: &Pat, line: usize, kind: &str) {
         let mut names = Names::default();
@@ -184,7 +362,7 @@ impl Check<'_> {
 
     fn let_in_a_condition(&mut self, cond: &Expr, line: usize, kind: &str) {
         match cond {
-            Expr::Let(l) => self.one_pattern(&l.pat, line, kind),
+            Expr::Let(l) => self.pattern(&l.pat, &l.expr, line, kind),
             Expr::Binary(b) => {
                 self.let_in_a_condition(&b.left, line, kind);
                 self.let_in_a_condition(&b.right, line, kind);
@@ -242,12 +420,20 @@ impl<'ast> Visit<'ast> for Check<'_> {
                 None => {}
             }
         }
+        self.arms_of_a_reader(node);
         visit::visit_expr_match(self, node);
     }
 
     fn visit_local(&mut self, node: &'ast syn::Local) {
-        if node.init.as_ref().is_some_and(|i| i.diverge.is_some()) {
-            self.one_pattern(&node.pat, node.let_token.span.start().line, "this let-else");
+        let line = node.let_token.span.start().line;
+        match &node.init {
+            Some(init) if init.diverge.is_some() => {
+                self.pattern(&node.pat, &init.expr, line, "this let-else");
+            }
+            Some(init) if matches!(node.pat, Pat::Wild(_)) && self.holds_a_reader(&init.expr) => {
+                self.flag_once(line, LET_WILD.into());
+            }
+            _ => {}
         }
         visit::visit_local(self, node);
     }
@@ -267,12 +453,30 @@ impl<'ast> Visit<'ast> for Check<'_> {
         visit::visit_expr_while(self, node);
     }
 
+    fn visit_expr(&mut self, node: &'ast Expr) {
+        self.calls += usize::from(self.is_a_reader(node));
+        visit::visit_expr(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        let method = node.method.to_string();
+        if DROPS.contains(&method.as_str()) && self.holds_a_reader(&node.receiver) {
+            let line = node.method.span().start().line;
+            self.flag_once(
+                line,
+                format!("this .{method}() drops the Err of a coordinator reader"),
+            );
+        }
+        visit::visit_expr_method_call(self, node);
+    }
+
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
         let line = node.path.span().start().line;
         if node.path.is_ident("matches") {
-            if let Ok(MatchesBody(value, pat)) = node.parse_body::<MatchesBody>() {
-                self.one_pattern(&pat, line, "this matches!");
+            if let Ok(MatchesBody(value, pat, guard)) = node.parse_body::<MatchesBody>() {
+                self.pattern(&pat, &value, line, "this matches!");
                 self.visit_expr(&value);
+                guard.iter().for_each(|g| self.visit_expr(g));
                 return;
             }
         }
@@ -283,21 +487,28 @@ impl<'ast> Visit<'ast> for Check<'_> {
                 let text = "syn cannot read the body of this macro, which names a Response";
                 self.flag(line, text.into());
             }
+            // The shape of a drop is not read there, so any reader call in such a body is a finding.
+            Err(_) if self.calls_a_reader(node.tokens.clone()) => {
+                self.flag_once(line, READER_MACRO.into());
+            }
             Err(_) => {}
         }
     }
 }
 
-/// Checks one source text. Gives the count of sites that read a `Response`, and one
-/// `(line, text)` for each finding; an `Err` when the text is no Rust that syn can read.
-fn check_source(text: &str) -> Result<(usize, Vec<(usize, String)>), String> {
-    let file = syn::parse_file(text).map_err(|e| {
-        let at = e.span().start();
-        format!("{}:{}: syn cannot read this file: {e}", at.line, at.column)
-    })?;
+/// The count of sites that read a `Response`, the count of reader calls, and one
+/// `(line, text)` for each finding.
+type Checked = (usize, usize, Vec<(usize, String)>);
+
+/// Checks one source text against the free readers of the tree. Gives an `Err` when the text
+/// is no Rust that syn can read.
+fn check_source(text: &str, readers: &BTreeSet<String>) -> Result<Checked, String> {
+    let file = parse(text)?;
     let mut check = Check {
         lines: text.lines().collect(),
+        readers,
         sites: 0,
+        calls: 0,
         used: Vec::new(),
         found: Vec::new(),
     };
@@ -309,7 +520,7 @@ fn check_source(text: &str) -> Result<(usize, Vec<(usize, String)>), String> {
         }
     }
     check.found.sort();
-    Ok((check.sites, check.found))
+    Ok((check.sites, check.calls, check.found))
 }
 
 fn rust_files(dir: &Path, files: &mut Vec<PathBuf>) {
@@ -331,12 +542,23 @@ fn no_fallback_in_src_reads_a_response_without_naming_its_error() {
     let mut files = Vec::new();
     rust_files(&root.join("src"), &mut files);
     files.sort();
-    let (mut sites, mut findings) = (0, 0);
-    for path in &files {
-        let name = path.strip_prefix(root).unwrap().display();
-        let text = std::fs::read_to_string(path).unwrap();
-        let (count, found) = check_source(&text).unwrap_or_else(|e| panic!("{name}:{e}"));
+    let texts: Vec<(String, String)> = files
+        .iter()
+        .map(|path| {
+            let name = path.strip_prefix(root).unwrap().display().to_string();
+            (name, std::fs::read_to_string(path).unwrap())
+        })
+        .collect();
+    let mut readers = Readers::default();
+    for (name, text) in &texts {
+        read_readers(text, &mut readers).unwrap_or_else(|e| panic!("{name}:{e}"));
+    }
+    let (mut sites, mut calls, mut findings) = (0, 0, 0);
+    for (name, text) in &texts {
+        let checked = check_source(text, &readers.free);
+        let (count, read, found) = checked.unwrap_or_else(|e| panic!("{name}:{e}"));
         sites += count;
+        calls += read;
         findings += found.len();
         for (line, what) in found {
             println!("{name}:{line}: {what}");
@@ -344,9 +566,23 @@ fn no_fallback_in_src_reads_a_response_without_naming_its_error() {
     }
     println!(
         "checked {} files and {sites} sites that read a Response",
-        files.len()
+        texts.len()
+    );
+    println!(
+        "read {calls} calls of a coordinator reader: {} free functions take a Client",
+        readers.free.len()
     );
     assert!(sites > 0, "the check found no site that reads a Response");
+    assert!(calls > 0, "the check found no call of a coordinator reader");
+    let listed: BTreeSet<String> = ANSWERS
+        .iter()
+        .chain(&NO_ANSWER)
+        .map(|m| m.to_string())
+        .collect();
+    assert_eq!(
+        readers.methods, listed,
+        "the methods of Client, and ANSWERS with NO_ANSWER"
+    );
     assert_eq!(findings, 0, "the findings are listed above");
 }
 
@@ -420,7 +656,7 @@ const HISTORIC: &[Row] = &[
     ),
 ];
 
-/// The shapes that those fixes wrote, which pass.
+/// The shapes that those fixes wrote: each passes the rule of #238.
 const FIXED: &[Row] = &[
     (
         "an arm for the error, then a fallback that bails",
@@ -456,7 +692,7 @@ const FIXED: &[Row] = &[
         Err(_) => None,
     })
 }"#,
-        &[],
+        &[(7, ARM)],
     ),
     (
         "a pattern that reads the error alone",
@@ -487,7 +723,7 @@ const RULE: &[Row] = &[
         Err(_) => None,
     }
 }"#,
-        &[(4, MATCH_ERROR), (8, MATCH_ERROR)],
+        &[(4, MATCH_ERROR), (8, MATCH_ERROR), (9, ARM)],
     ),
     (
         "an Err under a guard leaves the fallback with the other faults",
@@ -728,26 +964,346 @@ const MARKERS: &[Row] = &[
     ),
 ];
 
+const DROP_OK: &str = "this .ok() drops the Err of a coordinator reader";
+const DROP_OR: &str = "this .unwrap_or() drops the Err of a coordinator reader";
+
+/// The shapes of #242: the `Err` of a coordinator reader that a method or a pattern drops.
+const DROPPED: &[Row] = &[
+    (
+        "#214: the ids of a wait, with .ok() on a reader inside a closure",
+        r#"fn resolve_many(client: &mut Client, raws: &[String]) -> Result<Vec<Result<Targets>>> {
+    read_the_ids(client.call(&Request::Resolve { handles: raws.to_vec() })?)
+}
+fn expand_ids(raws: &[String]) -> Result<Vec<String>> {
+    let answers = Client::connect_existing().and_then(|mut c| resolve_many(&mut c, raws).ok());
+    let Some(answers) = answers else {
+        return Ok(raws.to_vec());
+    };
+    Ok(ids_of(answers))
+}"#,
+        &[(5, DROP_OK)],
+    ),
+    (
+        "#226: a refused info reads as no job that operates",
+        r#"fn jobs_running(client: &mut Client) -> Result<usize> {
+    read_the_count(client.call(&Request::Info)?)
+}
+fn pause(client: &mut Client) -> Result<i32> {
+    let running = jobs_running(client).unwrap_or(0);
+    Ok(i32::from(running > 0))
+}"#,
+        &[(5, DROP_OR)],
+    ),
+    (
+        "#214: an arm that reads every fault of a reader as a coordinator that stopped",
+        r#"fn resolve_id_for_wait(client: &mut Client, raw_id: &str) -> Result<Option<Uuid>> {
+    one_id(client.call(&Request::Resolve { handles: vec![raw_id.into()] })?)
+}
+fn wait_through_coordinator(client: &mut Client, raw_id: &str) -> Result<Option<WaitOutcome>> {
+    let id = match resolve_id_for_wait(client, raw_id) {
+        Ok(Some(id)) => id,
+        Ok(None) => return Ok(Some(WaitOutcome::NoSuchJob)),
+        Err(_) if the_limit_passed() => return Ok(Some(WaitOutcome::TimedOut)),
+        Err(_) => return Ok(None),
+    };
+    let reason = match resolve_id_for_wait(client, raw_id) {
+        Ok(Some(id)) => read_the_reason(id),
+        _ => None,
+    };
+    Ok(None)
+}"#,
+        &[(8, ARM), (9, ARM), (13, ARM)],
+    ),
+    (
+        "each method of the list, on each method of Client and behind other methods",
+        r#"fn f(client: &mut Client) -> Option<bool> {
+    let a = client.call(&Request::Info).ok()?;
+    let b = client.can("resolve").unwrap_or(false);
+    let c = client.recv().unwrap_or_default();
+    let d = client.recv_opt().unwrap_or_else(|_| None);
+    let e = self.call_within(&request, deadline).map_or(0, count);
+    let f = client.call(&Request::List).map_or_else(|_| 0, count);
+    if client.call(&Request::Ping).is_ok() {
+        return None;
+    }
+    let late = client.call(&Request::Ping).is_err();
+    let able = client.can("pause").is_ok_and(|able| able);
+    let slow = client.recv().is_err_and(is_a_time_limit);
+    let g = client
+        .call(&Request::Info)
+        .map(count)
+        .unwrap_or(0);
+    let h = client
+        .recv_opt()
+        .ok()
+        .unwrap_or_default();
+    Some((client.can("events")).is_ok())
+}"#,
+        &[
+            (2, DROP_OK),
+            (3, DROP_OR),
+            (
+                4,
+                "this .unwrap_or_default() drops the Err of a coordinator reader",
+            ),
+            (
+                5,
+                "this .unwrap_or_else() drops the Err of a coordinator reader",
+            ),
+            (6, "this .map_or() drops the Err of a coordinator reader"),
+            (
+                7,
+                "this .map_or_else() drops the Err of a coordinator reader",
+            ),
+            (8, "this .is_ok() drops the Err of a coordinator reader"),
+            (11, "this .is_err() drops the Err of a coordinator reader"),
+            (
+                12,
+                "this .is_ok_and() drops the Err of a coordinator reader",
+            ),
+            (
+                13,
+                "this .is_err_and() drops the Err of a coordinator reader",
+            ),
+            (17, DROP_OR),
+            (20, DROP_OK),
+            (22, "this .is_ok() drops the Err of a coordinator reader"),
+        ],
+    ),
+    (
+        "a let _ on a reader, and a let that drops no answer",
+        r#"fn job_list(client: &mut Client) -> Result<Vec<JobStatus>> {
+    read_the_jobs(client.call(&Request::List)?)
+}
+fn f(client: &mut Client) {
+    let _ = client.call(&Request::Shutdown);
+    let _ = job_list(client).map(show);
+    let _ = client.send(&Request::Wait { id });
+    let answer = client.call(&Request::Info);
+    let _ = answer;
+    let _ = client.call(&Request::Ping)?;
+}"#,
+        &[(5, LET_WILD), (6, LET_WILD)],
+    ),
+    (
+        "a ? hands the Err on, and so does a pattern that names the fault",
+        r#"fn jobs_running(client: &mut Client) -> Result<usize> {
+    match client.call(&Request::Info)? {
+        Response::Info { jobs_running, .. } => Ok(jobs_running),
+        Response::Error { message, .. } => bail!("{message}"),
+        _ => bail!("the coordinator did not give the number of jobs that operate"),
+    }
+}
+fn drain(client: &mut Client) -> Result<i32> {
+    if jobs_running(client)? == 0 {
+        return Ok(0);
+    }
+    let names = client.call(&Request::Capabilities)?.names().unwrap_or_default();
+    let running = match jobs_running(client) {
+        Ok(running) => running,
+        Err(e) if is_a_coordinator_timeout(&e) => return Err(e),
+        Err(e) => bail!("the coordinator did not answer: {e}"),
+    };
+    if let Err(e) = client.call(&Request::Ping) {
+        eprintln!("fairq: {e:#}");
+    }
+    let Err(fault) = jobs_running(client) else {
+        return Ok(0);
+    };
+    Err(fault)
+}"#,
+        &[],
+    ),
+    (
+        "what is no reader: other names, two hops, a variable, a method of another type",
+        r#"fn jobs_running(client: &mut Client) -> Result<usize> {
+    read_the_count(client.call(&Request::Info)?)
+}
+fn running() -> Result<usize> {
+    jobs_running(&mut Client::connect()?)
+}
+impl Page {
+    fn refresh(&mut self, client: &mut Client) -> Result<()> {
+        self.show(client.call(&Request::List)?)
+    }
+}
+fn f(page: &mut Page, client: &mut Client, child: &mut Child) -> Result<()> {
+    child.kill().ok();
+    client.set_read_timeout(None).ok();
+    if client.send(&Request::Wait { id }).is_err() {
+        return Ok(());
+    }
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let status = read_status_on_disk(raw_id).unwrap_or(None);
+    let two_hops = running().unwrap_or(0);
+    let answer = client.call(&Request::Info);
+    let held = answer.is_ok();
+    let shown = page.refresh(client).is_ok();
+    let late = held_result.unwrap_or_else(|_| client.call(&Request::Info));
+    Ok(())
+}"#,
+        &[],
+    ),
+    (
+        "the arms of a match on a reader, in their order",
+        r#"fn f(client: &mut Client) -> Option<usize> {
+    let a = match client.can("resolve") {
+        Ok(true) => 1,
+        Err(e) if is_a_coordinator_timeout(&e) => 2,
+        Ok(false) | Err(_) => 3,
+    };
+    let b = match client.recv_opt() {
+        Ok(Some(answer)) => show(answer),
+        Err(e) => return report(e),
+        _ => 0,
+    };
+    let c = match (client.recv()) {
+        Ok(answer) => show(answer),
+        Err(_fault) => 0,
+    };
+    let d = match &client.call(&Request::Ping) {
+        _ if quiet => 0,
+        Err(..) => 1,
+        other => show(other),
+    };
+    match client.call(&Request::List).map(count) {
+        whole => Some(whole),
+    }
+}"#,
+        &[(5, ARM), (14, ARM), (17, ARM), (18, ARM), (22, ARM)],
+    ),
+    (
+        "one pattern on a reader: a let-else, an if-let, a while-let and matches!",
+        r#"fn f(client: &mut Client) -> Result<bool> {
+    let Ok(names) = client.call(&Request::Capabilities) else {
+        return Ok(false);
+    };
+    if let Ok(true) = client.can("resolve") {
+        return Ok(true);
+    }
+    if let Err(_) = client.call(&Request::Ping) {
+        return Ok(false);
+    } else {
+        show(names);
+    }
+    while let Ok(Some(event)) = client.recv_opt() {
+        show(event);
+    }
+    Ok(matches!(client.can("events"), Ok(true)))
+}"#,
+        &[
+            (
+                2,
+                "this let-else leaves the Err of a coordinator reader unread",
+            ),
+            (
+                5,
+                "this if-let with no else leaves the Err of a coordinator reader unread",
+            ),
+            (
+                8,
+                "this if-let with an else leaves the Err of a coordinator reader unread",
+            ),
+            (
+                13,
+                "this while-let leaves the Err of a coordinator reader unread",
+            ),
+            (
+                16,
+                "this matches! leaves the Err of a coordinator reader unread",
+            ),
+        ],
+    ),
+    (
+        "a marker excuses a method, a let _ and an arm, and needs its reason",
+        r#"fn f(client: &mut Client) -> usize {
+    // response-fallback: #226 a refused info reads as no job that operates
+    let running = client.call(&Request::Info).map(count).unwrap_or(0);
+    let later = client
+        .call(&Request::Info)
+        // response-fallback: a courtesy notice; the next command reports the fault
+        .map_or(0, count);
+    // response-fallback: the coordinator stops, and may close the connection first
+    let _ = client.call(&Request::Shutdown);
+    let last = match client.recv() {
+        Ok(answer) => show(answer),
+        // response-fallback: a closed connection is a coordinator that stopped
+        Err(_) => 0,
+    };
+    // response-fallback:
+    let late = client.can("resolve").unwrap_or(false);
+    // response-fallback: no reader below this line
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    running + later + last
+}"#,
+        &[(15, NO_REASON), (17, NO_USE)],
+    ),
+    (
+        "the arguments of a macro are read, and the code of tests is left alone",
+        r#"fn f(client: &mut Client, count: Option<u32>) -> bool {
+    println!("{}", client.call(&Request::Info).map_or(0, count));
+    matches!(count, Some(_) if client.can("pause").unwrap_or(false))
+}
+#[cfg(test)]
+mod tests {
+    fn t(client: &mut Client) {
+        let _ = client.call(&Request::Shutdown);
+        assert!(client.call(&Request::Ping).is_ok());
+    }
+}"#,
+        &[
+            (2, "this .map_or() drops the Err of a coordinator reader"),
+            (3, DROP_OR),
+        ],
+    ),
+    (
+        "a macro that syn cannot read and that calls a reader is a finding",
+        r#"fn jobs_running(client: &mut Client) -> Result<usize> {
+    read_the_count(client.call(&Request::Info)?)
+}
+fn f(client: &mut Client, jobs_running: usize, can: bool) {
+    let shown = json!({ "running": jobs_running(client).unwrap_or(0) });
+    let other = serde_json::json!({ "can": client.can("pause").is_ok() });
+    let plain = json!({ "running": jobs_running, "can": can });
+    // response-fallback: a page that shows no count when the coordinator refuses
+    let marked = json!({ "running": jobs_running(client).unwrap_or(0) });
+    let _ = client.call(&Request::Ping); let late = json!({ "can": client.can("pause")? });
+}"#,
+        &[(5, READER_MACRO), (6, READER_MACRO), (10, LET_WILD)],
+    ),
+];
+
+/// One row through both passes of the real check: the readers that its text declares, then
+/// the check of that text.
+fn check_row(source: &str) -> Result<Checked, String> {
+    let mut readers = Readers::default();
+    read_readers(source, &mut readers)?;
+    check_source(source, &readers.free)
+}
+
 /// The check, row by row. A row that fails prints `FAIL` with what the check gave.
 #[test]
 fn each_fixture_row_gets_its_verdict() {
     let mut failed = Vec::new();
-    for (name, source, expected) in [HISTORIC, FIXED, RULE, MARKERS].concat() {
-        let (sites, got) = match check_source(source) {
+    let rows = [HISTORIC, FIXED, RULE, MARKERS].concat();
+    for (index, (name, source, expected)) in rows.iter().chain(DROPPED).enumerate() {
+        let (sites, calls, got) = match check_row(source) {
             Ok(checked) => checked,
-            Err(_) => (1, vec![(0, NO_RUST.to_string())]),
+            Err(_) => (1, 1, vec![(0, NO_RUST.to_string())]),
         };
-        // A row with no finding passes only when the check saw a site that reads a Response.
-        let same = sites > 0
+        // A row with no finding passes only when the check saw what the row is about: a site
+        // that reads a Response, or the call of a reader for a row of #242.
+        let seen = if index < rows.len() { sites } else { calls };
+        let same = seen > 0
             && got.len() == expected.len()
             && got
                 .iter()
-                .zip(expected)
+                .zip(*expected)
                 .all(|(g, e)| g.0 == e.0 && g.1 == e.1);
         if same {
             println!("row ok: {name}");
         } else {
-            println!("row FAIL: {name}\n    the check saw {sites} sites and gave {got:?}");
+            println!("row FAIL: {name}\n    saw {sites} sites and {calls} calls, and gave {got:?}");
             failed.push(name);
         }
     }
