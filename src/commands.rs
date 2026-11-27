@@ -18,10 +18,11 @@
 // Modified by the local-resource-coordinator fork, 2026-11-24: the plain wait passes on the coordinator's words for a refused wait and for no such job, and a sentence for an answer of another kind (issue #251).
 // Modified by the local-resource-coordinator fork, 2026-11-24: fairq pause with no word writes the pause file only when no coordinator answered, and passes on a failed write (issue #252).
 // Modified by the local-resource-coordinator fork, 2026-11-25: a reason above each place that drops the Err of a coordinator reader, for the check of tests/response_arms.rs (issue #242).
+// Modified by the local-resource-coordinator fork, 2026-11-26: the commands that wait pass on a refused read of the ids, and an answer of another kind to it, with the code of a fault (issue #214).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
-use crate::client::Client;
+use crate::client::{an_answer, Client};
 use crate::config::{Config, EnvCapture};
 use crate::job::{safe_name, JobState, JobStatus};
 use crate::paths;
@@ -746,8 +747,8 @@ const LIST_RECENT_AGE: u64 = 3600;
 pub fn job_list(client: &mut Client) -> Result<Vec<JobStatus>> {
     match client.call(&Request::List)? {
         Response::Jobs { jobs } => Ok(jobs),
-        Response::Error { message, .. } => bail!("{message}"),
-        _ => bail!("the coordinator did not give the job list"),
+        Response::Error { message, .. } => Err(an_answer(message)),
+        _ => Err(an_answer("the coordinator did not give the job list")),
     }
 }
 
@@ -1661,17 +1662,17 @@ pub fn wait(args: cli::WaitArgs) -> Result<i32> {
     // for the whole pipeline, and the group id that `fairq pipeline` writes is a
     // handle that works.
     //
-    // A value that the resolver refuses gives its own message here, with the
-    // code for "no such job". An earlier version kept the value and let the
-    // wait fail later, and the user then read "there is no job with the id x"
-    // for a value that named a job AND a pipeline.
+    // A value that the rules refuse gives their message here, with the code
+    // for "no such job"; an answer of the coordinator that is not the ids gives
+    // the code of a fault. An earlier version kept the value and let the wait
+    // fail later, with "there is no job with the id x" for a job AND a pipeline.
     let ids = match expand_ids(&args.ids) {
         Ok(ids) => ids,
         Err(e) => {
             // A fault, and not a report. `--quiet` keeps it: the reader has no
             // result and no id, so silence would leave it with a number only.
             eprintln!("fairq: {e}");
-            return Ok(EXIT_NO_SUCH_JOB);
+            return Ok(code_for_a_resolver_error(&e));
         }
     };
 
@@ -1816,7 +1817,9 @@ fn wait_for_the_next(
                         Err(_) => None,
                     },
                     Ok(None) => Some(None),
-                    // response-fallback: #214 a refusal reads as a coordinator that did not answer
+                    // An answer that is not the ids is no missing coordinator (#214).
+                    Err(e) if crate::client::is_an_answer(&e) => return Err(e),
+                    // response-fallback: no answer from the coordinator: the record answers
                     Err(_) => None,
                 },
                 None => None,
@@ -2091,7 +2094,7 @@ impl ReasonReporter {
                         // response-fallback: a courtesy read of the reason, on its own connection
                         _ => None,
                     },
-                    // response-fallback: #214 a refusal reads as a coordinator that did not answer
+                    // response-fallback: a courtesy read of the reason, on its own connection
                     _ => None,
                 }
             }
@@ -2286,10 +2289,10 @@ fn reconnect(raw_id: &str, deadline: Option<Instant>) -> Reconnect {
 /// Finds the id of a job for a wait.
 ///
 /// `Ok(None)` says that the coordinator ANSWERED, and that it holds no such
-/// job. An `Err` says that the coordinator did not answer, and the caller then
-/// tries the record on the disk or a new coordinator. The two must stay apart:
-/// "there is no job with that id" about a job that operates is the worst answer
-/// that a wait can give.
+/// job. An `Err` that `client::is_an_answer` knows is the coordinator's answer
+/// and goes to the reader (#214); any other `Err` says that it did not answer,
+/// and the caller then tries the record on the disk or a new coordinator.
+/// "There is no job with that id" about a job that operates is the worst answer.
 fn resolve_id_for_wait(client: &mut Client, raw_id: &str) -> Result<Option<uuid::Uuid>> {
     let raws = [raw_id.to_string()];
     let answer = resolve_many(client, &raws)?.pop();
@@ -2342,10 +2345,13 @@ fn wait_through_coordinator(
     let id = match resolve_id_for_wait(&mut client, raw_id) {
         Ok(Some(id)) => id,
         Ok(None) => return Ok(Some(WaitOutcome::NoSuchJob)),
-        // response-fallback: #214 a refusal reads as a coordinator that did not answer
+        // response-fallback: a limit ended the read, so the wait reached its limit
         Err(_) if the_limit_passed() => return Ok(Some(WaitOutcome::TimedOut)),
+        // An answer that is not the ids is no coordinator that stopped (#214). It comes after the
+        // limit: the read timeout above lets an answer arrive once the limit passed.
+        Err(e) if crate::client::is_an_answer(&e) => return Err(e),
         // The coordinator did not answer. Find the answer without it.
-        // response-fallback: #214 a refusal reads as a coordinator that did not answer
+        // response-fallback: no answer from the coordinator: the record answers
         Err(_) => return Ok(None),
     };
 
@@ -4059,11 +4065,16 @@ fn resolve_targets_in(jobs: &[JobStatus], raw: &str) -> Result<Targets> {
 /// x" for a value that named a job AND a pipeline. The user read that the value
 /// named nothing, and it named two things.
 fn expand_ids(raws: &[String]) -> Result<Vec<String>> {
-    // ONE request for every value, whatever the number of values.
-    // response-fallback: #214 a refusal reads as no coordinator, and the raw ids go on
-    let answers = Client::connect_existing().and_then(|mut c| resolve_many(&mut c, raws).ok());
-    let Some(answers) = answers else {
+    let Some(mut client) = Client::connect_existing() else {
         return Ok(raws.to_vec());
+    };
+    // ONE request for every value, whatever the number of values.
+    let answers = match resolve_many(&mut client, raws) {
+        Ok(answers) => answers,
+        // An answer that is not the ids goes to the reader (#214).
+        Err(e) if crate::client::is_an_answer(&e) => return Err(e),
+        // response-fallback: no answer from the coordinator: the raw ids go on to the record
+        Err(_) => return Ok(raws.to_vec()),
     };
 
     let mut out: Vec<String> = Vec::new();
@@ -4080,10 +4091,10 @@ fn expand_ids(raws: &[String]) -> Result<Vec<String>> {
 
 /// Asks the coordinator what each text of the user names.
 ///
-/// The outer error is a fault of the TRANSPORT: the coordinator did not answer.
-/// The inner error is the answer of the rules: the text names nothing, or it
-/// names more than one thing. A wait must keep the two apart. See
-/// `resolve_id_for_wait`.
+/// The outer error is a fault of the TRANSPORT, or an answer that is not the ids,
+/// which `client::is_an_answer` knows. The inner error is the answer of the rules:
+/// the text names nothing, or it names more than one thing. A wait must keep the
+/// three apart. See `resolve_id_for_wait`.
 ///
 /// A coordinator that gives the capability `resolve` reads the texts itself,
 /// from its index, in one request. An earlier coordinator gives its whole job
@@ -4103,11 +4114,13 @@ fn resolve_many(client: &mut Client, raws: &[String]) -> Result<Vec<Result<Targe
     };
     let found = match client.call(&request)? {
         Response::Resolved { found } => found,
-        Response::Error { message, .. } => bail!("{message}"),
-        _ => bail!("the coordinator did not read the ids"),
+        Response::Error { message, .. } => return Err(an_answer(message)),
+        _ => return Err(an_answer("the coordinator did not read the ids")),
     };
     if found.len() != raws.len() {
-        bail!("the coordinator did not give one answer for each id");
+        return Err(an_answer(
+            "the coordinator did not give one answer for each id",
+        ));
     }
     Ok(found
         .into_iter()

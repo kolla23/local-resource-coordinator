@@ -53,6 +53,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-24: tests that an answer of another kind than the one a command asked for is a fault (issue #250).
 // Modified by the local-resource-coordinator fork, 2026-11-24: tests that the plain wait passes on the coordinator's words for a refused wait and for no such job (issue #251).
 // Modified by the local-resource-coordinator fork, 2026-11-24: a test that fairq pause with no word writes the pause file only when no coordinator answered, and passes on a failed write (issue #252).
+// Modified by the local-resource-coordinator fork, 2026-11-26: tests that the commands that wait pass on a refused read of the ids, and an answer of another kind to it (issue #214).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -26129,6 +26130,12 @@ enum Fault {
     Earlier(&'static str),
     /// An error of the kind `no_such_job`, with the same words as a refusal.
     NoSuchJob,
+    /// A refusal, from a coordinator that holds each `wait` and never answers it.
+    BesideAHeldWait,
+    /// A `resolved` answer with no entry in `found`, whatever the handles.
+    EmptyFound,
+    /// A refusal after 1.5 s: past a `--timeout 1s`, inside the 2 s read limit of a wait.
+    LateRefuse,
 }
 
 /// A coordinator of the test that records each request, and that answers like
@@ -26230,8 +26237,13 @@ impl ARecordingCoordinator {
                             })
                         };
                         let answer = match op.as_str() {
+                            "wait" if matches!(fault, Fault::BesideAHeldWait) => {
+                                // Longer than the limit that the row gives the wait.
+                                std::thread::sleep(Duration::from_secs(60));
+                                return;
+                            }
                             op if armed && refused.contains(&op) => match fault {
-                                Fault::Refuse => serde_json::json!({
+                                Fault::Refuse | Fault::BesideAHeldWait => serde_json::json!({
                                     "result": "error", "kind": "internal",
                                     "message": Self::REFUSAL,
                                 }),
@@ -26241,9 +26253,19 @@ impl ARecordingCoordinator {
                                     return;
                                 }
                                 Fault::Close => return,
+                                Fault::LateRefuse => {
+                                    std::thread::sleep(Duration::from_millis(1500));
+                                    serde_json::json!({
+                                        "result": "error", "kind": "internal",
+                                        "message": Self::REFUSAL,
+                                    })
+                                }
                                 Fault::Other => serde_json::json!({ "result": "ok" }),
                                 Fault::Garbled => {
                                     serde_json::json!({ "result": "of-a-later-version" })
+                                }
+                                Fault::EmptyFound => {
+                                    serde_json::json!({ "result": "resolved", "found": [] })
                                 }
                                 Fault::Pid(pid) => info(pid, "0.0.0-dev+gfixture"),
                                 Fault::NoSuchJob => serde_json::json!({
@@ -27662,6 +27684,235 @@ fn wait_passes_on_a_refused_wait() {
             ));
         }
     }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// `fairq wait` and `fairq wait --next`, when the coordinator refuses the question that reads the
+/// ids (`list`, `resolve` or `capabilities`), or gives another answer to it: 121 there (#214).
+#[test]
+fn wait_passes_on_a_refused_read_of_the_ids() {
+    const EARLIER: &[&str] = &["locks", "retries"];
+    const CAPS: &[&str] = &["resolve", "query"];
+    let refusal = format!("fairq: {}", ARecordingCoordinator::REFUSAL);
+    // The row, what the coordinator can do, the requests up to the one that meets the fault,
+    // and the sentence for an answer of another kind.
+    let rows: [(&str, &'static [&'static str], &'static [&'static str], &str); 3] = [
+        (
+            "list",
+            EARLIER,
+            &["capabilities", "list"],
+            "fairq: the coordinator did not give the job list",
+        ),
+        (
+            "resolve",
+            CAPS,
+            &["capabilities", "resolve"],
+            "fairq: the coordinator did not read the ids",
+        ),
+        (
+            "caps",
+            CAPS,
+            &["capabilities"],
+            "fairq: the coordinator did not say what it can do",
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (command, args) in [
+        ("wait", vec!["wait", "build", "--timeout", "5s"]),
+        (
+            "next",
+            vec!["wait", "--next", "build", "test", "--timeout", "5s"],
+        ),
+    ] {
+        for (row, capabilities, asked, no_ids) in rows {
+            let mut faults = vec![
+                ("refuse", Fault::Refuse, refusal.as_str()),
+                ("other", Fault::Other, no_ids),
+            ];
+            if row == "resolve" {
+                let says = "fairq: the coordinator did not give one answer for each id";
+                faults.push(("count", Fault::EmptyFound, says));
+            }
+            for (kind, fault, says) in faults {
+                let name = format!("ids{command}{row}{kind}");
+                let refused = &asked[asked.len() - 1..];
+                let c = ARecordingCoordinator::refusing_after(
+                    &name,
+                    capabilities,
+                    refused,
+                    None,
+                    fault,
+                );
+                let out = c.fairq(&args);
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let last = stderr.lines().last().unwrap_or("");
+                let ops = c.ops();
+                // The fault ends the command: its question is the last request.
+                let right = out.status.code() == Some(121) && last == says && ops == asked;
+                if !right || !out.stdout.is_empty() {
+                    wrong.push(format!(
+                        "{command}/{row}/{kind}: code {:?}, ops {ops:?}, last line: {last}",
+                        out.status.code()
+                    ));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The same when the coordinator refuses a later read of the ids: the wait through the
+/// coordinator, `fairq status --wait` and the loop of `--next`; `--quiet` keeps the words (#214).
+#[test]
+fn a_wait_passes_on_a_later_refused_read_of_the_ids() {
+    const CAPS: &[&str] = &["resolve", "query"];
+    const TWICE: &[&str] = &["capabilities", "resolve", "capabilities", "resolve"];
+    const PAUSE_BETWEEN: &[&str] = &[
+        "capabilities",
+        "resolve",
+        "pause_state",
+        "capabilities",
+        "resolve",
+    ];
+    let refusal = format!("fairq: {}", ARecordingCoordinator::REFUSAL);
+    let mut wrong = Vec::new();
+    for (row, args, asked) in [
+        (
+            "wait",
+            vec!["wait", "build", "--timeout", "5s"],
+            PAUSE_BETWEEN,
+        ),
+        (
+            "quiet",
+            vec!["wait", "build", "--quiet", "--timeout", "5s"],
+            TWICE,
+        ),
+        (
+            "json",
+            vec!["wait", "build", "--json", "--timeout", "5s"],
+            TWICE,
+        ),
+        (
+            "next",
+            vec!["wait", "--next", "build", "test", "--timeout", "5s"],
+            PAUSE_BETWEEN,
+        ),
+        (
+            "status",
+            vec!["status", "build", "--wait", "--timeout", "5s"],
+            TWICE,
+        ),
+    ] {
+        let name = format!("idslater{row}");
+        // The first `resolve` gets its answer, and each one after it is refused.
+        let after = Some("resolve");
+        let c =
+            ARecordingCoordinator::refusing_after(&name, CAPS, &["resolve"], after, Fault::Refuse);
+        let out = c.fairq(&args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let last = stderr.lines().last().unwrap_or("");
+        let ops = c.ops();
+        let right = out.status.code() == Some(121) && last == refusal && ops == asked;
+        if !right || !out.stdout.is_empty() {
+            wrong.push(format!(
+                "{row}: code {:?}, ops {ops:?}, last line: {last}",
+                out.status.code()
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// What is no answer about the ids keeps its path: 127 for an unknown name, a closed connection
+/// (also in `--next`), the limit before a late refusal, the reporter's refused read (#214).
+#[test]
+fn a_wait_keeps_the_other_paths_of_a_read_of_the_ids() {
+    const CAPS: &[&str] = &["resolve", "query"];
+    let mut wrong = Vec::new();
+    let mut check = |row: &str, right: bool, c: &ARecordingCoordinator, out: &Output| {
+        if !right || !out.stdout.is_empty() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            wrong.push(format!(
+                "{row}: code {:?}, ops {:?}, stderr: {stderr:?}",
+                out.status.code(),
+                c.ops()
+            ));
+        }
+    };
+
+    let c = ARecordingCoordinator::new("idsnosuch", CAPS);
+    let out = c.fairq(&["wait", "nosuch", "--timeout", "5s"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let says = "fairq: there is no job or pipeline with the id or the name `nosuch`\n";
+    let right = out.status.code() == Some(127) && stderr == says;
+    check(
+        "nosuch",
+        right && c.ops() == ["capabilities", "resolve"],
+        &c,
+        &out,
+    );
+
+    let c =
+        ARecordingCoordinator::refusing_after("idsclose", CAPS, &["resolve"], None, Fault::Close);
+    let out = c.fairq(&["wait", "build", "--timeout", "2s"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stopped = stderr.contains("fairq: the coordinator stopped.");
+    check("close", out.status.code() == Some(124) && stopped, &c, &out);
+
+    // The loop of `--next` meets the closed connection at its own read, and reads the record.
+    let (after, close) = (Some("resolve"), Fault::Close);
+    let c = ARecordingCoordinator::refusing_after("idsnextclose", CAPS, &["resolve"], after, close);
+    let out = c.fairq(&["wait", "--next", "build", "test", "--timeout", "2s"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let no_job = format!(
+        "fairq: there is no job with the id {}\n",
+        ARecordingCoordinator::BUILD
+    );
+    let asked = [
+        "capabilities",
+        "resolve",
+        "pause_state",
+        "capabilities",
+        "resolve",
+    ];
+    let right = out.status.code() == Some(127) && stderr == no_job && c.ops() == asked;
+    check("next-close", right, &c, &out);
+
+    // The refusal of the later read arrives once the limit passed: the limit ended the wait.
+    let (after, late) = (Some("resolve"), Fault::LateRefuse);
+    let c = ARecordingCoordinator::refusing_after("idslate", CAPS, &["resolve"], after, late);
+    let out = c.fairq(&["wait", "build", "--timeout", "1s"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let unsaid = !stderr.contains(ARecordingCoordinator::REFUSAL);
+    let asked = [
+        "capabilities",
+        "resolve",
+        "pause_state",
+        "capabilities",
+        "resolve",
+    ];
+    let right = out.status.code() == Some(124) && unsaid && c.ops() == asked;
+    check("late", right, &c, &out);
+
+    let held = Fault::BesideAHeldWait;
+    let c =
+        ARecordingCoordinator::refusing_after("idspoll", CAPS, &["resolve"], Some("wait"), held);
+    let out = c.fairq(&["wait", "build", "--timeout", "5s"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    // The reporter asked after the wait began, and the coordinator refused that read.
+    let asked = c
+        .ops()
+        .iter()
+        .skip_while(|op| *op != "wait")
+        .any(|op| op == "resolve");
+    let silent = !stderr.contains(ARecordingCoordinator::REFUSAL) && !stderr.contains("stopped");
+    check(
+        "poll",
+        out.status.code() == Some(124) && asked && silent,
+        &c,
+        &out,
+    );
+
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
