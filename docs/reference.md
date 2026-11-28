@@ -5,6 +5,7 @@ description: Every command, option, claim word and configuration field.
 <!-- Modified by the local-resource-coordinator fork, 2026-10-01: the update check defaults to never (issue #4). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-03: the default [update] url names this project's releases (issue #113). -->
 <!-- Modified by the local-resource-coordinator fork, 2026-11-18: the program is named fairq (issue #28). -->
+<!-- Modified by the local-resource-coordinator fork, 2026-11-27: a name needs a coordinator, and what a wait and fairq logs do for a name with none (issue #264). -->
 
 *[Home](index.md) · [Agents](agents.md) · [Reference](reference.md) · [Design](design.md) · [Security](security.md) · [Sandbox](sandbox.md)*
 
@@ -1150,6 +1151,13 @@ A group needs a coordinator. The records on the disk hold the jobs, and they
 hold no group, so `fairq wait $GROUP` after the coordinator retires says that
 there is no job with that id. Keep the id of a stage as well when a script must
 work with no coordinator.
+
+A name needs a coordinator as well: the records on the disk go by the id. With
+no coordinator, `fairq wait <name>` and `fairq wait --next <name>` look for one
+for 10 seconds, and then they end with the code 121 and say so; a `--timeout`
+under 10 seconds ends them first, with 124. `fairq logs <name>` says so at once,
+with the code 1. None of them says that there is no job with that name. A script
+that must work with no coordinator keeps the id of the job.
 
 ## Job files
 

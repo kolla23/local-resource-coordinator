@@ -19,6 +19,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-24: fairq pause with no word writes the pause file only when no coordinator answered, and passes on a failed write (issue #252).
 // Modified by the local-resource-coordinator fork, 2026-11-25: a reason above each place that drops the Err of a coordinator reader, for the check of tests/response_arms.rs (issue #242).
 // Modified by the local-resource-coordinator fork, 2026-11-26: the commands that wait pass on a refused read of the ids, and an answer of another kind to it, with the code of a fault (issue #214).
+// Modified by the local-resource-coordinator fork, 2026-11-27: find_id_on_disk tells a full id with no folder from a value that the disk cannot judge; a wait keeps such a value for the time it gives a new coordinator, then ends with a fault, and fairq logs gives a fault at once, never "no such job" (issue #264).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -1789,6 +1790,8 @@ fn wait_for_the_next(
     deadline: Option<Instant>,
 ) -> Result<i32> {
     let mut delay = Duration::from_millis(50);
+    // Since when no coordinator read a value that only a coordinator can read (#264).
+    let mut unread_since: Option<Instant> = None;
     // One reporter for each job, in the same way as every other wait. This
     // loop reads the record of each job already, so the reason costs nothing.
     let mut reporters: Vec<ReasonReporter> = ids
@@ -1826,8 +1829,24 @@ fn wait_for_the_next(
             };
 
             let status = match from_coordinator {
-                Some(answer) => answer,
-                None => read_status_on_disk(raw)?,
+                Some(answer) => {
+                    unread_since = None;
+                    answer
+                }
+                None => match find_id_on_disk(raw)? {
+                    JobOnDisk::Found(id) => crate::job::read_status(&paths::job_dir(&id)?).ok(),
+                    JobOnDisk::NoSuchId => None,
+                    // A name lives in the coordinator, so it keeps its wait for the time that a
+                    // wait gives a new coordinator (#264).
+                    JobOnDisk::CannotJudge => {
+                        let since = *unread_since.get_or_insert_with(Instant::now);
+                        let limit_passed = deadline.is_some_and(|d| Instant::now() >= d);
+                        if since.elapsed() >= RECONNECT_LIMIT && !limit_passed {
+                            return Err(no_coordinator_read(raw));
+                        }
+                        continue;
+                    }
+                },
             };
 
             let Some(status) = status else {
@@ -2132,11 +2151,22 @@ impl ReasonReporter {
 /// The supervisor writes that record, and it continues after the coordinator
 /// stops. The record is thus the answer that always exists.
 fn read_status_on_disk(raw_id: &str) -> Result<Option<JobStatus>> {
-    let Some(id) = find_id_on_disk(raw_id)? else {
+    let JobOnDisk::Found(id) = find_id_on_disk(raw_id)? else {
         return Ok(None);
     };
     let dir = paths::job_dir(&id)?;
     Ok(crate::job::read_status(&dir).ok())
+}
+
+/// The fault of a wait for a value that no coordinator read in `RECONNECT_LIMIT` and that no
+/// record carries. "No such job" would be false: the disk cannot say what a name names (#264).
+fn no_coordinator_read(raw: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "no coordinator answered in {} seconds, and only a coordinator can say what `{raw}` \
+         names. Each job continues. Run `fairq list`, which starts a coordinator, and then wait \
+         again.",
+        RECONNECT_LIMIT.as_secs()
+    )
 }
 
 /// Waits for one job.
@@ -2213,7 +2243,7 @@ fn wait_one_until(
                 // seconds before the same answer. The test is for an ID only: a
                 // NAME lives in the coordinator, and the disk cannot resolve
                 // one.
-                if raw_id.parse::<uuid::Uuid>().is_ok() && find_id_on_disk(raw_id)?.is_none() {
+                if matches!(find_id_on_disk(raw_id)?, JobOnDisk::NoSuchId) {
                     return Ok(WaitOutcome::NoSuchJob);
                 }
 
@@ -2646,8 +2676,11 @@ fn wait_on_file(
     deadline: Option<Instant>,
     reporter: &mut ReasonReporter,
 ) -> Result<WaitOutcome> {
-    let Some(id) = find_id_on_disk(raw_id)? else {
-        return Ok(WaitOutcome::NoSuchJob);
+    let id = match find_id_on_disk(raw_id)? {
+        JobOnDisk::Found(id) => id,
+        JobOnDisk::NoSuchId => return Ok(WaitOutcome::NoSuchJob),
+        // No coordinator came back, and only a coordinator can read a name (#264).
+        JobOnDisk::CannotJudge => return Err(no_coordinator_read(raw_id)),
     };
     let dir = paths::job_dir(&id)?;
     let mut delay = Duration::from_millis(20);
@@ -2690,11 +2723,16 @@ pub fn logs(args: cli::LogsArgs) -> Result<i32> {
             }
         },
         None => match find_id_on_disk(&args.id)? {
-            Some(id) => id,
-            None => {
+            JobOnDisk::Found(id) => id,
+            JobOnDisk::NoSuchId => {
                 eprintln!("fairq: there is no job with the id {}", args.id);
                 return Ok(EXIT_NO_SUCH_JOB);
             }
+            JobOnDisk::CannotJudge => bail!(
+                "no coordinator operates, and only a coordinator can say what `{}` names. Run \
+                 `fairq list`, which starts a coordinator, and then ask again.",
+                args.id
+            ),
         },
     };
 
@@ -4161,21 +4199,35 @@ fn resolve_id(client: &mut Client, raw: &str) -> Result<uuid::Uuid> {
     )))
 }
 
+/// What the records on the disk say about a value, with no coordinator to ask.
+enum JobOnDisk {
+    /// The folder of the job with this id.
+    Found(uuid::Uuid),
+    /// A full id with no folder: there is no such job.
+    NoSuchId,
+    /// No folder starts with a value that is no full id, such as a name: only a coordinator can
+    /// say what it names (#264).
+    CannotJudge,
+}
+
 /// Finds a job id in the state directory, without a coordinator.
 ///
 /// A job id must name a directory that exists. Without that test, a command
 /// with a correct but unknown id waits for a status file that never arrives.
-fn find_id_on_disk(raw: &str) -> Result<Option<uuid::Uuid>> {
+fn find_id_on_disk(raw: &str) -> Result<JobOnDisk> {
     if let Ok(id) = raw.parse::<uuid::Uuid>() {
         // The folder's own type, not its target's: a link in jobs/ is no job.
         let dir = std::fs::symlink_metadata(paths::job_dir(&id)?);
-        return Ok(dir.is_ok_and(|m| m.is_dir()).then_some(id));
+        if dir.is_ok_and(|m| m.is_dir()) {
+            return Ok(JobOnDisk::Found(id));
+        }
+        return Ok(JobOnDisk::NoSuchId);
     }
 
     let dir = paths::jobs_dir()?;
     let entries = match std::fs::read_dir(&dir) {
         Ok(e) => e,
-        Err(_) => return Ok(None),
+        Err(_) => return Ok(JobOnDisk::CannotJudge),
     };
 
     let mut found = None;
@@ -4197,7 +4249,7 @@ fn find_id_on_disk(raw: &str) -> Result<Option<uuid::Uuid>> {
             found = Some(id);
         }
     }
-    Ok(found)
+    Ok(found.map_or(JobOnDisk::CannotJudge, JobOnDisk::Found))
 }
 
 /// Writes the event stream.
