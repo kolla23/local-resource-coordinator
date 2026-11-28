@@ -20,6 +20,8 @@
 // Modified by the local-resource-coordinator fork, 2026-11-25: a reason above each place that drops the Err of a coordinator reader, for the check of tests/response_arms.rs (issue #242).
 // Modified by the local-resource-coordinator fork, 2026-11-26: the commands that wait pass on a refused read of the ids, and an answer of another kind to it, with the code of a fault (issue #214).
 // Modified by the local-resource-coordinator fork, 2026-11-27: find_id_on_disk tells a full id with no folder from a value that the disk cannot judge; a wait keeps such a value for the time it gives a new coordinator, then ends with a fault, and fairq logs gives a fault at once, never "no such job" (issue #264).
+// Modified by the local-resource-coordinator fork, 2026-11-28: fairq pause queue says on stderr why it did not read the number of jobs after the pause, and keeps the code 0 (issue #226).
+// Modified by the local-resource-coordinator fork, 2026-11-28: fairq run passes on what a new coordinator answered in place of what it can do, apart from no answer, and coordinator_capabilities marks such an answer; own_the_job prints the cause of no answer in the form main prints a fault (issue #261).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -5267,8 +5269,17 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
             // Say what a pause does NOT do. A person who asked for a quiet
             // machine must not believe that the jobs which operate stopped.
             if !(json || args.json) {
-                // response-fallback: #226 a refused info reads as no job that operates
-                let running = jobs_running(&mut client).unwrap_or(0);
+                // The pause is made, so the code stays 0: a fault of this read is words (#226).
+                let running = match jobs_running(&mut client) {
+                    Ok(running) => running,
+                    Err(e) => {
+                        eprintln!(
+                            "fairq: the pause is made, but fairq did not read the number of \
+                             jobs that still operate: {e:#}"
+                        );
+                        0
+                    }
+                };
                 if running > 0 {
                     // The singular and the plural are separate texts. ASD-STE100
                     // does not accept `job(s)`.
@@ -6288,7 +6299,7 @@ fn own_the_job(client: &mut Client, id: uuid::Uuid) {
         Ok(Response::Ok) => OwnershipAnswer::Taken,
         Ok(Response::Error { message, .. }) => OwnershipAnswer::Refused(message),
         Ok(_) => OwnershipAnswer::Unexpected,
-        Err(e) => OwnershipAnswer::NoAnswer(e.to_string()),
+        Err(e) => OwnershipAnswer::NoAnswer(format!("{e:#}")),
     };
     if let Some(text) = ownership_message(id, &answer) {
         eprintln!("{text}");
@@ -6587,17 +6598,26 @@ fn status_without_the_coordinator(
         // the answer of the coordinator that stopped says nothing about it: a
         // new one can take the ownership that an earlier one refused.
         if started_here {
-            // A coordinator that did not answer is not a coordinator that
-            // refuses. Keep the job in that case, which is the safe direction.
-            // response-fallback: #261 a refusal reads as a coordinator that keeps the job
-            if coordinator_owns_jobs(client).unwrap_or(false) {
-                own_the_job(client, id);
-            } else {
-                eprintln!(
+            // A coordinator that did not answer is not one that refuses. Keep the job in both
+            // cases, which is the safe direction, and say which of the two it was (#261).
+            match coordinator_owns_jobs(client) {
+                Ok(true) => own_the_job(client, id),
+                Ok(false) => eprintln!(
                     "fairq: this coordinator keeps the job {id} after this command stops.\n\
                      fairq: Ctrl-C and SIGTERM still stop it. After a stop that this command \
                      cannot catch, run `fairq cancel {id}`."
-                );
+                ),
+                Err(e) => {
+                    let words = format!("{e:#}");
+                    let answer = if crate::client::is_an_answer(&e) {
+                        OwnershipAnswer::Refused(words)
+                    } else {
+                        OwnershipAnswer::NoAnswer(words)
+                    };
+                    if let Some(text) = ownership_message(id, &answer) {
+                        eprintln!("{text}");
+                    }
+                }
             }
         }
         // response-fallback: every other answer leaves the record on the disk as the answer
@@ -6793,9 +6813,13 @@ fn coordinator_capabilities(client: &mut Client) -> Result<(Vec<String>, String,
     // The version and the pid come from an `Info` answer that fairq read, or this is an
     // error: a remedy built from a pid that nobody read says `kill 0` (#222).
     let (version, pid) = match client.call(&Request::Info)? {
-        Response::Info { version, pid, .. } => (version, a_pid_of_a_process(pid)?),
-        Response::Error { message, .. } => bail!("{message}"),
-        _ => bail!("the coordinator did not give its version"),
+        Response::Info { version, pid, .. } => {
+            let pid = a_pid_of_a_process(pid).map_err(|e| an_answer(e.to_string()))?;
+            (version, pid)
+        }
+        // What the coordinator ANSWERED has the mark, apart from no answer at all (#261).
+        Response::Error { message, .. } => return Err(an_answer(message)),
+        _ => return Err(an_answer("the coordinator did not give its version")),
     };
 
     // An answer that is no list is an error (#234). Below the capability floor it is an empty
@@ -6807,8 +6831,8 @@ fn coordinator_capabilities(client: &mut Client) -> Result<(Vec<String>, String,
     match client.call(&Request::Capabilities)? {
         Response::Capabilities { names } => Ok((names, version, pid)),
         _ if below => Ok((Vec::new(), version, pid)),
-        Response::Error { message, .. } => bail!("{message}"),
-        _ => bail!("the coordinator did not say what it can do"),
+        Response::Error { message, .. } => Err(an_answer(message)),
+        _ => Err(an_answer("the coordinator did not say what it can do")),
     }
 }
 

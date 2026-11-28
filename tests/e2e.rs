@@ -55,6 +55,8 @@
 // Modified by the local-resource-coordinator fork, 2026-11-24: a test that fairq pause with no word writes the pause file only when no coordinator answered, and passes on a failed write (issue #252).
 // Modified by the local-resource-coordinator fork, 2026-11-26: tests that the commands that wait pass on a refused read of the ids, and an answer of another kind to it (issue #214).
 // Modified by the local-resource-coordinator fork, 2026-11-27: tests that a wait keeps a name that no coordinator read, and ends with a fault and never "no such job" when none reads it, and that fairq logs gives a fault for it (issue #264).
+// Modified by the local-resource-coordinator fork, 2026-11-28: tests that fairq pause queue says on stderr why it did not read the number of jobs after the pause, and keeps the receipt and the code 0 (issue #226).
+// Modified by the local-resource-coordinator fork, 2026-11-28: a test that fairq run passes on what a new coordinator answered in place of what it can do, apart from no answer, and prints the whole fault of an answer that it cannot read, to the capability question and to own_job; the test coordinator can stop and start again under fairq run (issue #261).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -26168,6 +26170,8 @@ impl ARecordingCoordinator {
     /// A name that `resolve` reads as one pipeline, with the two jobs as its stages.
     const PIPELINE: &'static str = "nightly";
     const GROUP: &'static str = "33333333-0000-4000-8000-000000000003";
+    /// The job that this coordinator makes for a `submit`, when it is one that starts again.
+    const RUN: &'static str = "44444444-0000-4000-8000-000000000004";
 
     fn new(name: &str, capabilities: &'static [&'static str]) -> Self {
         Self::refusing(name, capabilities, &[])
@@ -26198,6 +26202,28 @@ impl ARecordingCoordinator {
         after: Option<&'static str>,
         fault: Fault,
     ) -> Self {
+        Self::build(name, capabilities, refused, after, fault, false)
+    }
+
+    /// A coordinator that stops and starts again under `fairq run`: no answer to the first
+    /// `status`, and from then on `refused` meets `fault` and the job of the command is done.
+    fn that_starts_again(
+        name: &str,
+        capabilities: &'static [&'static str],
+        refused: &'static [&'static str],
+        fault: Fault,
+    ) -> Self {
+        Self::build(name, capabilities, refused, Some("status"), fault, true)
+    }
+
+    fn build(
+        name: &str,
+        capabilities: &'static [&'static str],
+        refused: &'static [&'static str],
+        after: Option<&'static str>,
+        fault: Fault,
+        starts_again: bool,
+    ) -> Self {
         use std::io::{BufRead, BufReader, Write};
 
         let root = std::env::temp_dir().join(format!("qx{name}{}", std::process::id()));
@@ -26224,6 +26250,9 @@ impl ARecordingCoordinator {
             })
         };
         let jobs = vec![record(Self::BUILD, "build"), record(Self::TEST, "test")];
+        let mut finished = record(Self::RUN, "run");
+        finished["state"] = "completed".into();
+        finished["exit_code"] = 0.into();
 
         // The thread ends with the process of the test. Each command of a test
         // is one connection, and each connection gets a thread of its own.
@@ -26231,6 +26260,7 @@ impl ARecordingCoordinator {
             for stream in listener.incoming().flatten() {
                 let seen = seen.clone();
                 let jobs = jobs.clone();
+                let finished = finished.clone();
                 let met = met.clone();
                 std::thread::spawn(move || {
                     let mut writer = stream.try_clone().unwrap();
@@ -26305,6 +26335,16 @@ impl ARecordingCoordinator {
                                     "message": "fairq could not read this request",
                                 }),
                             },
+                            "submit" if starts_again => serde_json::json!({
+                                "result": "submitted", "id": Self::RUN, "warning": null,
+                                "deduplicated": false,
+                            }),
+                            "own_job" if starts_again => serde_json::json!({ "result": "ok" }),
+                            // The coordinator that stops: its connection ends with no answer.
+                            "status" if starts_again && !armed => return,
+                            "status" if starts_again => {
+                                serde_json::json!({ "result": "status", "status": finished })
+                            }
                             "info" => info(4321, env!("CARGO_PKG_VERSION")),
                             "capabilities" => serde_json::json!({
                                 "result": "capabilities", "names": capabilities,
@@ -29512,6 +29552,220 @@ fn pause_with_no_word_leaves_the_file_while_a_coordinator_operates() {
         wrong.push(format!(
             "write-fails: the command gave {out:?}, and the file keeps {after}"
         ));
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// When the coordinator does not give the number of jobs after the pause, `fairq pause queue`
+/// keeps the receipt and the code 0, and says on stderr what it did not read and why (#226).
+#[test]
+fn pause_says_why_it_did_not_read_the_number_of_jobs_after_the_pause() {
+    const CAPS: &[&str] = &["pause", "pause-requests"];
+    const SAYS: &str =
+        "fairq: the pause is made, but fairq did not read the number of jobs that still operate: ";
+    let after_the_pause = |c: &ARecordingCoordinator| {
+        let ops = c.ops();
+        ops.iter()
+            .skip_while(|op| *op != "pause")
+            .any(|op| op == "info")
+    };
+    let mut wrong = Vec::new();
+
+    let c = ARecordingCoordinator::new("pausenum", CAPS);
+    let control = c.fairq(&["pause", "queue"]);
+    let receipt = String::from_utf8_lossy(&control.stdout).to_string();
+    let made = control.status.code() == Some(0) && receipt.starts_with("pause p1 is made; ");
+    if !made || !control.stderr.is_empty() || !after_the_pause(&c) {
+        wrong.push(format!("control: {control:?}, ops {:?}", c.ops()));
+    }
+
+    let refusal = format!("{SAYS}{}\n", ARecordingCoordinator::REFUSAL);
+    let closed = format!("{SAYS}the coordinator closed the connection without an answer\n");
+    let other = format!("{SAYS}the coordinator did not give the number of jobs that operate\n");
+    let silent = format!("{SAYS}the coordinator took the request and gave no answer in ");
+    // The row, the fault that `info` meets after the pause, the words, and if they are all of
+    // stderr or its start.
+    for (row, fault, says, whole) in [
+        ("refuse", Fault::Refuse, &refusal, true),
+        ("close", Fault::Close, &closed, true),
+        ("other", Fault::Other, &other, true),
+        ("silent", Fault::Silent, &silent, false),
+    ] {
+        let name = format!("pausenum{row}");
+        let c = ARecordingCoordinator::refusing_after(&name, CAPS, &["info"], Some("pause"), fault);
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_fairq"));
+        cmd.args(["pause", "queue"]);
+        isolate(&mut cmd, &c.root, &c.root.join("peers"));
+        cmd.env(fairq_ceiling_variable(), "3");
+        let out = cmd.output().expect("fairq did not start");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let said = if whole {
+            stderr == *says
+        } else {
+            stderr.starts_with(says.as_str())
+        };
+        let kept = out.status.code() == Some(0) && out.stdout == control.stdout;
+        if !kept || !said || !after_the_pause(&c) {
+            wrong.push(format!(
+                "{row}: code {:?}, ops {:?}, stdout {:?}, stderr {stderr:?}",
+                out.status.code(),
+                c.ops(),
+                String::from_utf8_lossy(&out.stdout)
+            ));
+        }
+    }
+
+    // `--json` asks for no number after the pause, so it has no fault to report.
+    let c = ARecordingCoordinator::refusing_after(
+        "pausenumjson",
+        CAPS,
+        &["info"],
+        Some("pause"),
+        Fault::Refuse,
+    );
+    let out = c.fairq(&["pause", "queue", "--json"]);
+    let receipt: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    let made = out.status.code() == Some(0) && receipt["pause_id"] == "p1";
+    if !made || !out.stderr.is_empty() || after_the_pause(&c) {
+        wrong.push(format!("json: {out:?}, ops {:?}", c.ops()));
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// `fairq pause queue` still names a job that operates when the coordinator gives the number:
+/// the line is on stdout, after the receipt, and stderr holds no word about a number (#226).
+#[test]
+fn pause_still_names_a_job_that_operates() {
+    let h = Harness::new("pauseone", "[budget]\ncpu = \"1\"\n");
+    let id = h.submit(&["submit", "--", TESTJOB, "sleep", "30"]);
+    h.until("the job operates", Duration::from_secs(30), || {
+        h.state_of(&id) == "running"
+    });
+
+    let out = h.fairq(&["pause", "queue"]);
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{stdout}{stderr}");
+    assert!(
+        stdout.contains("\n1 job still operates. It continues, because it already holds its"),
+        "{stdout}"
+    );
+    assert!(!stderr.contains("did not read the number"), "{stderr}");
+    h.ok(&["kill", &id]);
+}
+
+/// `fairq run` after its coordinator stopped: what the new one answered in place of what it can
+/// do is passed on as its answer, and no answer as no answer; the job is kept each time (#261).
+#[test]
+fn run_passes_on_why_a_new_coordinator_did_not_say_what_it_can_do() {
+    const CAPS: &[&str] = &["own-job"];
+    const EARLIER: &[&str] = &["locks", "retries"];
+    const INFO: &[&str] = &["info"];
+    const LIST: &[&str] = &["capabilities"];
+    const OWN: &[&str] = &["own_job"];
+    let id = ARecordingCoordinator::RUN;
+    let job = format!("fairq: job {id}");
+    let stopped = format!(
+        "fairq: the coordinator stopped. The job {id} continues, and this command continues \
+         with it."
+    );
+    let remedy = format!(
+        "fairq: Ctrl-C and SIGTERM still stop it. After a stop that this command cannot catch, \
+         run `fairq cancel {id}`."
+    );
+    let said = |words: &str| {
+        format!("fairq: the coordinator keeps the job {id} after this command stops: {words}")
+    };
+    let unanswered = |words: &str| {
+        format!(
+            "fairq: the coordinator did not answer, so it keeps the job {id} after this command \
+             stops: {words}"
+        )
+    };
+    let cannot = format!("fairq: this coordinator keeps the job {id} after this command stops.");
+    let refusal = said(ARecordingCoordinator::REFUSAL);
+    let no_version = said("the coordinator did not give its version");
+    let no_list = said("the coordinator did not say what it can do");
+    let no_pid = said("the coordinator gave a pid that names no process: 0");
+    let unread = unanswered(
+        "reading this answer of the coordinator: {\"result\":\"of-a-later-version\"}: unknown \
+         variant",
+    );
+    let closed = unanswered("the coordinator closed the connection without an answer");
+    let none = String::new();
+    const ONE: &[&str] = &["info", "status"];
+    const BOTH: &[&str] = &["info", "capabilities", "status"];
+    const OWNS: &[&str] = &["info", "capabilities", "own_job", "status"];
+    // The row, what the coordinator can do, the request that meets the fault on the new
+    // connection, the fault, the line about the job, and the requests on that connection.
+    type Row<'a> = (
+        &'static str,
+        &'static [&'static str],
+        &'static [&'static str],
+        Fault,
+        &'a String,
+        &'static [&'static str],
+    );
+    let rows: [Row; 10] = [
+        ("owns", CAPS, &[], Fault::Refuse, &none, OWNS),
+        ("cannot", EARLIER, &[], Fault::Refuse, &cannot, BOTH),
+        ("refuse-info", CAPS, INFO, Fault::Refuse, &refusal, ONE),
+        ("refuse-list", CAPS, LIST, Fault::Refuse, &refusal, BOTH),
+        ("other-info", CAPS, INFO, Fault::Other, &no_version, ONE),
+        ("other-list", CAPS, LIST, Fault::Other, &no_list, BOTH),
+        ("pid0", CAPS, INFO, Fault::Pid(0), &no_pid, ONE),
+        ("unread", CAPS, INFO, Fault::Garbled, &unread, &["info"]),
+        ("close", CAPS, INFO, Fault::Close, &closed, &["info"]),
+        (
+            "own-unread",
+            CAPS,
+            OWN,
+            Fault::Garbled,
+            &unread,
+            &["info", "capabilities", "own_job"],
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (n, (row, capabilities, refused, fault, says, asked)) in rows.into_iter().enumerate() {
+        // The record of the job is on no disk, so a row whose connection ended has this fault.
+        let code = if asked.contains(&"status") { 0 } else { 121 };
+        // A short name for each coordinator: a long one moves the socket of fairq away from it.
+        let name = format!("again{n}");
+        let c = ARecordingCoordinator::that_starts_again(&name, capabilities, refused, fault);
+        let out = c.fairq(&["run", "--", "true"]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        // What the command said once it had the id of its job.
+        let tail: Vec<&str> = stderr.lines().skip_while(|l| *l != job).skip(1).collect();
+        let about_the_job = if says.is_empty() {
+            tail.len() == 1
+        } else {
+            let first = tail.get(1).is_some_and(|line| match row {
+                "unread" | "own-unread" => line.starts_with(says.as_str()),
+                _ => line == says,
+            });
+            // The row that ends with a fault of its own says one line more below these lines.
+            first
+                && tail.get(2) == Some(&remedy.as_str())
+                && tail.len() == if code == 121 { 4 } else { 3 }
+        };
+        let ops = c.ops();
+        let on_the_new_connection: Vec<&str> = ops
+            .iter()
+            .skip_while(|op| *op != "status")
+            .skip(1)
+            .map(String::as_str)
+            .collect();
+        let right = out.status.code() == Some(code)
+            && tail.first() == Some(&stopped.as_str())
+            && about_the_job
+            && on_the_new_connection == asked;
+        if !right || !out.stdout.is_empty() {
+            wrong.push(format!(
+                "{row}: code {:?}, ops {ops:?}, stderr: {stderr:?}",
+                out.status.code()
+            ));
+        }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
