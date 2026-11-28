@@ -20,6 +20,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-25: a reason above each place that drops the Err of a coordinator reader, for the check of tests/response_arms.rs (issue #242).
 // Modified by the local-resource-coordinator fork, 2026-11-26: the commands that wait pass on a refused read of the ids, and an answer of another kind to it, with the code of a fault (issue #214).
 // Modified by the local-resource-coordinator fork, 2026-11-27: find_id_on_disk tells a full id with no folder from a value that the disk cannot judge; a wait keeps such a value for the time it gives a new coordinator, then ends with a fault, and fairq logs gives a fault at once, never "no such job" (issue #264).
+// Modified by the local-resource-coordinator fork, 2026-11-28: fairq pause queue says on stderr why it did not read the number of jobs after the pause, and keeps the code 0 (issue #226).
 //! This module holds the commands that talk to the coordinator.
 
 use crate::cli::{self, StateFilter};
@@ -5267,8 +5268,17 @@ pub fn pause(args: cli::PauseArgs) -> Result<i32> {
             // Say what a pause does NOT do. A person who asked for a quiet
             // machine must not believe that the jobs which operate stopped.
             if !(json || args.json) {
-                // response-fallback: #226 a refused info reads as no job that operates
-                let running = jobs_running(&mut client).unwrap_or(0);
+                // The pause is made, so the code stays 0: a fault of this read is words (#226).
+                let running = match jobs_running(&mut client) {
+                    Ok(running) => running,
+                    Err(e) => {
+                        eprintln!(
+                            "fairq: the pause is made, but fairq did not read the number of \
+                             jobs that still operate: {e:#}"
+                        );
+                        0
+                    }
+                };
                 if running > 0 {
                     // The singular and the plural are separate texts. ASD-STE100
                     // does not accept `job(s)`.

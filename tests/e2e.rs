@@ -55,6 +55,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-24: a test that fairq pause with no word writes the pause file only when no coordinator answered, and passes on a failed write (issue #252).
 // Modified by the local-resource-coordinator fork, 2026-11-26: tests that the commands that wait pass on a refused read of the ids, and an answer of another kind to it (issue #214).
 // Modified by the local-resource-coordinator fork, 2026-11-27: tests that a wait keeps a name that no coordinator read, and ends with a fault and never "no such job" when none reads it, and that fairq logs gives a fault for it (issue #264).
+// Modified by the local-resource-coordinator fork, 2026-11-28: tests that fairq pause queue says on stderr why it did not read the number of jobs after the pause, and keeps the receipt and the code 0 (issue #226).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -29514,4 +29515,103 @@ fn pause_with_no_word_leaves_the_file_while_a_coordinator_operates() {
         ));
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// When the coordinator does not give the number of jobs after the pause, `fairq pause queue`
+/// keeps the receipt and the code 0, and says on stderr what it did not read and why (#226).
+#[test]
+fn pause_says_why_it_did_not_read_the_number_of_jobs_after_the_pause() {
+    const CAPS: &[&str] = &["pause", "pause-requests"];
+    const SAYS: &str =
+        "fairq: the pause is made, but fairq did not read the number of jobs that still operate: ";
+    let after_the_pause = |c: &ARecordingCoordinator| {
+        let ops = c.ops();
+        ops.iter()
+            .skip_while(|op| *op != "pause")
+            .any(|op| op == "info")
+    };
+    let mut wrong = Vec::new();
+
+    let c = ARecordingCoordinator::new("pausenum", CAPS);
+    let control = c.fairq(&["pause", "queue"]);
+    let receipt = String::from_utf8_lossy(&control.stdout).to_string();
+    let made = control.status.code() == Some(0) && receipt.starts_with("pause p1 is made; ");
+    if !made || !control.stderr.is_empty() || !after_the_pause(&c) {
+        wrong.push(format!("control: {control:?}, ops {:?}", c.ops()));
+    }
+
+    let refusal = format!("{SAYS}{}\n", ARecordingCoordinator::REFUSAL);
+    let closed = format!("{SAYS}the coordinator closed the connection without an answer\n");
+    let other = format!("{SAYS}the coordinator did not give the number of jobs that operate\n");
+    let silent = format!("{SAYS}the coordinator took the request and gave no answer in ");
+    // The row, the fault that `info` meets after the pause, the words, and if they are all of
+    // stderr or its start.
+    for (row, fault, says, whole) in [
+        ("refuse", Fault::Refuse, &refusal, true),
+        ("close", Fault::Close, &closed, true),
+        ("other", Fault::Other, &other, true),
+        ("silent", Fault::Silent, &silent, false),
+    ] {
+        let name = format!("pausenum{row}");
+        let c = ARecordingCoordinator::refusing_after(&name, CAPS, &["info"], Some("pause"), fault);
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_fairq"));
+        cmd.args(["pause", "queue"]);
+        isolate(&mut cmd, &c.root, &c.root.join("peers"));
+        cmd.env(fairq_ceiling_variable(), "3");
+        let out = cmd.output().expect("fairq did not start");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let said = if whole {
+            stderr == *says
+        } else {
+            stderr.starts_with(says.as_str())
+        };
+        let kept = out.status.code() == Some(0) && out.stdout == control.stdout;
+        if !kept || !said || !after_the_pause(&c) {
+            wrong.push(format!(
+                "{row}: code {:?}, ops {:?}, stdout {:?}, stderr {stderr:?}",
+                out.status.code(),
+                c.ops(),
+                String::from_utf8_lossy(&out.stdout)
+            ));
+        }
+    }
+
+    // `--json` asks for no number after the pause, so it has no fault to report.
+    let c = ARecordingCoordinator::refusing_after(
+        "pausenumjson",
+        CAPS,
+        &["info"],
+        Some("pause"),
+        Fault::Refuse,
+    );
+    let out = c.fairq(&["pause", "queue", "--json"]);
+    let receipt: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    let made = out.status.code() == Some(0) && receipt["pause_id"] == "p1";
+    if !made || !out.stderr.is_empty() || after_the_pause(&c) {
+        wrong.push(format!("json: {out:?}, ops {:?}", c.ops()));
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// `fairq pause queue` still names a job that operates when the coordinator gives the number:
+/// the line is on stdout, after the receipt, and stderr holds no word about a number (#226).
+#[test]
+fn pause_still_names_a_job_that_operates() {
+    let h = Harness::new("pauseone", "[budget]\ncpu = \"1\"\n");
+    let id = h.submit(&["submit", "--", TESTJOB, "sleep", "30"]);
+    h.until("the job operates", Duration::from_secs(30), || {
+        h.state_of(&id) == "running"
+    });
+
+    let out = h.fairq(&["pause", "queue"]);
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{stdout}{stderr}");
+    assert!(
+        stdout.contains("\n1 job still operates. It continues, because it already holds its"),
+        "{stdout}"
+    );
+    assert!(!stderr.contains("did not read the number"), "{stderr}");
+    h.ok(&["kill", &id]);
 }
