@@ -54,6 +54,7 @@
 // Modified by the local-resource-coordinator fork, 2026-11-24: tests that the plain wait passes on the coordinator's words for a refused wait and for no such job (issue #251).
 // Modified by the local-resource-coordinator fork, 2026-11-24: a test that fairq pause with no word writes the pause file only when no coordinator answered, and passes on a failed write (issue #252).
 // Modified by the local-resource-coordinator fork, 2026-11-26: tests that the commands that wait pass on a refused read of the ids, and an answer of another kind to it (issue #214).
+// Modified by the local-resource-coordinator fork, 2026-11-27: tests that a wait keeps a name that no coordinator read, and ends with a fault and never "no such job" when none reads it, and that fairq logs gives a fault for it (issue #264).
 //! End-to-end tests for fairq.
 //!
 //! Each test makes its own config directory, state directory, runtime
@@ -12088,9 +12089,15 @@ fn a_link_in_jobs_to_an_outside_record_is_no_job() {
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr),
         );
+        // A prefix with no real folder could be a name, which only a coordinator reads (#264).
+        let right = if raw == link_id {
+            out.status.code() == Some(127) && stderr.contains("there is no job")
+        } else {
+            out.status.code() == Some(1) && stderr.contains("only a coordinator can say")
+        };
         assert!(
-            out.status.code() == Some(127) && stderr.contains("there is no job"),
-            "`fairq logs {raw}` must say there is no such job: {out:?}"
+            right,
+            "`fairq logs {raw}`: no such job for the id, a fault for a prefix: {out:?}"
         );
         assert!(
             !stdout.contains("outside-log-129"),
@@ -26136,6 +26143,12 @@ enum Fault {
     EmptyFound,
     /// A refusal after 1.5 s: past a `--timeout 1s`, inside the 2 s read limit of a wait.
     LateRefuse,
+    /// `Close`, but a request that arrives between these two times, counted from the start of
+    /// the coordinator of the test, gets its answer.
+    CloseOutside(Duration, Duration),
+    /// `Close` for the first so many requests that meet the fault, on any connection, and an
+    /// answer for each later one.
+    CloseFirst(usize),
 }
 
 /// A coordinator of the test that records each request, and that answers like
@@ -26196,6 +26209,8 @@ impl ARecordingCoordinator {
         let listener = std::os::unix::net::UnixListener::bind(run.join("s")).unwrap();
         let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen = requests.clone();
+        let born = Instant::now();
+        let met = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
         let record = |id: &str, name: &str| {
             serde_json::json!({
@@ -26216,6 +26231,7 @@ impl ARecordingCoordinator {
             for stream in listener.incoming().flatten() {
                 let seen = seen.clone();
                 let jobs = jobs.clone();
+                let met = met.clone();
                 std::thread::spawn(move || {
                     let mut writer = stream.try_clone().unwrap();
                     for line in BufReader::new(stream).lines() {
@@ -26227,6 +26243,15 @@ impl ARecordingCoordinator {
                                 serde_json::from_str::<serde_json::Value>(l).unwrap()["op"] == a
                             })
                         });
+                        let open = match fault {
+                            Fault::CloseOutside(from, to) => (from..to).contains(&born.elapsed()),
+                            Fault::CloseFirst(n) => {
+                                refused.contains(&op.as_str())
+                                    && met.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= n
+                            }
+                            _ => false,
+                        };
+                        let armed = armed && !open;
                         seen.lock().unwrap().push(line.clone());
                         let can = |c: &str| capabilities.contains(&c);
                         let info = |pid: i32, version: &str| {
@@ -26252,7 +26277,9 @@ impl ARecordingCoordinator {
                                     std::thread::sleep(Duration::from_secs(60));
                                     return;
                                 }
-                                Fault::Close => return,
+                                Fault::Close | Fault::CloseOutside(..) | Fault::CloseFirst(_) => {
+                                    return
+                                }
                                 Fault::LateRefuse => {
                                     std::thread::sleep(Duration::from_millis(1500));
                                     serde_json::json!({
@@ -27913,6 +27940,312 @@ fn a_wait_keeps_the_other_paths_of_a_read_of_the_ids() {
         &out,
     );
 
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// While no coordinator reads a name (a closed connection, no answer inside the limit, no
+/// coordinator), `fairq wait --next` goes on to its limit: never "no such job" (#264).
+#[test]
+fn wait_next_keeps_a_name_that_no_coordinator_read() {
+    const EARLIER: &[&str] = &["locks", "retries"];
+    const CAPS: &[&str] = &["resolve", "query"];
+    const TWICE: &[&str] = &[
+        "capabilities",
+        "resolve",
+        "pause_state",
+        "capabilities",
+        "resolve",
+    ];
+    let mut wrong = Vec::new();
+    // At the limit: 124 and the line that waits again, and no word about a missing job.
+    let mut check = |row: &str, values: &[&str], out: &Output, asked: bool, ops: Vec<String>| {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let again = format!(
+            "fairq: wait again:  fairq wait --next {} --timeout 1s",
+            values.join(" ")
+        );
+        let right = out.status.code() == Some(124)
+            && stderr.lines().last() == Some(again.as_str())
+            && !stderr.contains("there is no job");
+        if !right || !asked || !out.stdout.is_empty() {
+            wrong.push(format!(
+                "{row}: code {:?}, ops {ops:?}, stderr: {stderr:?}",
+                out.status.code()
+            ));
+        }
+    };
+    // The row, what the coordinator can do, the request that meets the fault, the fault, the
+    // values of the reader, and the requests up to the first read of the loop.
+    type Row = (
+        &'static str,
+        &'static [&'static str],
+        &'static [&'static str],
+        Fault,
+        &'static [&'static str],
+        &'static [&'static str],
+    );
+    let names: &[&str] = &["build", "test"];
+    let rows: [Row; 5] = [
+        (
+            "close/resolve",
+            CAPS,
+            &["resolve"],
+            Fault::Close,
+            names,
+            TWICE,
+        ),
+        (
+            "close/caps",
+            CAPS,
+            &["capabilities"],
+            Fault::Close,
+            names,
+            &["capabilities", "pause_state", "capabilities"],
+        ),
+        (
+            "close/list",
+            EARLIER,
+            &["list"],
+            Fault::Close,
+            names,
+            &[
+                "capabilities",
+                "list",
+                "pause_state",
+                "capabilities",
+                "list",
+            ],
+        ),
+        (
+            "silent",
+            CAPS,
+            &["resolve"],
+            Fault::Silent,
+            names,
+            &["capabilities", "resolve"],
+        ),
+        (
+            "short-id",
+            CAPS,
+            &["resolve"],
+            Fault::Close,
+            &["11111111"],
+            TWICE,
+        ),
+    ];
+    for (n, (row, caps, refused, fault, values, first)) in rows.into_iter().enumerate() {
+        let name = format!("lost{n}");
+        let c = ARecordingCoordinator::refusing_after(&name, caps, refused, None, fault);
+        let mut args = vec!["wait", "--next"];
+        args.extend(values);
+        args.extend(["--timeout", "1s"]);
+        let out = c.fairq(&args);
+        let ops = c.ops();
+        let asked = ops.len() >= first.len() && ops.iter().zip(first).all(|(a, b)| a == b);
+        check(row, values, &out, asked, ops);
+    }
+    let h = Harness::with_default_config("lostnone");
+    let args = ["wait", "--next", "build", "test", "--timeout", "1s"];
+    let out = h.fairq_within(&args, Duration::from_secs(30));
+    check("none", names, &out, true, Vec::new());
+
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A name that went unread does not hold the loop of `--next`: a coordinator that answers again
+/// reads it, a record on the disk gives its result, and an answer of "no" ends the wait (#264).
+#[test]
+fn wait_next_goes_on_beside_a_name_that_went_unread() {
+    const CAPS: &[&str] = &["resolve", "query"];
+    let test = ARecordingCoordinator::TEST;
+    let mut wrong = Vec::new();
+    let mut check = |row: &str, right: bool, c: &ARecordingCoordinator, out: &Output| {
+        if !right {
+            wrong.push(format!(
+                "{row}: code {:?}, ops {:?}, stdout: {:?}, stderr: {:?}",
+                out.status.code(),
+                c.ops(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+    };
+    // The coordinator closes the read of the ids and the first read of each value in the loop,
+    // and answers each later read.
+    let later = Fault::CloseFirst(3);
+
+    let c = ARecordingCoordinator::refusing_after("lostback", CAPS, &["resolve"], None, later);
+    let out = c.fairq(&["wait", "--next", "build", "test", "--timeout", "3s"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    // The coordinator read the name: the loop asked for the state of the job.
+    let read = c.ops().iter().any(|op| op == "status");
+    let right = out.status.code() == Some(124) && read && !stderr.contains("there is no job");
+    check("back", right && out.stdout.is_empty(), &c, &out);
+
+    // One value: the read of the ids and the first read of the loop are closed.
+    let first = Fault::CloseFirst(2);
+    let c = ARecordingCoordinator::refusing_after("lostno", CAPS, &["resolve"], None, first);
+    let out = c.fairq(&["wait", "--next", "nosuch", "--timeout", "5s"]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let says = "fairq: there is no job with the id nosuch\n";
+    let right = out.status.code() == Some(127) && stderr == says;
+    check("answered-no", right, &c, &out);
+
+    // The record of a job that stopped, beside a coordinator that closes each read of the ids.
+    for (row, values) in [
+        ("beside-a-record", &["build", test][..]),
+        ("short-id-record", &["22222222"][..]),
+    ] {
+        let name = format!("lostrec{}", values.len());
+        let close = Fault::Close;
+        let c = ARecordingCoordinator::refusing_after(&name, CAPS, &["resolve"], None, close);
+        let dir = c.root.join("state/fairq/jobs").join(test);
+        std::fs::create_dir_all(&dir).unwrap();
+        let record = serde_json::json!({
+            "id": test, "name": "test", "state": "completed", "submitted_at": 1,
+            "sequence": 1, "started_at": 2, "finished_at": 3,
+            "pid": null, "exit_code": 0, "signal": null,
+            "cpu": 1, "mem": 1048576, "tags": ["test"],
+            "claim_source": "explicit", "cpu_source": "explicit",
+            "mem_source": "explicit", "usage": {"max_rss": 0, "cpu_secs": 0.0},
+            "forced": false, "error": null, "blocked_reason": null,
+        });
+        std::fs::write(dir.join("status.json"), record.to_string()).unwrap();
+        let mut args = vec!["wait", "--next"];
+        args.extend(values);
+        args.extend(["--timeout", "5s"]);
+        let out = c.fairq(&args);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let right = out.status.code() == Some(0) && stdout.starts_with("22222222: completed");
+        check(row, right, &c, &out);
+    }
+
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A name that no coordinator reads for the time that a wait gives a new coordinator (10 s) ends
+/// `fairq wait --next` and `fairq wait` with a fault: 121 and what to do, never 127 (#264).
+#[test]
+fn a_wait_ends_with_a_fault_for_a_name_that_stays_unread() {
+    const CAPS: &[&str] = &["resolve", "query"];
+    let words = "fairq: no coordinator answered in 10 seconds, and only a coordinator can say \
+                 what `build` names. Each job continues. Run `fairq list`, which starts a \
+                 coordinator, and then wait again.\n";
+    let stopped =
+        "fairq: the coordinator stopped. The job continues, and this wait continues with it.\n";
+    let close = Fault::Close;
+    let closing = ARecordingCoordinator::refusing_after("lostend", CAPS, &["resolve"], None, close);
+    let none = Harness::with_default_config("lostendnone");
+    let plain = Harness::with_default_config("lostendplain");
+    // The record of a job that runs, with no coordinator: a full id, whose folder goes.
+    let gone = Harness::with_default_config("lostendgone");
+    let id = "44444444-0000-4000-8000-000000000004";
+    let dir = gone.root.join("state/fairq/jobs").join(id);
+    std::fs::create_dir_all(&dir).unwrap();
+    let record = serde_json::json!({
+        "id": id, "name": "gone", "state": "running", "submitted_at": 1,
+        "sequence": 1, "started_at": 2, "finished_at": null,
+        "pid": null, "exit_code": null, "signal": null,
+        "cpu": 1, "mem": 1048576, "tags": ["gone"],
+        "claim_source": "explicit", "cpu_source": "explicit",
+        "mem_source": "explicit", "usage": {"max_rss": 0, "cpu_secs": 0.0},
+        "forced": false, "error": null, "blocked_reason": null,
+    });
+    std::fs::write(dir.join("status.json"), record.to_string()).unwrap();
+
+    // It answers from its first second to its twelfth: two times with no answer, each under 10 s.
+    // Made after the setup above, so that the setup takes none of its first second.
+    let twice = Fault::CloseOutside(Duration::from_secs(1), Duration::from_secs(12));
+    let again = ARecordingCoordinator::refusing_after("lostagain", CAPS, &["resolve"], None, twice);
+    // The rows run side by side: each takes the 10 s, or the 14 s of its limit.
+    let limit = Duration::from_secs(60);
+    let [next_close, next_none, wait_none, twice_unread, id_gone] = std::thread::scope(|s| {
+        let rows = [
+            s.spawn(|| closing.fairq(&["wait", "--next", "build", "test", "--timeout", "30s"])),
+            s.spawn(|| {
+                let args = [
+                    "wait",
+                    "--next",
+                    "build",
+                    "test",
+                    "--quiet",
+                    "--timeout",
+                    "30s",
+                ];
+                none.fairq_within(&args, limit)
+            }),
+            s.spawn(|| plain.fairq_within(&["wait", "build", "--timeout", "30s"], limit)),
+            s.spawn(|| again.fairq(&["wait", "--next", "build", "--timeout", "14s"])),
+            s.spawn(|| gone.fairq_within(&["wait", id, "--timeout", "30s"], limit)),
+        ];
+        // The folder goes while that wait looks for a coordinator.
+        std::thread::sleep(Duration::from_secs(2));
+        std::fs::remove_dir_all(&dir).unwrap();
+        rows.map(|row| row.join().unwrap())
+    });
+
+    let mut wrong = Vec::new();
+    let mut check = |row: &str, right: bool, out: &Output| {
+        if !right || !out.stdout.is_empty() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            wrong.push(format!(
+                "{row}: code {:?}, stderr: {stderr:?}",
+                out.status.code()
+            ));
+        }
+    };
+    let said = |out: &Output| String::from_utf8_lossy(&out.stderr).to_string();
+    let fault = |out: &Output, says: &str| out.status.code() == Some(121) && said(out) == says;
+    check("next/close", fault(&next_close, words), &next_close);
+    check("next/none", fault(&next_none, words), &next_none);
+    let both = format!("{stopped}{words}");
+    check("wait/none", fault(&wait_none, &both), &wait_none);
+    // Each time with no answer has its own 10 s: the limit of the reader ends this wait.
+    let read = again.ops().iter().any(|op| op == "status");
+    let unsaid = !said(&twice_unread).contains("no coordinator answered");
+    let right = twice_unread.status.code() == Some(124) && read && unsaid;
+    check("twice-unread", right, &twice_unread);
+    // A full id whose folder went is a job that fairq does not hold: 127, as before.
+    let no_job = format!(
+        "fairq: there is no job with the id {id}. A `fairq clean` deletes the record of a job \
+         that stopped, so a job that succeeded a moment ago can give this answer.\n"
+    );
+    let right = id_gone.status.code() == Some(127) && said(&id_gone).ends_with(&no_job);
+    check("id-gone", right, &id_gone);
+
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// With no coordinator, `fairq logs <name>` gives the fault of logs (1) and says that only a
+/// coordinator can read the name; a full id with no folder keeps 127 (#264).
+#[test]
+fn logs_with_no_coordinator_says_that_only_a_coordinator_reads_a_name() {
+    let h = Harness::with_default_config("lostlogs");
+    let id = "55555555-0000-4000-8000-000000000005";
+    let mut wrong = Vec::new();
+    for (row, value, code, says) in [
+        (
+            "logs/name",
+            "build",
+            1,
+            "fairq: no coordinator operates, and only a coordinator can say what `build` names. \
+             Run `fairq list`, which starts a coordinator, and then ask again.\n"
+                .to_string(),
+        ),
+        (
+            "logs/full-id",
+            id,
+            127,
+            format!("fairq: there is no job with the id {id}\n"),
+        ),
+    ] {
+        let out = h.fairq_within(&["logs", value], Duration::from_secs(30));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if out.status.code() != Some(code) || stderr != says || !out.stdout.is_empty() {
+            let code = out.status.code();
+            wrong.push(format!("{row}: code {code:?}, stderr: {stderr:?}"));
+        }
+    }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
